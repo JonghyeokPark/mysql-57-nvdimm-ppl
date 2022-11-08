@@ -104,6 +104,11 @@ Created 2/16/1996 Heikki Tuuri
 # include "ut0crc32.h"
 # include "ut0new.h"
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+//extern unsigned char* nvdimm_ptr;
+#endif
+
 #ifdef HAVE_LZO1X
 #include <lzo/lzo1x.h>
 extern bool srv_lzo_disabled;
@@ -1474,6 +1479,24 @@ innobase_start_or_create_for_mysql(void)
 		doublewrite mechanism completely. */
 		srv_use_doublewrite_buf = FALSE;
 	}
+
+	
+#ifdef UNIV_NVDIMM_IPL
+	// TODO(jhpark): add configuration variable 
+	//sprintf(NVDIMM_FILE_PATH, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
+
+	const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";
+	size_t srv_nvdimm_pool_size = 10 * 1024;
+	uint64_t pool_size = srv_nvdimm_pool_size * 1024 * 1024UL;
+
+	nvdimm_ptr = nvdimm_create_or_initialize(nvdimm_file_path, pool_size);
+
+	if (!nvdimm_ptr) {
+		NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
+		assert(nvdimm_ptr);
+	}
+
+#endif
 
 #ifdef HAVE_LZO1X
 	if (lzo_init() != LZO_E_OK) {

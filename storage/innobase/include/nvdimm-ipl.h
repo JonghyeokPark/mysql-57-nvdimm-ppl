@@ -71,4 +71,10 @@ static inline void memcpy_persist
   mfence();
 }
 
+extern unsigned char* nvdimm_ptr;
+extern int nvdimm_fd;
+
+unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size);
+void nvdimm_free(const uint64_t pool_size);
+
 #endif // end-of-header
