@@ -19,11 +19,11 @@ echo $PASSWD | sudo -S rm -rf CMakeFiles/*
 if [ "$1" = "--origin" ]; then
   # No caching
   BUILD_FLAGS=""
-elif [ "$1" = "--f2ckpt" ]; then
+elif [ "$1" = "--ipl" ]; then
   # Enable Flash-Friendly Checkpoint
-  BUILD_FLAGS="-DUNIV_F2CKPT"
+  BUILD_FLAGS="-DUNIV_NVDIMM_IPL"
 else
-  BUILD_FLAGS=""
+  BUILD_FLAGS="-DUNIV_NVDIMM_IPL"
 fi
 
 echo "Start build using $BUILD_FLAGS"
