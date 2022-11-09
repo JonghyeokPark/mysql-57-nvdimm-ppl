@@ -242,6 +242,13 @@ srv_printf_innodb_monitor() will request mutex acquisition
 with mutex_enter(), which will wait until it gets the mutex. */
 #define MUTEX_NOWAIT(mutex_skipped)	((mutex_skipped) < MAX_MUTEX_NOWAIT)
 
+#ifdef UNIV_NVDIMM_IPL
+/** If true then enable NVDIMM IPL */
+my_bool srv_use_nvdimm_ipl = FALSE;
+/** NVDIMM-aware file resident directory */
+char* srv_nvdimm_home_dir = NULL;
+#endif
+
 /** Requested size in bytes */
 ulint	srv_buf_pool_size	= ULINT_MAX;
 /** Minimum pool size in bytes */
