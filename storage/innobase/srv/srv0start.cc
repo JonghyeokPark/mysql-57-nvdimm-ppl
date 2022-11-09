@@ -1483,19 +1483,20 @@ innobase_start_or_create_for_mysql(void)
 	
 #ifdef UNIV_NVDIMM_IPL
 	// TODO(jhpark): add configuration variable 
-	//sprintf(NVDIMM_FILE_PATH, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
+	if (srv_use_nvdimm_ipl) {
+		char nvdimm_file_path[NVDIMM_MMAP_MAX_FILE_NAME_LENGTH];
+		sprintf(nvdimm_file_path, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
+		//const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";
+		size_t srv_nvdimm_pool_size = 10 * 1024;
+		uint64_t pool_size = srv_nvdimm_pool_size * 1024 * 1024UL;
 
-	const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";
-	size_t srv_nvdimm_pool_size = 10 * 1024;
-	uint64_t pool_size = srv_nvdimm_pool_size * 1024 * 1024UL;
+		nvdimm_ptr = nvdimm_create_or_initialize(nvdimm_file_path, pool_size);
 
-	nvdimm_ptr = nvdimm_create_or_initialize(nvdimm_file_path, pool_size);
-
-	if (!nvdimm_ptr) {
-		NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
-		assert(nvdimm_ptr);
+		if (!nvdimm_ptr) {
+			NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
+			assert(nvdimm_ptr);
+		}
 	}
-
 #endif
 
 #ifdef HAVE_LZO1X

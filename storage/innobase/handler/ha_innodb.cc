@@ -20288,6 +20288,17 @@ static MYSQL_SYSVAR_BOOL(sync_debug, srv_sync_debug,
   NULL, NULL, FALSE);
 #endif /* UNIV_DEBUG */
 
+#ifdef UNIV_NVDIMM_IPL
+static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl, srv_use_nvdimm_ipl,
+  PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
+  "Enable NVDIMM IPL mode (disabled by default).",
+  NULL, NULL, FALSE);
+
+static MYSQL_SYSVAR_STR(nvdimm_home_dir, srv_nvdimm_home_dir,
+  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  "Path to NVDIMM-aware files.", NULL, NULL, NULL);
+#endif
+
 static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(api_trx_level),
   MYSQL_SYSVAR(api_bk_commit_interval),
@@ -20460,6 +20471,12 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(master_thread_disabled_debug),
   MYSQL_SYSVAR(sync_debug),
 #endif /* UNIV_DEBUG */
+
+#ifdef UNIV_NVDIMM_IPL
+	MYSQL_SYSVAR(use_nvdimm_ipl),
+	MYSQL_SYSVAR(nvdimm_home_dir),
+#endif
+
   NULL
 };
 
