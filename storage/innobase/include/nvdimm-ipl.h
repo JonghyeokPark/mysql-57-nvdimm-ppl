@@ -16,6 +16,9 @@
 #include <cassert>
 #include <iostream>
 
+#include <map>
+#include "buf0buf.h" 
+
 // TDOO(jhpark): make this variable configurable
 #define NVDIMM_MAP_SIZE	(10*1024*1024*1024UL)
 
@@ -74,7 +77,40 @@ static inline void memcpy_persist
 extern unsigned char* nvdimm_ptr;
 extern int nvdimm_fd;
 
+/* IPL mapping */
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size);
 void nvdimm_free(const uint64_t pool_size);
+
+// compare for page_id
+struct comp
+{
+    bool operator()(const page_id_t &l, const page_id_t &r) const
+    {
+        if (l.space() == r.space()) {
+            return l.page_no() > r.page_no();
+        }
+ 
+        return l.space() < r.space();
+    }
+};
+extern std::map<page_id_t, uint64_t, comp> ipl_map; // (page_id , offset in NVDIMM IPL regions)
+extern std::map<page_id_t, uint64_t, comp> ipl_wp; // (page_id , write pointer per-page)
+
+// global offset which manages overall NVDIMM region
+#define IPL_LOG_REGION_SZ	(1024*1024UL)
+
+extern uint64_t nvdimm_offset;
+
+// log header
+typedef struct ipl_log_header {
+	bool flag;
+	uint64_t offset;
+	char padding[48]; // unused
+} IPL_LOG_HDR;
+
+/* IPL operations */
+void nvdimm_ipl_initialize();
+bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long len);
+bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
 
 #endif // end-of-header

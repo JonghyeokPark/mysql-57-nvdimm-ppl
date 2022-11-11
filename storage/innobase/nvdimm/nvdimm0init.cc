@@ -11,9 +11,12 @@
 #include <errno.h>
 #include <stddef.h>
 
+std::map<page_id_t, uint64_t, comp> ipl_map;
+std::map<page_id_t, uint64_t, comp> ipl_wp;
 
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
+uint64_t nvdimm_offset = 0;
 
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
