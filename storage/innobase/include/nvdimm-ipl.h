@@ -113,4 +113,25 @@ void nvdimm_ipl_initialize();
 bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long len);
 bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
 
+#ifdef UNIV_NVDIMM_IPL
+unsigned char* 
+recv_parse_or_apply_log_rec_body(
+	mlog_id_t type,
+	unsigned char* ptr,
+	unsigned char* end_ptr,
+	unsigned long space,
+	unsigned long page_no,
+	buf_block_t* block,
+	mtr_t* mtr);
+#endif
+/*
+unsigned char* nvdimm_ipl_log_apply(
+	mlog_id_t type,
+	unsigned char* ptr,
+	unsigned char* end_ptr,
+	unsigned long space,
+	unsigned long page_no,
+	buf_block_t* block);
+*/
+
 #endif // end-of-header
