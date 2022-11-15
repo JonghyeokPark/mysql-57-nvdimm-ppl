@@ -331,6 +331,11 @@ private:
                 const page_id_t&        page_id);
 };
 
+#ifdef UNIV_NVDIMM_IPL
+bool nvdimm_ipl_lookup(page_id_t page_id);
+bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
+#endif
+
 /** Print the given page_id_t object.
 @param[in,out]	out	the output stream
 @param[in]	page_id	the page_id_t object to be printed
@@ -2477,5 +2482,4 @@ struct	CheckUnzipLRUAndLRUList {
 #include "buf0buf.ic"
 #endif
 #endif /* !UNIV_INNOCHECKSUM */
-
 #endif

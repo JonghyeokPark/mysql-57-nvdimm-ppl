@@ -484,7 +484,7 @@ struct mtr_write_log_t {
 																	, &type, &space, &page_no);
 		const page_id_t page_id(space, page_no);
 		if (!nvdimm_ipl_add(page_id, (unsigned char*)block->begin(), block->used())) {
-			fprintf(stderr, "[DEBUG] wow, IPL log is FULL! we need merge !!!\n");
+			//fprintf(stderr, "[DEBUG] wow, IPL log is FULL! we need merge !!!\n");
 			nvdimm_ipl_erase(page_id, NULL);
 		}
 #endif

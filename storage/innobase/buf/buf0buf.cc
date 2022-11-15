@@ -31,9 +31,9 @@ Created 11/5/1995 Heikki Tuuri
 *******************************************************/
 
 #include "ha_prototypes.h"
-
 #include "page0size.h"
 #include "buf0buf.h"
+
 #ifdef UNIV_NONINL
 #include "buf0buf.ic"
 #endif
@@ -117,6 +117,7 @@ struct set_numa_interleave_t
 #else
 #define NUMA_MEMPOLICY_INTERLEAVE_IN_SCOPE
 #endif /* HAVE_LIBNUMA */
+
 
 /*
 		IMPLEMENTATION OF THE BUFFER POOL
@@ -4424,6 +4425,14 @@ got_block:
 			ut_a(success);
 		}
 
+#ifdef UNIV_NVDIMM_IPL
+			if (!access_time) {
+        if (nvdimm_ipl_lookup(page_id)) {
+          fprintf(stderr, " (2) this is IPL log apply!!!\n");
+        }
+			}
+#endif
+
 		if (!recv_no_ibuf_operations) {
 			if (access_time) {
 #ifdef UNIV_IBUF_COUNT_DEBUG
@@ -5825,6 +5834,16 @@ corrupt:
 		    && fil_page_get_type(frame) == FIL_PAGE_INDEX
 		    && page_is_leaf(frame)) {
 
+#ifdef UNIV_NVDIMM_IPL
+				// (jhpark): check IPL log and apply it
+				if (nvdimm_ipl_lookup(bpage->id)) {
+					if (buf_page_is_accessed(bpage)) { 
+						ib::info() << "IPL apply accesstime: " << buf_page_is_accessed(bpage);
+					 	ib::info() << "we need to apply IPL log " << bpage->id.space() << ":" << bpage->id.page_no();
+						//nvdimm_ipl_merge(bpage->id, bpage);	
+					}
+				}
+#endif
 			ibuf_merge_or_delete_for_page(
 				(buf_block_t*) bpage, bpage->id,
 				&bpage->size, TRUE);

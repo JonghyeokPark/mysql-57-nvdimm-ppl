@@ -1235,7 +1235,16 @@ buf_flush_page(
 		oldest_modification != 0.  Thus, it cannot be relocated in the
 		buffer pool or removed from flush_list or LRU_list. */
 
-		buf_flush_write_block_low(bpage, flush_type, sync);
+#ifdef UNIV_NVDIMM_IPL
+    if (nvdimm_ipl_lookup(bpage->id)) {
+			// TODO(jhpark)!!!
+  		buf_flush_write_block_low(bpage, flush_type, sync);
+    } else {
+  		buf_flush_write_block_low(bpage, flush_type, sync);
+    }
+#else
+    buf_flush_write_block_low(bpage, flush_type, sync);
+#endif
 
 #ifdef UNIV_NVDIMM_IPL
     // (jhpark): we need to erase IPL Log of this page.

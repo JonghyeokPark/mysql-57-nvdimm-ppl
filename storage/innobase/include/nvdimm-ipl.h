@@ -111,9 +111,9 @@ typedef struct ipl_log_header {
 /* IPL operations */
 void nvdimm_ipl_initialize();
 bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long len);
-bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
+//bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
 void nvdimm_ipl_erase(page_id_t page_id, buf_page_t * page);
-bool nvdimm_ipl_lookup(page_id_t page_id);
+//bool nvdimm_ipl_lookup(page_id_t page_id);
 
 #ifdef UNIV_NVDIMM_IPL
 unsigned char* 
@@ -138,3 +138,4 @@ unsigned char* nvdimm_ipl_log_apply(
 */
 
 #endif // end-of-header
+

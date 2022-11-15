@@ -31,8 +31,6 @@ void nvdimm_ipl_initialize() {
 }
 
 bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long len) {
-	// debug 
-	fprintf(stderr, "nvdimm_ip_add called! %lu:%lu\n", page_id.space(), page_id.page_no());
 	// step1. get offset in NVDIMM IPL region from ipl_map table
 	std::map<page_id_t, uint64_t>::iterator it;
 	uint64_t ipl_start_offset = -1;
@@ -59,7 +57,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long l
 
 	// step2. check capacity 
 	if (offset > IPL_LOG_REGION_SZ*0.8) {
-		std::cerr << "(debug) IPL page is FULL!\n";
+		//std::cerr << "(debug) IPL page is FULL!\n";
 		return false;
 	}
 
