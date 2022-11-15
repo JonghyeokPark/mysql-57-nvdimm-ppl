@@ -61,6 +61,10 @@ Created 11/11/1995 Heikki Tuuri
 static const int buf_flush_page_cleaner_priority = -20;
 #endif /* UNIV_LINUX */
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
+
 /** Sleep time in microseconds for loop waiting for the oldest
 modification lsn */
 static const ulint buf_flush_wait_flushed_sleep_time = 10000;
@@ -1175,6 +1179,10 @@ buf_flush_page(
 		}
 	}
 
+#ifdef UNIV_NVDIMM_IPL
+  page_id_t page_id_save = page_id_t(bpage->id.space(), bpage->id.page_no());
+#endif
+
 	if (flush) {
 
 		/* We are committed to flushing by the time we get here */
@@ -1228,6 +1236,12 @@ buf_flush_page(
 		buffer pool or removed from flush_list or LRU_list. */
 
 		buf_flush_write_block_low(bpage, flush_type, sync);
+
+#ifdef UNIV_NVDIMM_IPL
+    // (jhpark): we need to erase IPL Log of this page.
+    nvdimm_ipl_erase(page_id_save, bpage);
+#endif
+
 	}
 
 	return(flush);

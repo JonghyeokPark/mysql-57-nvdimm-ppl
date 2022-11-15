@@ -38,6 +38,11 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long l
 	uint64_t ipl_start_offset = -1;
 	uint64_t offset = -1;
 
+	if (nvdimm_offset >= (14*1024*1024*1024UL)) {
+		std::cerr << "we need more ... NVDIMMM region\n";
+		nvdimm_offset = 0;
+	}
+
 	it = ipl_map.find(page_id);
 	if (it == ipl_map.end()) {
 	// - First write
@@ -53,7 +58,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long l
 	offset = ipl_wp[page_id];
 
 	// step2. check capacity 
-	if (offset > 1024*1024*0.8) {
+	if (offset > IPL_LOG_REGION_SZ*0.8) {
 		std::cerr << "(debug) IPL page is FULL!\n";
 		return false;
 	}
@@ -541,6 +546,23 @@ case MLOG_PAGE_CREATE: case MLOG_COMP_PAGE_CREATE:
   return(ptr);
 }
 */
+
+void nvdimm_ipl_erase(page_id_t page_id, buf_page_t* page) {
+	// When the page is flushed, we need to delete IPL log from NVDIMM
+	// step1. read current IPL log using page_id
+	uint64_t offset = ipl_map[page_id];
+	uint64_t end_offset = ipl_wp[page_id];
+	
+	// step2. delete IPL Logs 
+	unsigned char* ptr = nvdimm_ptr + offset;
+	unsigned char* end_ptr = nvdimm_ptr + end_offset;
+	//ib::info() << page_id.space() << ":" << page_id.page_no()  << " IPL delete start!";
+	memset(ptr, 0x00, IPL_LOG_REGION_SZ);
+	flush_cache(ptr, IPL_LOG_REGION_SZ);
+	ipl_wp[page_id] = 0;
+	//ib::info() << page_id.space() << ":" << page_id.page_no()  << " IPL delete finish!";
+	return;
+}
 
 bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page) {
 	// merge IPL log to buffer page

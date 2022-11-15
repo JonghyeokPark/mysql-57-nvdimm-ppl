@@ -97,7 +97,7 @@ extern std::map<page_id_t, uint64_t, comp> ipl_map; // (page_id , offset in NVDI
 extern std::map<page_id_t, uint64_t, comp> ipl_wp; // (page_id , write pointer per-page)
 
 // global offset which manages overall NVDIMM region
-#define IPL_LOG_REGION_SZ	(1024*1024UL)
+#define IPL_LOG_REGION_SZ	(1024*4UL)
 
 extern uint64_t nvdimm_offset;
 
@@ -112,6 +112,7 @@ typedef struct ipl_log_header {
 void nvdimm_ipl_initialize();
 bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long len);
 bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
+void nvdimm_ipl_erase(page_id_t page_id, buf_page_t * page);
 
 #ifdef UNIV_NVDIMM_IPL
 unsigned char* 
@@ -124,6 +125,7 @@ recv_parse_or_apply_log_rec_body(
 	buf_block_t* block,
 	mtr_t* mtr);
 #endif
+
 /*
 unsigned char* nvdimm_ipl_log_apply(
 	mlog_id_t type,
