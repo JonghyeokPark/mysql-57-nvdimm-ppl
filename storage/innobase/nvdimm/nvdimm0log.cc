@@ -564,6 +564,13 @@ void nvdimm_ipl_erase(page_id_t page_id, buf_page_t* page) {
 	return;
 }
 
+bool nvdimm_ipl_lookup(page_id_t page_id) {
+	// return true, 
+	// if page exists in IPL region and IPL log is written
+	
+	return (ipl_map[page_id] && ipl_wp[page_id]!=0);
+}
+
 bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page) {
 	// merge IPL log to buffer page
 }
