@@ -2696,6 +2696,8 @@ client/mysql_install_db
 internal/tests/open_files_limit
 client/mysql_ssl_rsa_setup
 
+mysql-test/suite/ndb/backups/
+
 # Allow
 !include/*/boost/geometry/*
 
