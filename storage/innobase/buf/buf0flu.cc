@@ -445,12 +445,12 @@ buf_flush_insert_into_flush_list(
 	}
 
 	ut_ad(buf_block_get_state(block) == BUF_BLOCK_FILE_PAGE);
-	ut_ad(!block->page.in_flush_list);
+	ut_ad(!block->page.in_flush_list); //debug 모드에서만, EXPR을 체킹하는데, in_flush_list에 있는지 체크한다.
 
-	ut_d(block->page.in_flush_list = TRUE);
+	ut_d(block->page.in_flush_list = TRUE); // debug 모드에서만 in_flush_list를 체크하므로 ut_d로 실행시키기
 	block->page.oldest_modification = lsn;
 
-	UT_LIST_ADD_FIRST(buf_pool->flush_list, &block->page);
+	UT_LIST_ADD_FIRST(buf_pool->flush_list, &block->page); // 수정된 page를 flush_list에 삽입, 이 부분에서 page를 check하고 삽입하지 말자.
 
 	incr_flush_list_size_in_bytes(block, buf_pool);
 
@@ -1128,8 +1128,9 @@ writes! NOTE: buf_pool->mutex and buf_page_get_mutex(bpage) must be
 held upon entering this function, and they will be released by this
 function if it returns true.
 @return TRUE if the page was flushed */
+// 이 함수에서 page 별로, In page log buffer에 존재하는지 확인해서 제가해보기
 ibool
-buf_flush_page(
+buf_flush_page( 
 /*===========*/
 	buf_pool_t*	buf_pool,	/*!< in: buffer pool instance */
 	buf_page_t*	bpage,		/*!< in: buffer control block */
@@ -1178,7 +1179,6 @@ buf_flush_page(
 			flush = TRUE;
 		}
 	}
-
 #ifdef UNIV_NVDIMM_IPL
   page_id_t page_id_save = page_id_t(bpage->id.space(), bpage->id.page_no());
 #endif
@@ -1235,20 +1235,22 @@ buf_flush_page(
 		oldest_modification != 0.  Thus, it cannot be relocated in the
 		buffer pool or removed from flush_list or LRU_list. */
 
+// 직접적으로 flush list에 추가되는 부분을 막지 않고, fwrite 할때만 제외해보기
 #ifdef UNIV_NVDIMM_IPL
     if (nvdimm_ipl_lookup(bpage->id)) {
-			// TODO(jhpark)!!!
-  		buf_flush_write_block_low(bpage, flush_type, sync);
+		// 	// TODO(jhpark)!!!
+  		// buf_flush_write_block_low(bpage, flush_type, sync);
+		ib::info() << "Skip the Flush, " << bpage->id.space() << ":" << bpage->id.page_no();
     } else {
   		buf_flush_write_block_low(bpage, flush_type, sync);
     }
 #else
-    buf_flush_write_block_low(bpage, flush_type, sync);
+		buf_flush_write_block_low(bpage, flush_type, sync);
 #endif
 
 #ifdef UNIV_NVDIMM_IPL
     // (jhpark): we need to erase IPL Log of this page.
-    nvdimm_ipl_erase(page_id_save, bpage);
+    // nvdimm_ipl_erase(page_id_save, bpage);
 #endif
 
 	}
@@ -1474,7 +1476,8 @@ buf_flush_try_neighbors(
 				neighbors != offset */
 
 				if (buf_flush_page(
-					buf_pool, bpage, flush_type, false)) {
+					buf_pool, b
+					page, flush_type, false)) {
 
 					++count;
 				} else {
