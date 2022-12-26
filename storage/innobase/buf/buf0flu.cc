@@ -1010,6 +1010,8 @@ buf_flush_write_block_low(
 	bool		sync)		/*!< in: true if sync IO request */
 {
 	page_t*	frame = NULL;
+	bool flush_flag = true;
+	int test = 0;
 
 #ifdef UNIV_DEBUG
 	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
@@ -1091,24 +1093,44 @@ buf_flush_write_block_low(
 		ulint	type = IORequest::WRITE | IORequest::DO_NOT_WAKE;
 
 		IORequest	request(type);
-
-		fil_io(request,
-		       sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-		       frame, bpage);
+		//block_flush
+		#ifdef UNIV_NVDIMM_IPL
+		if (nvdimm_ipl_lookup(bpage->id)) {
+			flush_flag = false; // ipl log가 존재하는 경유, flush flag를 끄기.
+		} else {
+			fil_io(request,
+			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+			frame, bpage);
+		}
+		#else
+			fil_io(request,
+			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+			frame, bpage);
+		#endif
+		test = 1;
+		
 
 	} else if (flush_type == BUF_FLUSH_SINGLE_PAGE) {
+		#ifdef UNIV_NVDIMM_IPL
+		if (nvdimm_ipl_lookup(bpage->id)) {
+			flush_flag = false; // ipl log가 존재하는 경유, flush flag를 끄기.
+		} 
+		#endif
 		buf_dblwr_write_single_page(bpage, sync);
+		test = 2;
 	} else {
 		ut_ad(!sync);
 		buf_dblwr_add_to_batch(bpage);
+		test = 3;
 	}
 
 	/* When doing single page flushing the IO is done synchronously
 	and we flush the changes to disk only for the tablespace we
 	are working on. */
-	if (sync) {
+	if (sync && flush_flag) {
 		ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
-		fil_flush(bpage->id.space());
+		fil_flush(bpage->id.space()); //catch_flush
+		fprintf(stderr, "[NVDIMM_block_flush]: flush type=%d\n", test); // flush type이 무조건 1만 나와야함.
 
 		/* true means we want to evict this page from the
 		LRU list as well. */
@@ -1179,6 +1201,7 @@ buf_flush_page(
 			flush = TRUE;
 		}
 	}
+
 #ifdef UNIV_NVDIMM_IPL
   page_id_t page_id_save = page_id_t(bpage->id.space(), bpage->id.page_no());
 #endif
@@ -1236,22 +1259,23 @@ buf_flush_page(
 		buffer pool or removed from flush_list or LRU_list. */
 
 // 직접적으로 flush list에 추가되는 부분을 막지 않고, fwrite 할때만 제외해보기
-#ifdef UNIV_NVDIMM_IPL
-    if (nvdimm_ipl_lookup(bpage->id)) {
-		// 	// TODO(jhpark)!!!
-  		// buf_flush_write_block_low(bpage, flush_type, sync);
-		ib::info() << "Skip the Flush, " << bpage->id.space() << ":" << bpage->id.page_no();
-    } else {
-  		buf_flush_write_block_low(bpage, flush_type, sync);
-    }
-#else
+// #ifdef UNIV_NVDIMM_IPL
+//     if (nvdimm_ipl_lookup(bpage->id)) {
+// 			// TODO(jhpark)!!!
+//   		// buf_flush_write_block_low(bpage, flush_type, sync);
+// 		fprintf(stderr, "[NVDIMM_BLOCK]: Sucess flush page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+// 		buf_flush_write_block_low(bpage, flush_type, sync);
+//     } else {
+//   		buf_flush_write_block_low(bpage, flush_type, sync);
+//     }
+// #else
 		buf_flush_write_block_low(bpage, flush_type, sync);
-#endif
+// #endif
 
-#ifdef UNIV_NVDIMM_IPL
+// #ifdef UNIV_NVDIMM_IPL
     // (jhpark): we need to erase IPL Log of this page.
     // nvdimm_ipl_erase(page_id_save, bpage);
-#endif
+// #endif
 
 	}
 
@@ -1476,8 +1500,8 @@ buf_flush_try_neighbors(
 				neighbors != offset */
 
 				if (buf_flush_page(
-					buf_pool, b
-					page, flush_type, false)) {
+					buf_pool, bpage
+					,flush_type, false)) {
 
 					++count;
 				} else {

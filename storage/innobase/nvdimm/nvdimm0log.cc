@@ -79,7 +79,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long l
 	// step5. updaet write pointer 
 	offset += len;	
 	ipl_wp[page_id] = offset;
-
+  // fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), Log size: %u\n", page_id.space(), page_id.page_no(),len);
 	return true;
 }
 

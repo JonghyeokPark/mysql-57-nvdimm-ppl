@@ -20,7 +20,7 @@
 #include "buf0buf.h" 
 
 // TDOO(jhpark): make this variable configurable
-#define NVDIMM_MAP_SIZE	(10*1024*1024*1024UL)
+#define NVDIMM_MAP_SIZE	(16*1024*1024*1024UL)
 
 #define NVDIMM_MMAP_FILE_NAME         			"nvdimm_mmap_file"
 #define NVDIMM_MMAP_MAX_FILE_NAME_LENGTH    10000
@@ -97,7 +97,7 @@ extern std::map<page_id_t, uint64_t, comp> ipl_map; // (page_id , offset in NVDI
 extern std::map<page_id_t, uint64_t, comp> ipl_wp; // (page_id , write pointer per-page)
 
 // global offset which manages overall NVDIMM region
-#define IPL_LOG_REGION_SZ	(1024*4UL)
+#define IPL_LOG_REGION_SZ	(1024*64UL)
 
 extern uint64_t nvdimm_offset;
 

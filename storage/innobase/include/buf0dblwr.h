@@ -32,6 +32,10 @@ Created 2011/12/19 Inaam Rana
 #include "buf0types.h"
 #include "log0recv.h"
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
+
 #ifndef UNIV_HOTBACKUP
 
 /** Doublewrite system */
