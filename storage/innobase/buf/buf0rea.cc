@@ -40,6 +40,10 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0start.h"
 #include "srv0srv.h"
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
+
 /** There must be at least this many pages in buf_pool in the area to start
 a random read-ahead */
 #define BUF_READ_AHEAD_RANDOM_THRESHOLD(b)	\
@@ -120,7 +124,6 @@ buf_read_page_low(
 	bool			unzip)
 {
 	buf_page_t*	bpage;
-
 	*err = DB_SUCCESS;
 
 	if (page_id.space() == TRX_SYS_SPACE
@@ -161,7 +164,6 @@ buf_read_page_low(
 			      sync ? "sync" : "async"));
 
 	ut_ad(buf_page_in_file(bpage));
-
 	if (sync) {
 		thd_wait_begin(NULL, THD_WAIT_DISKIO);
 	}
@@ -220,6 +222,20 @@ buf_read_page_low(
 		ut_error;
 	}
 
+
+	// log_apply_function
+	// First, check the if log for the page is in the IPL.
+	// Second, apply the log record to the page.
+	#ifdef UNIV_NVDIMM_IPL
+	if (nvdimm_ipl_lookup(page_id)){
+		mtr_t temp_mtr;
+		mtr_start(&temp_mtr);
+		nvdimm_ipl_log_apply(page_id, (buf_block_t*) bpage);
+		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+		mtr_commit(&temp_mtr);
+	}
+	#endif
+
 	if (sync) {
 		/* The i/o is already completed when we arrive from
 		fil_read */
@@ -227,6 +243,8 @@ buf_read_page_low(
 			return(0);
 		}
 	}
+
+	
 
 	return(1);
 }
@@ -382,7 +400,6 @@ read_ahead:
 		const page_id_t	cur_page_id(page_id.space(), i);
 
 		if (!ibuf_bitmap_page(cur_page_id, page_size)) {
-
 			count += buf_read_page_low(
 				&err, false,
 				IORequest::DO_NOT_WAKE,
@@ -441,7 +458,6 @@ buf_read_page(
 	acquire the buffer pool mutex before acquiring the block
 	mutex, required for updating the page state. The acquire
 	of the buffer pool mutex becomes an expensive bottleneck. */
-
 	count = buf_read_page_low(
 		&err, true,
 		0, BUF_READ_ANY_PAGE, page_id, page_size, false);
@@ -826,7 +842,6 @@ buf_read_ibuf_merge_pages(
 		}
 
 		dberr_t	err;
-
 		buf_read_page_low(&err,
 				  sync && (i + 1 == n_stored),
 				  0,
@@ -901,7 +916,7 @@ buf_read_recv_pages(
 					<< " pending reads";
 			}
 		}
-
+		
 		if ((i + 1 == n_stored) && sync) {
 			buf_read_page_low(
 				&err, true,
