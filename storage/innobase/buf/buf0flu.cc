@@ -1010,8 +1010,6 @@ buf_flush_write_block_low(
 	bool		sync)		/*!< in: true if sync IO request */
 {
 	page_t*	frame = NULL;
-	bool flush_flag = true;
-	int test = 0;
 
 #ifdef UNIV_DEBUG
 	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
@@ -1093,44 +1091,50 @@ buf_flush_write_block_low(
 		ulint	type = IORequest::WRITE | IORequest::DO_NOT_WAKE;
 
 		IORequest	request(type);
-		//block_flush
-		#ifdef UNIV_NVDIMM_IPL
-		if (nvdimm_ipl_lookup(bpage->id)) {
-			flush_flag = false; // ipl log가 존재하는 경유, flush flag를 끄기.
-		} else {
-			fil_io(request,
-			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-			frame, bpage);
-		}
-		#else
-			fil_io(request,
-			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-			frame, bpage);
-		#endif
-		test = 1;
-		
 
+//block_flush
+#ifdef UNIV_NVDIMM_IPL
+	if (nvdimm_ipl_lookup(bpage->id)) {
+		fprintf(stderr, "[NVDIMM_BLOCK] Block single page flush: (%u, %u) \n", bpage->id.space(), bpage->id.page_no());
+		//we do not the flush, So unlock the page_block lock and free the page in LRU list.
+		rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
+						BUF_IO_WRITE);
+		rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
+						BUF_IO_READ);
+		buf_LRU_free_page(bpage, true);
+		buf_LRU_stat_inc_io();
+		return;
+
+		
+		// fil_io(request,
+		// sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+		// frame, bpage);
+	} else {
+		fil_io(request,
+		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+		frame, bpage);
+	}
+#else
+		fil_io(request,
+		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+		frame, bpage);
+#endif
+		
 	} else if (flush_type == BUF_FLUSH_SINGLE_PAGE) {
-		#ifdef UNIV_NVDIMM_IPL
-		if (nvdimm_ipl_lookup(bpage->id)) {
-			flush_flag = false; // ipl log가 존재하는 경유, flush flag를 끄기.
-		} 
-		#endif
 		buf_dblwr_write_single_page(bpage, sync);
-		test = 2;
+		fprintf(stderr, "[NVDIMM_FLUSH] Double Write\n");
 	} else {
 		ut_ad(!sync);
 		buf_dblwr_add_to_batch(bpage);
-		test = 3;
+		fprintf(stderr, "[NVDIMM_FLUSH] Double Write\n");
 	}
 
 	/* When doing single page flushing the IO is done synchronously
 	and we flush the changes to disk only for the tablespace we
 	are working on. */
-	if (sync && flush_flag) {
+	if (sync) {
 		ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
 		fil_flush(bpage->id.space()); //catch_flush
-		fprintf(stderr, "[NVDIMM_block_flush]: flush type=%d\n", test); // flush type이 무조건 1만 나와야함.
 
 		/* true means we want to evict this page from the
 		LRU list as well. */
@@ -1202,10 +1206,6 @@ buf_flush_page(
 		}
 	}
 
-#ifdef UNIV_NVDIMM_IPL
-  page_id_t page_id_save = page_id_t(bpage->id.space(), bpage->id.page_no());
-#endif
-
 	if (flush) {
 
 		/* We are committed to flushing by the time we get here */
@@ -1261,21 +1261,23 @@ buf_flush_page(
 // 직접적으로 flush list에 추가되는 부분을 막지 않고, fwrite 할때만 제외해보기
 // #ifdef UNIV_NVDIMM_IPL
 //     if (nvdimm_ipl_lookup(bpage->id)) {
-// 			// TODO(jhpark)!!!
-//   		// buf_flush_write_block_low(bpage, flush_type, sync);
-// 		fprintf(stderr, "[NVDIMM_BLOCK]: Sucess flush page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
-// 		buf_flush_write_block_low(bpage, flush_type, sync);
+// 		fprintf(stderr, "[NVDIMM_BLOCK] Block page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+// 		if (sync) {
+// 			ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
+// 			/* true means we want to evict this page from the
+// 			LRU list as well. */
+// 			buf_page_io_complete(bpage, true);
+// 		}
+// 		/* Increment the counter of I/O operations used
+// 		for selecting LRU policy. */
+// 		buf_LRU_stat_inc_io();
 //     } else {
 //   		buf_flush_write_block_low(bpage, flush_type, sync);
 //     }
 // #else
+// 		buf_flush_write_block_low(bpage, flush_type, sync);
+// #endif
 		buf_flush_write_block_low(bpage, flush_type, sync);
-// #endif
-
-// #ifdef UNIV_NVDIMM_IPL
-    // (jhpark): we need to erase IPL Log of this page.
-    // nvdimm_ipl_erase(page_id_save, bpage);
-// #endif
 
 	}
 

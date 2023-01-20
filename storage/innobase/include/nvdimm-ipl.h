@@ -20,7 +20,7 @@
 #include "buf0buf.h" 
 
 // TDOO(jhpark): make this variable configurable
-#define NVDIMM_MAP_SIZE	(16*1024*1024*1024UL)
+#define NVDIMM_MAP_SIZE	(32*1024*1024*1024UL)
 
 #define NVDIMM_MMAP_FILE_NAME         			"nvdimm_mmap_file"
 #define NVDIMM_MMAP_MAX_FILE_NAME_LENGTH    10000
@@ -97,23 +97,23 @@ extern std::map<page_id_t, uint64_t, comp> ipl_map; // (page_id , offset in NVDI
 extern std::map<page_id_t, uint64_t, comp> ipl_wp; // (page_id , write pointer per-page)
 
 // global offset which manages overall NVDIMM region
-#define IPL_LOG_REGION_SZ	(1024*64UL)
+#define IPL_LOG_REGION_SZ	(1024*128UL)
 
 extern uint64_t nvdimm_offset;
 
 // log header
 typedef struct ipl_log_header {
-	bool flag;
-	uint64_t offset;
-	char padding[48]; // unused
+  ulint body_len; //log를 적용할 len
+  mlog_id_t type; // log의 type 저장.
 } IPL_LOG_HDR;
 
 /* IPL operations */
 void nvdimm_ipl_initialize();
-bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, unsigned long len);
+bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog_id_t type);
+void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block);
+void nvdimm_ipl_erase(page_id_t page_id);
 //bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
-void nvdimm_ipl_erase(page_id_t page_id, buf_page_t * page);
-//bool nvdimm_ipl_lookup(page_id_t page_id);
+bool nvdimm_ipl_lookup(page_id_t page_id);
 
 #ifdef UNIV_NVDIMM_IPL
 unsigned char* 
