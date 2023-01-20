@@ -36,3 +36,5 @@ cmake .. -DWITH_DEBUG=0 -DCMAKE_C_FLAGS="$BUILD_FLAGS" -DCMAKE_CXX_FLAGS="$BUILD
 
 make -j8
 echo $PASSWD | sudo -S make install
+
+cp ./START.sh ${BUILD_DIR}/bin/

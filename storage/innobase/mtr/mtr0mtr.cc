@@ -483,10 +483,12 @@ struct mtr_write_log_t {
 																	, block->begin() + block->used()
 																	, &type, &space, &page_no);
 		const page_id_t page_id(space, page_no);
-		if (!nvdimm_ipl_add(page_id, (unsigned char*)block->begin(), block->used())) {
+		// (jhpark): miss type values; what??
+		if (!nvdimm_ipl_add(page_id, (unsigned char*)block->begin(), block->used(), type)) {
 			//가득 찼을 경우에는, 그대로 log 쓰기
 			fprintf(stderr, "[NVDIMM_ERROR] wow, IPL log is FULL! we need merge !!!\n");
-			nvdimm_ipl_erase(page_id, NULL);
+			// (jhpakr): too many argument for `nvdimm_ipl_erase` what??
+			nvdimm_ipl_erase(page_id);
 			
 		}
 #endif
