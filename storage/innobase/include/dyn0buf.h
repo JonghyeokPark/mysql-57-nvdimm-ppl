@@ -30,6 +30,7 @@ Created 2013-03-16 Sunny Bains
 #include "ut0lst.h"
 #include "mem0mem.h"
 #include "dyn0types.h"
+#include "stdlib.h"
 
 /** Class that manages dynamic buffers. It uses a UT_LIST of
 dyn_buf_t::block_t instances. We don't use STL containers in
@@ -464,7 +465,6 @@ private:
 			mem_heap_alloc(m_heap, sizeof(*block)));
 
 		push_back(block);
-
 		return(block);
 	}
 
@@ -490,6 +490,7 @@ typedef dyn_buf_t<DYN_ARRAY_DATA_SIZE> mtr_buf_t;
 struct mtr_buf_copy_t {
 	/** The copied buffer */
 	mtr_buf_t	m_buf;
+	ulint size;
 
 	/** Append a block to the redo log buffer.
 	@return whether the appending should continue (always true here) */
@@ -498,8 +499,35 @@ struct mtr_buf_copy_t {
 		byte*	buf = m_buf.open(block->used());
 		memcpy(buf, block->begin(), block->used());
 		m_buf.close(buf + block->used());
+		size += block->used();
 		return(true);
 	}
+};
+
+struct test_type{
+
+	byte * buffer;
+	ulint offset;
+	ulint log_size;
+
+	void init(ulint mtr_log_size){ // 추후 calloc 체킹 필요
+		buffer = (byte *)calloc(mtr_log_size, sizeof(char));
+		ut_d(!buffer);
+		offset = 0;
+		log_size = mtr_log_size;
+	}
+
+	bool operator()(const mtr_buf_t::block_t* block)
+	{
+		memcpy(buffer + offset, block->begin(), block->used());
+		offset += block->used();
+		return(true);
+	}
+	
+	void free_mem(){
+		free(buffer);
+	}
+
 };
 
 #endif /* dyn0buf_h */
