@@ -3473,6 +3473,13 @@ btr_cur_pessimistic_insert(
 
 	*big_rec = big_rec_vec;
 
+#ifdef UNIV_NVDIMM_IPL
+  // (jhpark): skip split/merge page from IPLization path
+  if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
+    nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
+  }
+#endif
+
 	return(DB_SUCCESS);
 }
 
@@ -4646,6 +4653,14 @@ return_after_reservations:
 
 	*big_rec = big_rec_vec;
 
+#ifdef UNIV_NVDIMM_IPL
+  // (jhpark): skip split/merge page from IPLization path
+  if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
+    nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
+  }
+#endif
+
+
 	return(err);
 }
 
@@ -5418,6 +5433,14 @@ return_after_reservations:
 	if (n_reserved > 0) {
 		fil_space_release_free_extents(index->space, n_reserved);
 	}
+
+#ifdef UNIV_NVDIMM_IPL
+  // (jhpark): skip split/merge page from IPLization path
+  if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
+    nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
+  }
+#endif
+
 
 	return(ret);
 }

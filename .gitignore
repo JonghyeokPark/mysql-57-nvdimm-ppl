@@ -2500,3 +2500,5 @@ bld/
 ctags
 cscope.*
 boost/
+
+my.cnf
