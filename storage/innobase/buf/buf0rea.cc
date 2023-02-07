@@ -125,6 +125,10 @@ buf_read_page_low(
 {
 	buf_page_t*	bpage;
 	*err = DB_SUCCESS;
+	if(nvdimm_ipl_lookup(page_id)){
+		sync = true;
+	}
+
 
 	if (page_id.space() == TRX_SYS_SPACE
 	    && buf_dblwr_page_inside(page_id.page_no())) {
@@ -149,6 +153,9 @@ buf_read_page_low(
 	or is being dropped; if we succeed in initing the page in the buffer
 	pool for read, then DISCARD cannot proceed until the read has
 	completed */
+	if(nvdimm_ipl_lookup(page_id)){
+		bpage = buf_page_init_for_read(err, mode, page_id, page_size, unzip);
+	}
 	bpage = buf_page_init_for_read(err, mode, page_id, page_size, unzip);
 
 	if (bpage == NULL) {
@@ -190,8 +197,9 @@ buf_read_page_low(
 		}
 	);
 
-	IORequest	request(type | IORequest::READ);
 
+
+	IORequest	request(type | IORequest::READ);
 	*err = fil_io(
 		request, sync, page_id, page_size, 0, page_size.physical(),
 		dst, bpage);
@@ -223,18 +231,32 @@ buf_read_page_low(
 	}
 
 
+
+
 	// log_apply_function
 	// First, check the if log for the page is in the IPL.
 	// Second, apply the log record to the page.
-	#ifdef UNIV_NVDIMM_IPL
+	fprintf(stderr, "Read page: (%u, %u) frame: %p \n", page_id.space(), page_id.page_no(), ((buf_block_t*) bpage)->frame);
+#ifdef UNIV_NVDIMM_IPL
+	// ulint	read_page_no;
+	// ulint	read_space_id;
+	// byte*	frame;
+	// frame = ((buf_block_t*) bpage)->frame;
+	// read_page_no = mach_read_from_4(frame + FIL_PAGE_OFFSET);
+	// read_space_id = mach_read_from_4(
+	// 	frame + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
+
 	if (nvdimm_ipl_lookup(page_id)){
+		//page를 완전히 가져오고 실행해보기
+		fprintf(stderr, "Good!\n");
 		mtr_t temp_mtr;
 		mtr_start(&temp_mtr);
+		buf_page_io_complete(bpage);
 		nvdimm_ipl_log_apply(page_id, (buf_block_t*) bpage);
 		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 		mtr_commit(&temp_mtr);
 	}
-	#endif
+#endif
 
 	if (sync) {
 		/* The i/o is already completed when we arrive from

@@ -5701,12 +5701,12 @@ buf_page_io_complete(
 		read_space_id = mach_read_from_4(
 			frame + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
 
+		fprintf(stderr, "buf_page_io_complete : (%lu, %lu), frame: %p \n", read_space_id, read_page_no, frame);
 		if (bpage->id.space() == TRX_SYS_SPACE
 		    && buf_dblwr_page_inside(bpage->id.page_no())) {
 
 			ib::error() << "Reading page " << bpage->id
 				<< ", which is in the doublewrite buffer!";
-
 		} else if (read_space_id == 0 && read_page_no == 0) {
 			/* This is likely an uninitialized page. */
 		} else if ((bpage->id.space() != 0

@@ -882,7 +882,7 @@ add_log_to_ipl(
 
 //leaf page만 거르기 위한 부분 추가.
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	buf_page_t * buf_page = buf_page_hash_get_low(buf_pool, page_id);
+	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
 	buf_block_t * buf_block = buf_page_get_block(buf_page);
 	ut_ad(buf_block != NULL);
 // page_is_leaf는 page_type만받기 때문에 위 과정을 통해서 page를 가져오는게 중요하다
@@ -906,10 +906,9 @@ add_log_to_ipl(
 		case MLOG_COMP_REC_UPDATE_IN_PLACE:
 		case MLOG_REC_DELETE:
 		case MLOG_COMP_REC_DELETE:
-			if(!is_system_or_undo_tablespace(space) && page_is_leaf(buf_block->frame)){
+			if(!is_system_or_undo_tablespace(space) && buf_page_in_file(buf_page) && page_is_leaf(buf_block->frame)){
 				if(!nvdimm_ipl_add(page_id, body, len, type)){
-					fprintf(stderr, "[NVDIMM_ERROR] wow, IPL log is FULL! we need merge !!!\n");
-					nvdimm_ipl_erase(page_id);
+					// fprintf(stderr, "Do not save the log (%lu, %lu)\n", space, page_no);
 				}
 			}
 			break;
@@ -1014,7 +1013,6 @@ loop:
 			}
 			
 			ut_a(len != 0); 
-			ut_a(!(*ptr & MLOG_SINGLE_REC_FLAG));
 
 			offset += len;
 			switch(type){

@@ -111,7 +111,7 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
 	byte * end_ptr = nvdimm_ptr + page_offset + write_pointer; // log
 
 	ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying start!";
-  	while (start_ptr <= end_ptr) {
+  	while (start_ptr < end_ptr) {
 
 		// log_hdr를 가져와서 저장
 		IPL_LOG_HDR log_hdr;
@@ -138,11 +138,11 @@ void nvdimm_ipl_erase(page_id_t page_id) { // 굳이 page가 들어갈 필요는
 	
 	// step2. delete IPL Logs 
 	unsigned char* ptr = nvdimm_ptr + offset;
-	ib::info() << page_id.space() << ":" << page_id.page_no()  << " IPL delete start!";
+	// ib::info() << page_id.space() << ":" << page_id.page_no()  << " IPL delete start!";
 	memset(ptr, 0x00, IPL_LOG_REGION_SZ);
 	flush_cache(ptr, IPL_LOG_REGION_SZ);
 	ipl_wp[page_id] = 0;
-	ib::info() << page_id.space() << ":" << page_id.page_no()  << " IPL delete finish!";
+	// ib::info() << page_id.space() << ":" << page_id.page_no()  << " IPL delete finish!";
 
 	return;
 }

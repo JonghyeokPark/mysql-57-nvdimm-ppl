@@ -1095,20 +1095,19 @@ buf_flush_write_block_low(
 //block_flush
 #ifdef UNIV_NVDIMM_IPL
 	if (nvdimm_ipl_lookup(bpage->id)) {
-		fprintf(stderr, "[NVDIMM_BLOCK] Block single page flush: (%u, %u) \n", bpage->id.space(), bpage->id.page_no());
-		//we do not the flush, So unlock the page_block lock and free the page in LRU list.
-		rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
-						BUF_IO_WRITE);
-		rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
-						BUF_IO_READ);
-		buf_LRU_free_page(bpage, true);
-		buf_LRU_stat_inc_io();
-		return;
-
+		if(fil_io(request,
+		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+		frame, bpage) == DB_SUCCESS){
+			fprintf(stderr, "[NVDIMM_BLOCK]Before Block page: (%u, %u) frame: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
+			buf_page_io_complete(bpage, true);
+			buf_LRU_stat_inc_io();
+			fprintf(stderr, "[NVDIMM_BLOCK]After Block page: (%u, %u) frame: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
+			return;
+		}
+		else{
+			fprintf(stderr, "Error!\n");
+		}
 		
-		// fil_io(request,
-		// sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-		// frame, bpage);
 	} else {
 		fil_io(request,
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
@@ -1119,6 +1118,7 @@ buf_flush_write_block_low(
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage);
 #endif
+
 		
 	} else if (flush_type == BUF_FLUSH_SINGLE_PAGE) {
 		buf_dblwr_write_single_page(bpage, sync);
@@ -1258,25 +1258,6 @@ buf_flush_page(
 		oldest_modification != 0.  Thus, it cannot be relocated in the
 		buffer pool or removed from flush_list or LRU_list. */
 
-// 직접적으로 flush list에 추가되는 부분을 막지 않고, fwrite 할때만 제외해보기
-// #ifdef UNIV_NVDIMM_IPL
-//     if (nvdimm_ipl_lookup(bpage->id)) {
-// 		fprintf(stderr, "[NVDIMM_BLOCK] Block page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
-// 		if (sync) {
-// 			ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
-// 			/* true means we want to evict this page from the
-// 			LRU list as well. */
-// 			buf_page_io_complete(bpage, true);
-// 		}
-// 		/* Increment the counter of I/O operations used
-// 		for selecting LRU policy. */
-// 		buf_LRU_stat_inc_io();
-//     } else {
-//   		buf_flush_write_block_low(bpage, flush_type, sync);
-//     }
-// #else
-// 		buf_flush_write_block_low(bpage, flush_type, sync);
-// #endif
 		buf_flush_write_block_low(bpage, flush_type, sync);
 
 	}
@@ -1817,13 +1798,14 @@ buf_do_flush_list_batch(
 	     ++scanned) {
 
 		buf_page_t*	prev;
-
+		fprintf(stderr, "[page cleaner] flush page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		ut_a(bpage->oldest_modification > 0);
 		ut_ad(bpage->in_flush_list);
 
 		prev = UT_LIST_GET_PREV(list, bpage);
 		buf_pool->flush_hp.set(prev);
 		buf_flush_list_mutex_exit(buf_pool);
+
 
 #ifdef UNIV_DEBUG
 		bool flushed =
@@ -2737,7 +2719,6 @@ pc_sleep_if_needed(
 
 		sleep_us = ut_min(static_cast<ulint>(1000000),
 				  (next_loop_time - cur_time) * 1000);
-
 		return(os_event_wait_time_low(buf_flush_event,
 					      sleep_us, sig_count));
 	}
