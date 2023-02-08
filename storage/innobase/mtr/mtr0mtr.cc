@@ -906,7 +906,9 @@ add_log_to_ipl(
 		case MLOG_COMP_REC_UPDATE_IN_PLACE:
 		case MLOG_REC_DELETE:
 		case MLOG_COMP_REC_DELETE:
-			if(!is_system_or_undo_tablespace(space) && buf_page_in_file(buf_page) && page_is_leaf(buf_block->frame)){
+			if(!is_system_or_undo_tablespace(space) && !nvdimm_ipl_is_split_or_merge_page(page_id) 
+				&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page))
+			{
 				if(!nvdimm_ipl_add(page_id, body, len, type)){
 					// fprintf(stderr, "Do not save the log (%lu, %lu)\n", space, page_no);
 				}

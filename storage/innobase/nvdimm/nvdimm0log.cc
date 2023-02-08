@@ -154,6 +154,41 @@ bool nvdimm_ipl_lookup(page_id_t page_id) {
 	return (ipl_map[page_id] && ipl_wp[page_id]!=0);
 }
 
+void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
+	//Function to page is splited or merge
+	ib::info() << page_id.space() << ":" << page_id.page_no()  << " Add split_merge_map!";
+	//is not in split merge map
+	if(split_merge_map.find(page_id) == split_merge_map.end()){
+		split_merge_map.insert(std::pair<page_id_t, bool>(page_id, true));
+	}
+	else{
+		split_merge_map[page_id] = true;
+	}
+	//split merge page에 대한 ipl log제거
+	if(nvdimm_ipl_lookup(page_id)){
+		nvdimm_ipl_erase(page_id);
+	}
+	
+}
+
+void nvdimm_ipl_remove_split_merge_map(page_id_t page_id){
+	//Function to page is splited or merge
+
+	//is not in split merge map
+	if(split_merge_map.find(page_id) == split_merge_map.end()){
+		split_merge_map.erase(page_id);
+	}
+	if(nvdimm_ipl_lookup(page_id)){
+		nvdimm_ipl_erase(page_id);
+	}
+}
+
+bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
+
+	if(split_merge_map.find(page_id) == split_merge_map.end()) return false;
+	return split_merge_map[page_id]; 
+}
+
 // bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page) {
 // 	// merge IPL log to buffer page
 // }

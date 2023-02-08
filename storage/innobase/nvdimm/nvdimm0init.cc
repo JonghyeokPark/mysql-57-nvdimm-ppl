@@ -13,6 +13,7 @@
 
 std::map<page_id_t, uint64_t, comp> ipl_map;
 std::map<page_id_t, uint64_t, comp> ipl_wp;
+std::map<page_id_t, bool, comp> split_merge_map;
 
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;

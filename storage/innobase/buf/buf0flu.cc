@@ -1094,14 +1094,14 @@ buf_flush_write_block_low(
 
 //block_flush
 #ifdef UNIV_NVDIMM_IPL
-	if (nvdimm_ipl_lookup(bpage->id)) {
+	if (nvdimm_ipl_lookup(bpage->id) && !nvdimm_ipl_is_split_or_merge_page(bpage->id)) {
 		if(fil_io(request,
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage) == DB_SUCCESS){
-			fprintf(stderr, "[NVDIMM_BLOCK]Before Block page: (%u, %u) frame: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
+			fprintf(stderr, "[NVDIMM_BLOCK]Block page: (%u, %u) frame: %p, oldes_modifi: %lu\n", bpage->id.space(),
+			 bpage->id.page_no(), ((buf_block_t*) bpage)->frame, ((buf_block_t*) bpage)->page.oldest_modification);
 			buf_page_io_complete(bpage, true);
 			buf_LRU_stat_inc_io();
-			fprintf(stderr, "[NVDIMM_BLOCK]After Block page: (%u, %u) frame: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 			return;
 		}
 		else{
@@ -1112,6 +1112,7 @@ buf_flush_write_block_low(
 		fil_io(request,
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage);
+		nvdimm_ipl_remove_split_merge_map(bpage->id);
 	}
 #else
 		fil_io(request,
@@ -1798,7 +1799,6 @@ buf_do_flush_list_batch(
 	     ++scanned) {
 
 		buf_page_t*	prev;
-		fprintf(stderr, "[page cleaner] flush page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		ut_a(bpage->oldest_modification > 0);
 		ut_ad(bpage->in_flush_list);
 

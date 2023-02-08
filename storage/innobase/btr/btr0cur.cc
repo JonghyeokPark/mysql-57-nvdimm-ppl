@@ -3473,13 +3473,14 @@ btr_cur_pessimistic_insert(
 
 	*big_rec = big_rec_vec;
 
-// #ifdef UNIV_NVDIMM_IPL
-//   // (jhpark): skip split/merge page from IPLization path
+#ifdef UNIV_NVDIMM_IPL
+  // (jhpark): skip split/merge page from IPLization path
+//   nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
 //   if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
-//     nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id, true);
-	
+// 	fprintf(stderr, "splited Page: (%lu, %lu)\n", btr_cur_get_block(cursor)->page.id.space(), btr_cur_get_block(cursor)->page.id.page_no());
+//     // nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
 //   }
-// #endif
+#endif
 
 	return(DB_SUCCESS);
 }
@@ -4654,12 +4655,14 @@ return_after_reservations:
 
 	*big_rec = big_rec_vec;
 
-// #ifdef UNIV_NVDIMM_IPL
-//   // (jhpark): skip split/merge page from IPLization path
+#ifdef UNIV_NVDIMM_IPL
+  // (jhpark): skip split/merge page from IPLization path
+//   nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
 //   if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
-//     nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id, true);
+// 	fprintf(stderr, "splited update Page: (%lu, %lu)\n", btr_cur_get_block(cursor)->page.id.space(), btr_cur_get_block(cursor)->page.id.page_no());
+//     // nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
 //   }
-// #endif
+#endif
 
 
 	return(err);
@@ -5435,12 +5438,15 @@ return_after_reservations:
 		fil_space_release_free_extents(index->space, n_reserved);
 	}
 
-// #ifdef UNIV_NVDIMM_IPL
-//   // (jhpark): skip split/merge page from IPLization path
+
+#ifdef UNIV_NVDIMM_IPL
+  // (jhpark): skip split/merge page from IPLization path
+//   nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
 //   if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
-//     nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id, true);
+// 	fprintf(stderr, "Delete Page: (%lu, %lu)\n", btr_cur_get_block(cursor)->page.id.space(), btr_cur_get_block(cursor)->page.id.page_no());
+//     // nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
 //   }
-// #endif
+#endif
 
 
 	return(ret);

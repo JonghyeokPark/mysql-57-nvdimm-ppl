@@ -125,9 +125,6 @@ buf_read_page_low(
 {
 	buf_page_t*	bpage;
 	*err = DB_SUCCESS;
-	if(nvdimm_ipl_lookup(page_id)){
-		sync = true;
-	}
 
 
 	if (page_id.space() == TRX_SYS_SPACE
@@ -153,9 +150,6 @@ buf_read_page_low(
 	or is being dropped; if we succeed in initing the page in the buffer
 	pool for read, then DISCARD cannot proceed until the read has
 	completed */
-	if(nvdimm_ipl_lookup(page_id)){
-		bpage = buf_page_init_for_read(err, mode, page_id, page_size, unzip);
-	}
 	bpage = buf_page_init_for_read(err, mode, page_id, page_size, unzip);
 
 	if (bpage == NULL) {
@@ -236,7 +230,6 @@ buf_read_page_low(
 	// log_apply_function
 	// First, check the if log for the page is in the IPL.
 	// Second, apply the log record to the page.
-	fprintf(stderr, "Read page: (%u, %u) frame: %p \n", page_id.space(), page_id.page_no(), ((buf_block_t*) bpage)->frame);
 #ifdef UNIV_NVDIMM_IPL
 	// ulint	read_page_no;
 	// ulint	read_space_id;
@@ -251,7 +244,6 @@ buf_read_page_low(
 		fprintf(stderr, "Good!\n");
 		mtr_t temp_mtr;
 		mtr_start(&temp_mtr);
-		buf_page_io_complete(bpage);
 		nvdimm_ipl_log_apply(page_id, (buf_block_t*) bpage);
 		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 		mtr_commit(&temp_mtr);

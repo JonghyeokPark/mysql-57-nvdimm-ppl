@@ -1662,6 +1662,13 @@ btr_root_raise_and_insert(
 	btr_page_set_prev(new_page, new_page_zip, FIL_NULL, mtr);
 
 	/* Copy the records from root to the new page one by one. */
+#ifdef UNIV_NVDIMM_IPL
+	fprintf(stderr, "btr_root_raise_and_insert: (%lu, %lu)\n", new_block->page.id.space(), new_block->page.id.page_no());
+	// nvdimm_ipl_add_split_merge_map(new_block->page.id);
+	// if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
+	// 	nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
+	// }
+#endif
 
 	if (0
 #ifdef UNIV_ZIP_COPY
@@ -2634,7 +2641,14 @@ func_start:
 	new_page_zip = buf_block_get_page_zip(new_block);
 	btr_page_create(new_block, new_page_zip, cursor->index,
 			btr_page_get_level(page, mtr), mtr);
-
+#ifdef UNIV_NVDIMM_IPL
+	fprintf(stderr, "block: (%lu, %lu), oldes_modifi: %lu\n", block->page.id.space(), block->page.id.page_no(),block->page.oldest_modification);
+	fprintf(stderr, "new_block: (%lu, %lu), oldes_modifi: %lu\n", new_block->page.id.space(), new_block->page.id.page_no(),new_block->page.oldest_modification);
+	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+	// if (nvdimm_ipl_lookup(block->page.id)) {
+	// 	nvdimm_ipl_erase(block->page.id);
+	// }
+#endif
 	/* 3. Calculate the first record on the upper half-page, and the
 	first record (move_limit) on original page which ends up on the
 	upper half */
