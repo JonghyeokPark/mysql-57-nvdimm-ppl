@@ -231,21 +231,23 @@ buf_read_page_low(
 	// First, check the if log for the page is in the IPL.
 	// Second, apply the log record to the page.
 #ifdef UNIV_NVDIMM_IPL
-	// ulint	read_page_no;
-	// ulint	read_space_id;
-	// byte*	frame;
-	// frame = ((buf_block_t*) bpage)->frame;
-	// read_page_no = mach_read_from_4(frame + FIL_PAGE_OFFSET);
-	// read_space_id = mach_read_from_4(
-	// 	frame + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
+	ulint	read_page_no;
+	ulint	read_space_id;
+	byte*	frame;
+	frame = ((buf_block_t*) bpage)->frame;
+	read_page_no = mach_read_from_4(frame + FIL_PAGE_OFFSET);
+	read_space_id = mach_read_from_4(
+		frame + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
 
 	if (nvdimm_ipl_lookup(page_id)){
 		//page를 완전히 가져오고 실행해보기
 		fprintf(stderr, "Good!\n");
 		mtr_t temp_mtr;
 		mtr_start(&temp_mtr);
+		fprintf(stderr, "frame page_id: (%u, %u)\n", read_space_id, read_page_no);
 		nvdimm_ipl_log_apply(page_id, (buf_block_t*) bpage);
 		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+		buf_page_io_complete(bpage);
 		mtr_commit(&temp_mtr);
 	}
 #endif

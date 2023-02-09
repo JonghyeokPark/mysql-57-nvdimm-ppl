@@ -2642,9 +2642,8 @@ func_start:
 	btr_page_create(new_block, new_page_zip, cursor->index,
 			btr_page_get_level(page, mtr), mtr);
 #ifdef UNIV_NVDIMM_IPL
-	fprintf(stderr, "block: (%lu, %lu), oldes_modifi: %lu\n", block->page.id.space(), block->page.id.page_no(),block->page.oldest_modification);
-	fprintf(stderr, "new_block: (%lu, %lu), oldes_modifi: %lu\n", new_block->page.id.space(), new_block->page.id.page_no(),new_block->page.oldest_modification);
 	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+	nvdimm_ipl_add_split_merge_map(block->page.id);
 	// if (nvdimm_ipl_lookup(block->page.id)) {
 	// 	nvdimm_ipl_erase(block->page.id);
 	// }
