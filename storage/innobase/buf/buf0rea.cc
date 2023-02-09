@@ -245,10 +245,16 @@ buf_read_page_low(
 		mtr_t temp_mtr;
 		mtr_start(&temp_mtr);
 		fprintf(stderr, "frame page_id: (%u, %u)\n", read_space_id, read_page_no);
-		nvdimm_ipl_log_apply(page_id, (buf_block_t*) bpage);
+		if(buf_page_io_complete(bpage)){
+			nvdimm_ipl_log_apply(page_id, (buf_block_t*) bpage);
+		}
+		else{
+			fprintf(stderr, "Page io not complete\n");
+			return(0);
+		}
 		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-		buf_page_io_complete(bpage);
 		mtr_commit(&temp_mtr);
+		return(1);
 	}
 #endif
 

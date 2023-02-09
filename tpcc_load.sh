@@ -1,5 +1,5 @@
-bld_path=/back_up/mysql-57-nvdimm-ipl/bld
-tpcc_path=/back_up/tpcc-mysql
+bld_path=/home/vldb/mysql-57-nvdimm-ipl/bld
+tpcc_path=/home/vldb/tpcc-mysql
 
 cd $bld_path
 ./bin/mysql -u root -e "CREATE DATABASE tpcc;"
