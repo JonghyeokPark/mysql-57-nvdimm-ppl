@@ -1094,12 +1094,7 @@ buf_flush_write_block_low(
 
 //block_flush
 #ifdef UNIV_NVDIMM_IPL
-	fprintf(stderr, "[FLUSH] page: (%u, %u) is_split_or_merge: %d, look_up: %d \n", bpage->id.space(),bpage->id.page_no(),
-	nvdimm_ipl_is_split_or_merge_page(bpage->id),nvdimm_ipl_lookup(bpage->id));
-
-	if (nvdimm_ipl_lookup(bpage->id)) {
-		fprintf(stderr, "[NVDIMM_BLOCK]ipl page: (%u, %u) frame: %p, oldes_modifi: %lu\n", bpage->id.space(),
-			 bpage->id.page_no(), ((buf_block_t*) bpage)->frame, ((buf_block_t*) bpage)->page.oldest_modification);
+	if (nvdimm_ipl_lookup(bpage->id) && !nvdimm_ipl_is_split_or_merge_page(bpage->id)) {
 		if(fil_io(request,
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage) == DB_SUCCESS){
