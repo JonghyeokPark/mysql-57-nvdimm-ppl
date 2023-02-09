@@ -61,7 +61,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 
 	// step2. check capacity 
 	if (offset > IPL_LOG_REGION_SZ*0.8) {
-    	fprintf(stderr, "space %u, page_no: %u, offset : %lu\n", page_id.space(), page_id.page_no(), offset);
+    	fprintf(stderr, "[IPL PAGE FULL]space %u, page_no: %u, offset : %lu\n", page_id.space(), page_id.page_no(), offset);
 		return false;
 	}
 
@@ -88,11 +88,11 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	ipl_wp[page_id] = offset;
 	
 	if (offset > IPL_LOG_REGION_SZ*0.8) {
-    	fprintf(stderr, "IPL page is FULL, space %u, page_no: %u, offset : %lu\n", page_id.space(), page_id.page_no(), offset);
+    	fprintf(stderr, "[IPL REGION FULL] space %u, page_no: %u, offset : %lu\n", page_id.space(), page_id.page_no(), offset);
 		return false;
 	}
 
-	//   fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu offset:%lu\n", page_id.space(), page_id.page_no(), type, len, offset);
+	  fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu offset:%lu\n", page_id.space(), page_id.page_no(), type, len, ipl_wp[page_id]);
   	mtr_commit(&temp_mtr);
 	return true;
 }
@@ -150,8 +150,13 @@ void nvdimm_ipl_erase(page_id_t page_id) { // 굳이 page가 들어갈 필요는
 bool nvdimm_ipl_lookup(page_id_t page_id) {
 	// return true, 
 	// if page exists in IPL region and IPL log is written
-	
-	return (ipl_map[page_id] && ipl_wp[page_id]!=0);
+	if(ipl_map.find(page_id) == ipl_map.end()){
+		return false;
+	}
+	else{
+		if(ipl_wp[page_id] == 0) 	return false;
+	}
+	return true;
 }
 
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id){

@@ -98,7 +98,7 @@ extern std::map<page_id_t, uint64_t, comp> ipl_wp; // (page_id , write pointer p
 extern std::map<page_id_t, bool, comp> split_merge_map;
 
 // global offset which manages overall NVDIMM region
-#define IPL_LOG_REGION_SZ	(1024*128UL)
+#define IPL_LOG_REGION_SZ	(1024*64) // 64KB로 변경, 많은 page가 생성되어서 log 영역이 부족할 것으로 판단
 
 extern uint64_t nvdimm_offset;
 

@@ -5821,7 +5821,6 @@ fil_io(
 	if (nvdimm_ipl_lookup(page_id) && req_type.is_write() && !req_type.is_log() && !nvdimm_ipl_is_split_or_merge_page(page_id)) {
 		// block flush code from page_io_complete;
 		err = DB_SUCCESS;
-
 		mutex_enter(&fil_system->mutex);
 
 		fil_node_complete_io_for_ipl_log(node, fil_system, req_type);

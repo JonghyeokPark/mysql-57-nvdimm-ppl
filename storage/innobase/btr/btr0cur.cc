@@ -3474,6 +3474,7 @@ btr_cur_pessimistic_insert(
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
   // (jhpark): skip split/merge page from IPLization path
 //   nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
 //   if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
@@ -4656,6 +4657,7 @@ return_after_reservations:
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
   // (jhpark): skip split/merge page from IPLization path
 //   nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
 //   if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
@@ -5440,6 +5442,7 @@ return_after_reservations:
 
 
 #ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
   // (jhpark): skip split/merge page from IPLization path
 //   nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
 //   if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
