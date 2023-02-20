@@ -450,6 +450,8 @@ btr_pcur_move_to_next_page(
 	next_page = buf_block_get_frame(next_block);
 #ifdef UNIV_BTR_DEBUG
 	ut_a(page_is_comp(next_page) == page_is_comp(page));
+	fprintf(stderr,"first_page: (%u)\n",btr_page_get_prev(next_page, mtr));
+	fprintf(stderr,"second_page: (%u, %u)\n",btr_pcur_get_block(cursor)->page.id.space(), btr_pcur_get_block(cursor)->page.id.page_no());
 	ut_a(btr_page_get_prev(next_page, mtr)
 	     == btr_pcur_get_block(cursor)->page.id.page_no());
 #endif /* UNIV_BTR_DEBUG */

@@ -250,7 +250,6 @@ mlog_write_initial_log_record_fast(
 			ut_ad(0);
 		}
 	}
-
 	return(mlog_write_initial_log_record_low(type, space, offset,
 						 log_ptr, mtr));
 }

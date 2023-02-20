@@ -42,6 +42,7 @@ Created 11/5/1995 Heikki Tuuri
 
 #ifdef UNIV_NVDIMM_IPL
 #include "nvdimm-ipl.h"
+#include "page0page.h"
 #endif
 
 /** There must be at least this many pages in buf_pool in the area to start
@@ -126,6 +127,9 @@ buf_read_page_low(
 	buf_page_t*	bpage;
 	*err = DB_SUCCESS;
 
+	if(nvdimm_ipl_lookup(page_id)){
+		sync = true;
+	}
 
 	if (page_id.space() == TRX_SYS_SPACE
 	    && buf_dblwr_page_inside(page_id.page_no())) {
@@ -231,28 +235,23 @@ buf_read_page_low(
 	// First, check the if log for the page is in the IPL.
 	// Second, apply the log record to the page.
 #ifdef UNIV_NVDIMM_IPL
-	ulint	read_page_no;
-	ulint	read_space_id;
-	byte*	frame;
-	frame = ((buf_block_t*) bpage)->frame;
-	read_page_no = mach_read_from_4(frame + FIL_PAGE_OFFSET);
-	read_space_id = mach_read_from_4(
-		frame + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
-
+	// fprintf(stderr, "Read ");
+	// page_header_print(((buf_block_t*) bpage)->frame);
 	if (nvdimm_ipl_lookup(page_id)){
 		//page를 완전히 가져오고 실행해보기
-		fprintf(stderr, "Good!\n");
 		mtr_t temp_mtr;
+		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 		mtr_start(&temp_mtr);
-		fprintf(stderr, "frame page_id: (%u, %u)\n", read_space_id, read_page_no);
 		if(buf_page_io_complete(bpage)){
+			fprintf(stderr, "Read bpage: (%lu, %lu) %p\n",page_id.space(), page_id.page_no(), bpage);
 			nvdimm_ipl_log_apply(page_id, (buf_block_t*) bpage);
+			nvdimm_ipl_add_split_merge_map(page_id);
 		}
 		else{
 			fprintf(stderr, "Page io not complete\n");
 			return(0);
 		}
-		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+		
 		mtr_commit(&temp_mtr);
 		return(1);
 	}

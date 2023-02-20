@@ -22,6 +22,7 @@
 
 #include "nvdimm-ipl.h"
 #include "mtr0log.h"
+#include "page0page.h"
 
 void nvdimm_ipl_initialize() {
 	// TODO(jhpark): initialize IPL-related data structures 
@@ -61,7 +62,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 
 	// step2. check capacity 
 	if (offset > IPL_LOG_REGION_SZ*0.8) {
-    	fprintf(stderr, "[IPL PAGE FULL]space %u, page_no: %u, offset : %lu\n", page_id.space(), page_id.page_no(), offset);
+    	fprintf(stderr, "[IPL PAGE FULL] page: (%lu, %lu) offset : %lu\n", page_id.space(), page_id.page_no(), offset);
 		return false;
 	}
 
@@ -88,11 +89,11 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	ipl_wp[page_id] = offset;
 	
 	if (offset > IPL_LOG_REGION_SZ*0.8) {
-    	fprintf(stderr, "[IPL REGION FULL] space %u, page_no: %u, offset : %lu\n", page_id.space(), page_id.page_no(), offset);
+    	fprintf(stderr, "[IPL REGION FULL]");
 		return false;
 	}
 
-	  fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu offset:%lu\n", page_id.space(), page_id.page_no(), type, len, ipl_wp[page_id]);
+	fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu offset:%lu\n", page_id.space(), page_id.page_no(), type, len, ipl_wp[page_id]);
   	mtr_commit(&temp_mtr);
 	return true;
 }
@@ -111,6 +112,7 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
 	byte * end_ptr = nvdimm_ptr + page_offset + write_pointer; // log
 
 	ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying start!";
+	
   	while (start_ptr < end_ptr) {
 
 		// log_hdr를 가져와서 저장
@@ -161,7 +163,7 @@ bool nvdimm_ipl_lookup(page_id_t page_id) {
 
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 	//Function to page is splited or merge
-	ib::info() << page_id.space() << ":" << page_id.page_no()  << " Add split_merge_map!";
+	ib::info() << "(" <<page_id.space() << ", " << page_id.page_no() << ")" << " Add split_merge_map!";
 	//is not in split merge map
 	if(split_merge_map.find(page_id) == split_merge_map.end()){
 		split_merge_map.insert(std::pair<page_id_t, bool>(page_id, true));

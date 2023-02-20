@@ -1027,7 +1027,7 @@ page_parse_create(
 	buf_block_t*	block,
 	ulint		comp,
 	bool		is_rtree);
-#ifndef UNIV_HOTBACKUP
+// #ifndef UNIV_HOTBACKUP
 /************************************************************//**
 Prints record contents including the data relevant only in
 the index page context. */
@@ -1036,7 +1036,7 @@ page_rec_print(
 /*===========*/
 	const rec_t*	rec,	/*!< in: physical record */
 	const ulint*	offsets);/*!< in: record descriptor */
-# ifdef UNIV_BTR_PRINT
+// # ifdef UNIV_BTR_PRINT
 /***************************************************************//**
 This is used to print the contents of the directory for
 debugging purposes. */
@@ -1072,8 +1072,8 @@ page_print(
 				in directory */
 	ulint		rn);	/*!< in: print rn first and last records
 				in directory */
-# endif /* UNIV_BTR_PRINT */
-#endif /* !UNIV_HOTBACKUP */
+// # endif /* UNIV_BTR_PRINT */
+// #endif /* !UNIV_HOTBACKUP */
 /***************************************************************//**
 The following is used to validate a record on a page. This function
 differs from rec_validate as it can also check the n_owned field and

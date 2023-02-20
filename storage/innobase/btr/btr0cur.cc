@@ -348,6 +348,8 @@ btr_cur_latch_leaves(
 #ifdef UNIV_BTR_DEBUG
 			ut_a(page_is_comp(get_block->frame)
 			     == page_is_comp(page));
+			fprintf(stderr,"first_page: (%u)\n",btr_page_get_prev(get_block->frame, mtr));
+			fprintf(stderr,"second_page: (%u, %u)\n",page_get_space_id(page), page_get_page_no(page));
 			ut_a(btr_page_get_prev(get_block->frame, mtr)
 			     == page_get_page_no(page));
 #endif /* UNIV_BTR_DEBUG */

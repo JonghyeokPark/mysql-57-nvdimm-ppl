@@ -1432,6 +1432,15 @@ func_exit:
 				mtr, page, index, type,
 				page_zip ? 1 : 0);
 
+		ulint		space;
+		ulint		offset;
+
+		space = mach_read_from_4(page + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
+		offset = mach_read_from_4(page + FIL_PAGE_OFFSET);
+		fprintf(stderr, "Reorganize: (%lu, %lu)\n", space, offset);
+		page_id_t page_id(space, offset);
+		nvdimm_ipl_add_split_merge_map(page_id);
+
 		/* For compressed pages write the compression level. */
 		if (log_ptr && page_zip) {
 			mach_write_to_1(log_ptr, z_level);
@@ -2642,6 +2651,7 @@ func_start:
 	btr_page_create(new_block, new_page_zip, cursor->index,
 			btr_page_get_level(page, mtr), mtr);
 #ifdef UNIV_NVDIMM_IPL
+	fprintf(stderr, "Split !\n");
 	nvdimm_ipl_add_split_merge_map(new_block->page.id);
 	nvdimm_ipl_add_split_merge_map(block->page.id);
 	// if (nvdimm_ipl_lookup(block->page.id)) {

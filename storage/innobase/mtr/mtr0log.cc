@@ -38,6 +38,7 @@ Created 12/7/1995 Heikki Tuuri
 #ifndef UNIV_HOTBACKUP
 # include "dict0boot.h"
 
+
 /********************************************************//**
 Catenates n bytes to the mtr log. */
 void
@@ -214,12 +215,19 @@ mlog_parse_nbytes(
 		break;
 	case MLOG_4BYTES:
 		if (page) {
+			fprintf(stderr, "Now Page: (%lu, %lu), offset: %lu, val: %lu, page_prev_page_no %lu\n", page_get_space_id(page), page_get_page_no(page), offset, val, fil_page_get_prev(page));
 			if (page_zip) {
+				fprintf(stderr, "Page_ZIP!!!\n");
 				mach_write_to_4
 					(((page_zip_des_t*) page_zip)->data
 					 + offset, val);
 			}
+			fprintf(stderr, "Not Page_ZIP!!!\n");
 			mach_write_to_4(page + offset, val);
+			fprintf(stderr, "Now Page: (%lu, %lu), offset: %lu, val: %lu, page_prev_page_no %lu\n", page_get_space_id(page), page_get_page_no(page), offset, val, fil_page_get_prev(page));
+		}
+		else{
+			fprintf(stderr, "Page is NULL!\n");
 		}
 		break;
 	default:
@@ -462,6 +470,7 @@ mlog_open_and_write_index(
 		}
 
 		log_start = log_ptr = mlog_open(mtr, alloc);
+		
 
 		if (!log_ptr) {
 			return(NULL); /* logging is disabled */
@@ -575,7 +584,7 @@ mlog_parse_index(
 	ind->table = table;
 	ind->n_uniq = (unsigned int) n_uniq;
 	if (n_uniq != n) {
-		ut_a(n_uniq + DATA_ROLL_PTR <= n);
+		ut_a(n_uniq + DATA_ROLL_PTR <= n); // open issue
 		ind->type = DICT_CLUSTERED;
 	}
 	if (comp) {
