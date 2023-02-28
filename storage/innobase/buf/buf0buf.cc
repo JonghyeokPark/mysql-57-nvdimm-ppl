@@ -3427,7 +3427,6 @@ buf_pool_watch_remove(
 #endif /* UNIV_DEBUG */
 
 	ut_ad(buf_pool_mutex_own(buf_pool));
-
 	HASH_DELETE(buf_page_t, hash, buf_pool->page_hash, watch->id.fold(),
 		    watch);
 	ut_d(watch->in_page_hash = FALSE);
@@ -4114,7 +4113,6 @@ loop:
 	hash_lock = buf_page_hash_lock_s_confirm(hash_lock, buf_pool, page_id);
 
 	if (block != NULL) {
-
 		/* If the guess is a compressed page descriptor that
 		has been allocated by buf_page_alloc_descriptor(),
 		it may have been freed by buf_relocate(). */
@@ -4136,11 +4134,15 @@ loop:
 	}
 
 	if (!block || buf_pool_watch_is_sentinel(buf_pool, &block->page)) {
+		if(block != NULL){
+		}
+		else{
+		}
 		rw_lock_s_unlock(hash_lock);
 		block = NULL;
 	}
-
 	if (block == NULL) {
+		
 		/* Page not in buf_pool: needs to be read from file */
 
 		if (mode == BUF_GET_IF_IN_POOL_OR_WATCH) {
@@ -4198,9 +4200,9 @@ loop:
 		}
 
 		if (buf_read_page(page_id, page_size)) {
+			
 			buf_read_ahead_random(page_id, page_size,
 					      ibuf_inside(mtr));
-
 			retries = 0;
 		} else if (retries < BUF_PAGE_READ_MAX_RETRIES) {
 			++retries;
@@ -4270,7 +4272,6 @@ got_block:
 			return(NULL);
 		}
 	}
-
 	switch (buf_block_get_state(fix_block)) {
 		buf_page_t*	bpage;
 
@@ -4424,14 +4425,6 @@ got_block:
 			bool	success = buf_zip_decompress(block, FALSE);
 			ut_a(success);
 		}
-
-#ifdef UNIV_NVDIMM_IPL
-			if (!access_time) {
-        if (nvdimm_ipl_lookup(page_id)) {
-          fprintf(stderr, " (2) this is IPL log apply!!!\n");
-        }
-			}
-#endif
 
 		if (!recv_no_ibuf_operations) {
 			if (access_time) {
@@ -5311,10 +5304,8 @@ buf_page_init_for_read(
 			ut_ad(buf_pool_watch_is_sentinel(buf_pool, watch_page));
 			buf_pool_watch_remove(buf_pool, watch_page);
 		}
-
 		HASH_INSERT(buf_page_t, hash, buf_pool->page_hash,
 			    bpage->id.fold(), bpage);
-
 		rw_lock_x_unlock(hash_lock);
 
 		/* The block must be put to the LRU list, to the old blocks.
@@ -5832,21 +5823,11 @@ corrupt:
 		    && !srv_is_tablespace_truncated(bpage->id.space())
 		    && fil_page_get_type(frame) == FIL_PAGE_INDEX
 		    && page_is_leaf(frame)) {
-
-#ifdef UNIV_NVDIMM_IPL
-				// (jhpark): check IPL log and apply it
-				if (nvdimm_ipl_lookup(bpage->id)) {
-					if (buf_page_is_accessed(bpage)) { 
-						ib::info() << "IPL apply accesstime: " << buf_page_is_accessed(bpage);
-					 	ib::info() << "we need to apply IPL log " << bpage->id.space() << ":" << bpage->id.page_no();
-						//nvdimm_ipl_merge(bpage->id, bpage);	
-					}
-				}
-#endif
 			ibuf_merge_or_delete_for_page(
 				(buf_block_t*) bpage, bpage->id,
 				&bpage->size, TRUE);
 		}
+
 	}
 
 	buf_pool_mutex_enter(buf_pool);

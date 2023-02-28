@@ -1095,16 +1095,15 @@ buf_flush_write_block_low(
 //block_flush
 #ifdef UNIV_NVDIMM_IPL
 
-	// fprintf(stderr, "[FLUSH] page: (%u, %u) is_ipl_split_merge: %d, look_up: %d \n", bpage->id.space(),bpage->id.page_no(),
-	// nvdimm_ipl_is_split_or_merge_page(bpage->id),nvdimm_ipl_lookup(bpage->id));
-	// fprintf(stderr, "Flush ");
-	// page_header_print(((buf_block_t*) bpage)->frame);
-	if (nvdimm_ipl_lookup(bpage->id)) {
-		fprintf(stderr, "[NVDIMM_BLOCK]ipl page: (%u, %u) bpage: %p\n", bpage->id.space(),
-			 bpage->id.page_no(), bpage);
+	
+	if (nvdimm_ipl_lookup(bpage->id) && !nvdimm_ipl_is_split_or_merge_page(bpage->id)) {
+		
 		if(fil_io(request,
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-		frame, bpage) == DB_SUCCESS){
+		frame, bpage) == DB_SUCCESS)
+		{
+			// fprintf(stderr, "[NVDIMM_BLOCK]ipl page: (%u, %u) frame: %p\n", bpage->id.space(),
+			//  bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 			buf_page_io_complete(bpage, sync);
 			buf_LRU_stat_inc_io();
 			return;

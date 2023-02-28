@@ -1437,7 +1437,6 @@ func_exit:
 
 		space = mach_read_from_4(page + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
 		offset = mach_read_from_4(page + FIL_PAGE_OFFSET);
-		fprintf(stderr, "Reorganize: (%lu, %lu)\n", space, offset);
 		page_id_t page_id(space, offset);
 		nvdimm_ipl_add_split_merge_map(page_id);
 
@@ -1672,8 +1671,7 @@ btr_root_raise_and_insert(
 
 	/* Copy the records from root to the new page one by one. */
 #ifdef UNIV_NVDIMM_IPL
-	fprintf(stderr, "btr_root_raise_and_insert: (%lu, %lu)\n", new_block->page.id.space(), new_block->page.id.page_no());
-	// nvdimm_ipl_add_split_merge_map(new_block->page.id);
+	nvdimm_ipl_add_split_merge_map(new_block->page.id);
 	// if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
 	// 	nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
 	// }
@@ -2651,7 +2649,6 @@ func_start:
 	btr_page_create(new_block, new_page_zip, cursor->index,
 			btr_page_get_level(page, mtr), mtr);
 #ifdef UNIV_NVDIMM_IPL
-	fprintf(stderr, "Split !\n");
 	nvdimm_ipl_add_split_merge_map(new_block->page.id);
 	nvdimm_ipl_add_split_merge_map(block->page.id);
 	// if (nvdimm_ipl_lookup(block->page.id)) {

@@ -38,12 +38,15 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 
 	std::map<page_id_t, uint64_t>::iterator it;
-	uint64_t ipl_start_offset = -1;
-	uint64_t offset = -1;
-
+	uint64_t ipl_start_offset = 0;
+	uint64_t offset = 0;
+	
+	unsigned long long int test_value = 32 * 1024 * 1024 * 1024;
+	fprintf(stderr, "test_value : %llu\n", test_value);
+	
 	if (nvdimm_offset >= (32*1024*1024*1024UL)) {
 		std::cerr << "we need more ... NVDIMMM region\n";
-		nvdimm_offset = 0;
+		exit(1);
 	}
 
 	it = ipl_map.find(page_id);
@@ -61,8 +64,9 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	offset = ipl_wp[page_id];
 
 	// step2. check capacity 
-	if (offset > IPL_LOG_REGION_SZ*0.8) {
-    	fprintf(stderr, "[IPL PAGE FULL] page: (%lu, %lu) offset : %lu\n", page_id.space(), page_id.page_no(), offset);
+	if (offset + len + sizeof(IPL_LOG_HDR) >= IPL_LOG_REGION_SZ) {
+    	fprintf(stderr, "Cannot Save the log, Add the Flush (%u, %u)\n", page_id.space(), page_id.page_no());
+		nvdimm_ipl_add_split_merge_map(page_id);
 		return false;
 	}
 
@@ -87,13 +91,8 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	// step5. update write pointer 
 	offset += len;	
 	ipl_wp[page_id] = offset;
-	
-	if (offset > IPL_LOG_REGION_SZ*0.8) {
-    	fprintf(stderr, "[IPL REGION FULL]");
-		return false;
-	}
 
-	fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu offset:%lu\n", page_id.space(), page_id.page_no(), type, len, ipl_wp[page_id]);
+	// fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu start_offset %lu wp:%lu\n", page_id.space(), page_id.page_no(), log_hdr.type, log_hdr.body_len, ipl_map[page_id], ipl_wp[page_id] );
   	mtr_commit(&temp_mtr);
 	return true;
 }
@@ -111,15 +110,16 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
 	byte * start_ptr = nvdimm_ptr + page_offset; 
 	byte * end_ptr = nvdimm_ptr + page_offset + write_pointer; // log
 
-	ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying start!";
+	// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying start!";
 	
   	while (start_ptr < end_ptr) {
 
 		// log_hdr를 가져와서 저장
 		IPL_LOG_HDR log_hdr;
 		memcpy(&log_hdr, start_ptr, sizeof(IPL_LOG_HDR));
+		flush_cache(&log_hdr, sizeof(IPL_LOG_HDR));
 		start_ptr += sizeof(IPL_LOG_HDR);
-		fprintf(stderr, "type: %u, len: %lu\n",log_hdr.type, log_hdr.body_len);
+		// fprintf(stderr, "(%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), log_hdr.type, log_hdr.body_len);
 
 		//log apply 진행 후, recovery 시작 위치 이동.
 		recv_parse_or_apply_log_rec_body(log_hdr.type, start_ptr, start_ptr + log_hdr.body_len, page_id.space(), page_id.page_no(), block, &temp_mtr);
@@ -127,8 +127,7 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
 	}
   	temp_mtr.discard_modifications();
 	mtr_commit(&temp_mtr);
-	ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying finish!";
-	nvdimm_ipl_erase(page_id);
+	// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying finish!";
 	return;
 }
 
@@ -163,7 +162,7 @@ bool nvdimm_ipl_lookup(page_id_t page_id) {
 
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 	//Function to page is splited or merge
-	ib::info() << "(" <<page_id.space() << ", " << page_id.page_no() << ")" << " Add split_merge_map!";
+	// ib::info() << "(" <<page_id.space() << ", " << page_id.page_no() << ")" << " Add split_merge_map!";
 	//is not in split merge map
 	if(split_merge_map.find(page_id) == split_merge_map.end()){
 		split_merge_map.insert(std::pair<page_id_t, bool>(page_id, true));
@@ -172,9 +171,6 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 		split_merge_map[page_id] = true;
 	}
 	//split merge page에 대한 ipl log제거
-	if(nvdimm_ipl_lookup(page_id)){
-		nvdimm_ipl_erase(page_id);
-	}
 	
 }
 
@@ -182,7 +178,7 @@ void nvdimm_ipl_remove_split_merge_map(page_id_t page_id){
 	//Function to page is splited or merge
 
 	//is not in split merge map
-	if(split_merge_map.find(page_id) == split_merge_map.end()){
+	if(split_merge_map.find(page_id) != split_merge_map.end()){
 		split_merge_map.erase(page_id);
 	}
 	if(nvdimm_ipl_lookup(page_id)){
@@ -196,6 +192,37 @@ bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
 	return split_merge_map[page_id]; 
 }
 
+void nvdimm_ipl_add_full_page_map(page_id_t page_id){
+	//Function to page is splited or merge
+	// ib::info() << "(" <<page_id.space() << ", " << page_id.page_no() << ")" << " Add split_merge_map!";
+	//is not in split merge map
+	if(full_page_map.find(page_id) == full_page_map.end()){
+		full_page_map.insert(std::pair<page_id_t, bool>(page_id, true));
+	}
+	else{
+		full_page_map[page_id] = true;
+	}
+	//split merge page에 대한 ipl log제거
+	
+}
+
+void nvdimm_ipl_remove_full_page_map(page_id_t page_id){
+	//Function to page is splited or merge
+
+	//is not in split merge map
+	if(full_page_map.find(page_id) == full_page_map.end()){
+		full_page_map.erase(page_id);
+	}
+	if(nvdimm_ipl_lookup(page_id)){
+		nvdimm_ipl_erase(page_id);
+	}
+}
+
+bool nvdimm_ipl_is_full_page_map(page_id_t page_id){
+
+	if(full_page_map.find(page_id) == full_page_map.end()) return false;
+	return full_page_map[page_id]; 
+}
 // bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page) {
 // 	// merge IPL log to buffer page
 // }

@@ -130,6 +130,12 @@ buf_read_page_low(
 	if(nvdimm_ipl_lookup(page_id)){
 		sync = true;
 	}
+	// if(buf_page_peek(page_id)){
+	// 	fprintf(stderr, "page is in hash (%u, %u)\n", page_id.space(), page_id.page_no());
+	// }
+	// else{
+	// 	fprintf(stderr, "Not in hash (%u, %u)\n", page_id.space(), page_id.page_no());
+	// }
 
 	if (page_id.space() == TRX_SYS_SPACE
 	    && buf_dblwr_page_inside(page_id.page_no())) {
@@ -230,22 +236,25 @@ buf_read_page_low(
 
 
 
-
 	// log_apply_function
 	// First, check the if log for the page is in the IPL.
 	// Second, apply the log record to the page.
 #ifdef UNIV_NVDIMM_IPL
-	// fprintf(stderr, "Read ");
 	// page_header_print(((buf_block_t*) bpage)->frame);
+	// if(buf_page_peek(page_id)){
+	// 	fprintf(stderr, "page is in hash (%u, %u)\n", page_id.space(), page_id.page_no());
+	// }
+	// else{
+	// 	fprintf(stderr, "Not in hash (%u, %u)\n", page_id.space(), page_id.page_no());
+	// }
 	if (nvdimm_ipl_lookup(page_id)){
 		//page를 완전히 가져오고 실행해보기
+		// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",page_id.space(), page_id.page_no(), bpage);
 		mtr_t temp_mtr;
 		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 		mtr_start(&temp_mtr);
-		if(buf_page_io_complete(bpage)){
-			fprintf(stderr, "Read bpage: (%lu, %lu) %p\n",page_id.space(), page_id.page_no(), bpage);
+		if(buf_page_io_complete(bpage, false)){
 			nvdimm_ipl_log_apply(page_id, (buf_block_t*) bpage);
-			nvdimm_ipl_add_split_merge_map(page_id);
 		}
 		else{
 			fprintf(stderr, "Page io not complete\n");

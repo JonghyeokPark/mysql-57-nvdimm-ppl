@@ -225,21 +225,11 @@ btr_page_set_prev(
 {
 	ut_ad(page != NULL);
 	ut_ad(mtr != NULL);
-	ulint	read_page_no;
-	ulint	read_space_id;
-	read_page_no = mach_read_from_4(page + FIL_PAGE_OFFSET);
-	read_space_id = mach_read_from_4(
-		page + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
 
-	fprintf(stderr, "Now Page: (%lu, %lu)\n", read_space_id, read_page_no);
-	fprintf(stderr, "Prev Page: (%lu, %lu)\n", read_space_id, prev);
-	
 	if (page_zip) {
-		fprintf(stderr, "Page_zip!!\n");
 		mach_write_to_4(page + FIL_PAGE_PREV, prev);
 		page_zip_write_header(page_zip, page + FIL_PAGE_PREV, 4, mtr);
 	} else {
-		fprintf(stderr, "Else!!!!\n");
 		mlog_write_ulint(page + FIL_PAGE_PREV, prev, MLOG_4BYTES, mtr);
 	}
 }

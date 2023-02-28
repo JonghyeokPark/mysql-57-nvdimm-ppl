@@ -1051,7 +1051,6 @@ buf_page_hash_get_low(
 #endif /* UNIV_DEBUG */
 
 	/* Look for the page in the hash table */
-
 	HASH_SEARCH(hash, buf_pool->page_hash, page_id.fold(), buf_page_t*,
 		    bpage,
 		    ut_ad(bpage->in_page_hash && !bpage->in_zip_hash

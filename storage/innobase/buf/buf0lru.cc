@@ -839,7 +839,6 @@ scan_again:
 		ut_ad(!bpage->in_flush_list);
 
 		/* Remove from the LRU list. */
-
 		if (buf_LRU_block_remove_hashed(bpage, true)) {
 			buf_LRU_block_free_hashed_page((buf_block_t*) bpage);
 		} else {
@@ -2108,8 +2107,6 @@ buf_LRU_block_free_non_file_page(
 {
 	void*		data;
 	buf_pool_t*	buf_pool = buf_pool_from_block(block);
-
-	ut_ad(buf_pool_mutex_own(buf_pool));
 	ut_ad(buf_page_mutex_own(block));
 
 	switch (buf_block_get_state(block)) {
@@ -2124,6 +2121,7 @@ buf_LRU_block_free_non_file_page(
 	ut_ad(!block->page.in_free_list);
 	ut_ad(!block->page.in_flush_list);
 	ut_ad(!block->page.in_LRU_list);
+	
 
 	buf_block_set_state(block, BUF_BLOCK_NOT_USED);
 
@@ -2318,7 +2316,7 @@ buf_LRU_block_remove_hashed(
 	ut_ad(!bpage->in_zip_hash);
 	ut_ad(bpage->in_page_hash);
 	ut_d(bpage->in_page_hash = FALSE);
-
+	ut_ad(buf_pool_mutex_own(buf_pool));
 	HASH_DELETE(buf_page_t, hash, buf_pool->page_hash, bpage->id.fold(),
 		    bpage);
 
@@ -2455,7 +2453,6 @@ buf_LRU_free_one_page(
 
 	rw_lock_x_lock(hash_lock);
 	mutex_enter(block_mutex);
-
 	if (buf_LRU_block_remove_hashed(bpage, true)) {
 		buf_LRU_block_free_hashed_page((buf_block_t*) bpage);
 	}

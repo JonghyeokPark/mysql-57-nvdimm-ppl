@@ -96,9 +96,9 @@ struct comp
 extern std::map<page_id_t, uint64_t, comp> ipl_map; // (page_id , offset in NVDIMM IPL regions)
 extern std::map<page_id_t, uint64_t, comp> ipl_wp; // (page_id , write pointer per-page)
 extern std::map<page_id_t, bool, comp> split_merge_map;
-
+extern std::map<page_id_t, bool, comp> full_page_map;
 // global offset which manages overall NVDIMM region
-#define IPL_LOG_REGION_SZ	(1024*128) // 128KB로 변경, 많은 page가 생성.
+#define IPL_LOG_REGION_SZ	(1024*32) // 128KB로 변경, 많은 page가 생성.
 
 extern uint64_t nvdimm_offset;
 
@@ -118,6 +118,11 @@ bool nvdimm_ipl_lookup(page_id_t page_id);
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id);
 void nvdimm_ipl_remove_split_merge_map(page_id_t page_id);
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
+
+void nvdimm_ipl_add_full_page_map(page_id_t page_id);
+void nvdimm_ipl_remove_full_page_map(page_id_t page_id);
+bool nvdimm_ipl_is_full_page_map(page_id_t page_id);
+
 
 #ifdef UNIV_NVDIMM_IPL
 unsigned char* 

@@ -905,39 +905,31 @@ buf_dblwr_write_block_to_datafile(
 	if (sync) {
 		type |= IORequest::DO_NOT_WAKE;
 	}
+	IORequest	request(type);
 
-	//block_flush
-	#ifdef UNIV_NVDIMM_IPL
-		if (nvdimm_ipl_lookup(bpage->id)) {
-			return; // ipl log가 존재하는 경유, flush flag를 끄기.
-		} 
-	#else
-		IORequest	request(type);
+	if (bpage->zip.data != NULL) {
+		ut_ad(bpage->size.is_compressed());
 
-		if (bpage->zip.data != NULL) {
-			ut_ad(bpage->size.is_compressed());
+		fil_io(request, sync, bpage->id, bpage->size, 0,
+			bpage->size.physical(),
+			(void*) bpage->zip.data,
+			(void*) bpage);
+	} else {
+		ut_ad(!bpage->size.is_compressed());
 
-			fil_io(request, sync, bpage->id, bpage->size, 0,
-				bpage->size.physical(),
-				(void*) bpage->zip.data,
-				(void*) bpage);
-		} else {
-			ut_ad(!bpage->size.is_compressed());
+		/* Our IO API is common for both reads and writes and is
+		therefore geared towards a non-const parameter. */
 
-			/* Our IO API is common for both reads and writes and is
-			therefore geared towards a non-const parameter. */
+		buf_block_t*	block = reinterpret_cast<buf_block_t*>(
+			const_cast<buf_page_t*>(bpage));
 
-			buf_block_t*	block = reinterpret_cast<buf_block_t*>(
-				const_cast<buf_page_t*>(bpage));
+		ut_a(buf_block_get_state(block) == BUF_BLOCK_FILE_PAGE);
+		buf_dblwr_check_page_lsn(block->frame);
 
-			ut_a(buf_block_get_state(block) == BUF_BLOCK_FILE_PAGE);
-			buf_dblwr_check_page_lsn(block->frame);
-
-			fil_io(request,
-				sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-				block->frame, block);
-		}
-	#endif
+		fil_io(request,
+			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+			block->frame, block);
+	}
 }
 
 /********************************************************************//**

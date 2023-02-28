@@ -512,7 +512,6 @@ recv_parse_log_rec(
 	new_ptr = mlog_parse_initial_log_record(ptr, end_ptr, type, space,
 						page_no);
 	*body = new_ptr;
-	fprintf(stderr, "type: %d, page: (%lu, %lu)\n", *type, *space, *page_no);
 
 	if (UNIV_UNLIKELY(!new_ptr)) {
 		return(0);
@@ -694,7 +693,6 @@ mtr_t::commit_checkpoint(
 	}
 
 	Command	cmd(this);
-	fprintf(stderr, "Commit checkpoint!\n");
 	cmd.finish_write(m_impl.m_log.size());
 	cmd.release_resources();
 
@@ -912,19 +910,19 @@ add_log_to_ipl(
 	// 	default:
 	// 		break;
 	// }
-	fprintf(stderr, "page: (%u, %u)\n"
-			"is_system_or_undo_tablespace : %d\n"
-			"nvdimm_ipl_is_split_or_merge_page: %d\n"
-			"page_is_leaf : %d\n"
-			"buf_page_in_file: %d\n",
-			space, page_no,
-			is_system_or_undo_tablespace(space),
-			nvdimm_ipl_is_split_or_merge_page(page_id),
-			page_is_leaf(buf_block->frame),
-			buf_page_in_file(buf_page));
+	// fprintf(stderr, "page: (%u, %u)\n"
+	// 		"is_system_or_undo_tablespace : %d\n"
+	// 		"nvdimm_ipl_is_split_or_merge_page: %d\n"
+	// 		"page_is_leaf : %d\n"
+	// 		"buf_page_in_file: %d\n",
+	// 		space, page_no,
+	// 		is_system_or_undo_tablespace(space),
+	// 		nvdimm_ipl_is_split_or_merge_page(page_id),
+	// 		page_is_leaf(buf_block->frame),
+	// 		buf_page_in_file(buf_page));
 
 	if(!is_system_or_undo_tablespace(space) && !nvdimm_ipl_is_split_or_merge_page(page_id)
-		&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page)){
+		&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
 		if(!nvdimm_ipl_add(page_id, body, len, type)){
 			// fprintf(stderr, "Do not save the log (%lu, %lu)\n", space, page_no);
 		}
@@ -974,7 +972,7 @@ loop:
 	if(single_rec){
 		len = recv_parse_log_rec(&type, ptr, end_ptr, &space,
 					 &page_no, true, &body);
-		fprintf(stderr, "[single record for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
+		// fprintf(stderr, "[single record for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
 		if (len == 0) {
 			return(false);
 		}
@@ -1026,7 +1024,7 @@ loop:
 		
 		for(;;){
 			len = recv_parse_log_rec(&type, ptr, end_ptr, &space, &page_no, false, &body);
-			fprintf(stderr, "[second for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
+			// fprintf(stderr, "[second for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
 
 			if (len == 0) { //corrput log인 경우는 베재해서 이 코드 작성
 				return(false);
@@ -1149,17 +1147,25 @@ mtr_t::Command::finish_write(
 	ut_ad(m_impl->m_log.size() == len);
 	ut_ad(len > 0);
 
-	// if (m_impl->m_log.is_small()) {
-	// 	const mtr_buf_t::block_t*	front = m_impl->m_log.front();
-	// 	ut_ad(len <= front->used());
+	#ifdef UNIV_NVDIMM_IPL
+		test_type test;
+		test.init(m_impl->m_log.size());
+		m_impl->m_log.for_each_block(test);
+		my_recv_parse_log_recs(test.buffer, test.log_size);
+		test.free_mem();
+	#endif
 
-	// 	m_end_lsn = log_reserve_and_write_fast(
-	// 		front->begin(), len, &m_start_lsn);
+	if (m_impl->m_log.is_small()) {
+		const mtr_buf_t::block_t*	front = m_impl->m_log.front();
+		ut_ad(len <= front->used());
 
-	// 	if (m_end_lsn > 0) {
-	// 		return;
-	// 	}
-	// }
+		m_end_lsn = log_reserve_and_write_fast(
+			front->begin(), len, &m_start_lsn);
+
+		if (m_end_lsn > 0) {
+			return;
+		}
+	}
 
 	/* Open the database log for log_write_low */
 	m_start_lsn = log_reserve_and_open(len);
@@ -1169,13 +1175,7 @@ mtr_t::Command::finish_write(
 
 	// sequential m_log를 전부 저장할 buffer를 할당
 	// sequential m_log를 parsing.
-	#ifdef UNIV_NVDIMM_IPL
-		test_type test;
-		test.init(m_impl->m_log.size());
-		m_impl->m_log.for_each_block(test);
-		my_recv_parse_log_recs(test.buffer, test.log_size);
-		test.free_mem();
-	#endif
+	
 	
 	m_end_lsn = log_close();
 }

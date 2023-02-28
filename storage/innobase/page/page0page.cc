@@ -252,7 +252,6 @@ page_mem_alloc_heap(
 
 	if (avl_space >= need) {
 		block = page_header_get_ptr(page, PAGE_HEAP_TOP);
-		fprintf(stderr, "page_mem_alloc_heap 1\n");
 		page_header_set_ptr(page, page_zip, PAGE_HEAP_TOP,
 				    block + need);
 		*heap_no = page_dir_get_n_heap(page);
@@ -1052,7 +1051,6 @@ delete_all:
 
 	/* Reset the last insert info in the page header and increment
 	the modify clock for the frame */
-	fprintf(stderr, "page_delete_rec_list_end 1\n");
 	page_header_set_ptr(page, page_zip, PAGE_LAST_INSERT, NULL);
 
 	/* The page gets invalid for optimistic searches: increment the
@@ -1175,12 +1173,9 @@ delete_all:
 	/* Catenate the deleted chain segment to the page free list */
 
 	page_rec_set_next(last_rec, page_header_get_ptr(page, PAGE_FREE));
-	fprintf(stderr, "page_delete_rec_list_end 2\n");
 	page_header_set_ptr(page, NULL, PAGE_FREE, rec);
-	fprintf(stderr, "page_delete_rec_list_end 3\n");
 	page_header_set_field(page, NULL, PAGE_GARBAGE, size
 			      + page_header_get_field(page, PAGE_GARBAGE));
-	fprintf(stderr, "page_delete_rec_list_end 4\n");
 	page_header_set_field(page, NULL, PAGE_N_RECS,
 			      (ulint)(page_get_n_recs(page) - n_recs));
 }
@@ -1401,7 +1396,6 @@ page_dir_delete_slot(
 	mach_write_to_2(page_dir_get_nth_slot(page, n_slots - 1), 0);
 
 	/* 5. Update the page header */
-	fprintf(stderr, "page_dir_delete_slot 1\n");
 	page_header_set_field(page, page_zip, PAGE_N_DIR_SLOTS, n_slots - 1);
 }
 
