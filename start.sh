@@ -10,7 +10,7 @@ bld_path=/home/vldb/mysql-57-nvdimm-ipl/bld
 third_setting=/home/vldb/4kb_10ware
 
 cd $test_data_path && rm -rf *
-# cd $third_setting && cp -r  * $test_data_path
+cd $third_setting && cp -r  * $test_data_path
 cd $test_log_path && rm -f *
 cd $nvdimm_file_path && rm -f * 
 cd $bld_path && ./bin/mysqld_safe --defaults-file=/home/vldb/mysql-57-nvdimm-ipl/my.cnf

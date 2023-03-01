@@ -15,10 +15,9 @@
 #include <unistd.h>
 #include <cassert>
 #include <iostream>
-#include <map>
+#include <tr1/unordered_map>
 
 #include "buf0buf.h" 
-using namespace std;
 
 // TDOO(jhpark): make this variable configurable
 #define NVDIMM_MAP_SIZE	ULONG_MAX;
@@ -102,7 +101,7 @@ typedef struct IPL_INFO
   bool have_to_flush;
 }ipl_info;
 
-extern map<page_id_t, ipl_info, comp> ipl_map; // (page_id , offset in NVDIMM IPL regions)
+extern std::tr1::unordered_map<ulint, ipl_info> ipl_map; // (page_id , offset in NVDIMM IPL regions)
 // global offset which manages overall NVDIMM region
 #define IPL_LOG_REGION_SZ	(1024*8) // 128KB로 변경, 많은 page가 생성.
 
@@ -120,14 +119,12 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block);
 void nvdimm_ipl_erase(page_id_t page_id);
 //bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
+void insert_new_ipl_info(page_id_t page_id);
 bool nvdimm_ipl_lookup(page_id_t page_id);
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id);
 void nvdimm_ipl_remove_split_merge_map(page_id_t page_id);
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 
-void nvdimm_ipl_add_full_page_map(page_id_t page_id);
-void nvdimm_ipl_remove_full_page_map(page_id_t page_id);
-bool nvdimm_ipl_is_full_page_map(page_id_t page_id);
 
 
 #ifdef UNIV_NVDIMM_IPL

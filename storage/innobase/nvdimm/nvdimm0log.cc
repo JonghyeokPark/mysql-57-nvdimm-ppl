@@ -23,16 +23,13 @@
 #include "nvdimm-ipl.h"
 #include "mtr0log.h"
 #include "page0page.h"
-#include <map>
-
-using namespace std;
 
 void insert_new_ipl_info(page_id_t page_id){
 	ipl_info new_ipl_info;
 	new_ipl_info.ipl_start_offset = nvdimm_offset;
 	new_ipl_info.ipl_write_pointer = 0;
 	new_ipl_info.have_to_flush = false;
-	ipl_map.insert(make_pair(page_id, new_ipl_info));
+	ipl_map.insert(std::make_pair(page_id.fold(), new_ipl_info));
 }
 
 void nvdimm_ipl_initialize() {
@@ -54,7 +51,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 	
-	map<page_id_t, ipl_info>::iterator it = ipl_map.find(page_id);
+	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
 	uint64_t ipl_start_offset = 0;
 	uint64_t ipl_write_pointer = 0;
 
@@ -98,7 +95,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	ipl_write_pointer += len;
 
 	//IPL write pointer 업데이트
-	it = ipl_map.find(page_id);
+	it = ipl_map.find(page_id.fold());
 	it->second.ipl_write_pointer = ipl_write_pointer;
 
 	// fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu start_offset %lu wp:%lu\n", page_id.space(), page_id.page_no(), log_hdr.type, log_hdr.body_len, ipl_map[page_id], ipl_wp[page_id] );
@@ -114,7 +111,7 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
 
 	// step1. read current IPL log using page_id
 
-	map<page_id_t, ipl_info>::iterator it = ipl_map.find(page_id);
+	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
 
 	uint64_t ipl_start_offset = it->second.ipl_start_offset;
 	uint64_t write_pointer = it->second.ipl_write_pointer;
@@ -147,7 +144,7 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
 void nvdimm_ipl_erase(page_id_t page_id) { // 굳이 page가 들어갈 필요는 없음.
 	// When the page is flushed, we need to delete IPL log from NVDIMM
 	// step1. read current IPL log using page_id
-	map<page_id_t, ipl_info>::iterator it = ipl_map.find(page_id);
+	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
 	uint64_t ipl_start_offset = it->second.ipl_start_offset;
 	
 	// step2. delete IPL Logs 
@@ -164,7 +161,7 @@ void nvdimm_ipl_erase(page_id_t page_id) { // 굳이 page가 들어갈 필요는
 bool nvdimm_ipl_lookup(page_id_t page_id) {
 	// return true, 
 	// if page exists in IPL region and IPL log is written
-	map<page_id_t, ipl_info>::iterator it = ipl_map.find(page_id);
+	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
 	if(it == ipl_map.end() || it->second.ipl_write_pointer == 0){
 		return false;
 	}
@@ -175,7 +172,7 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 	//Function to page is splited or merge
 	// ib::info() << "(" <<page_id.space() << ", " << page_id.page_no() << ")" << " Add split_merge_map!";
 	//is not in split merge map
-	map<page_id_t, ipl_info>::iterator it = ipl_map.find(page_id);
+	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
 
 	if(it != ipl_map.end()){
 		it->second.have_to_flush = true;
@@ -191,7 +188,7 @@ void nvdimm_ipl_remove_split_merge_map(page_id_t page_id){
 }
 
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
-	map<page_id_t, ipl_info>::iterator it = ipl_map.find(page_id);
+	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
 
 	if(it == ipl_map.end()) return false;
 	return it->second.have_to_flush; 

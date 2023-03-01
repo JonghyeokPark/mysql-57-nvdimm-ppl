@@ -10,7 +10,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stddef.h>
-#include <map>
+
+std::tr1::unordered_map<ulint, ipl_info> ipl_map;
 
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
