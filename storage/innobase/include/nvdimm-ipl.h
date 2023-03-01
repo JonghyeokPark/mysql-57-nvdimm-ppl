@@ -15,12 +15,13 @@
 #include <unistd.h>
 #include <cassert>
 #include <iostream>
-
 #include <map>
+
 #include "buf0buf.h" 
+using namespace std;
 
 // TDOO(jhpark): make this variable configurable
-#define NVDIMM_MAP_SIZE	(32*1024*1024*1024UL)
+#define NVDIMM_MAP_SIZE	ULONG_MAX;
 
 #define NVDIMM_MMAP_FILE_NAME         			"nvdimm_mmap_file"
 #define NVDIMM_MMAP_MAX_FILE_NAME_LENGTH    10000
@@ -93,12 +94,17 @@ struct comp
         return l.space() < r.space();
     }
 };
-extern std::map<page_id_t, uint64_t, comp> ipl_map; // (page_id , offset in NVDIMM IPL regions)
-extern std::map<page_id_t, uint64_t, comp> ipl_wp; // (page_id , write pointer per-page)
-extern std::map<page_id_t, bool, comp> split_merge_map;
-extern std::map<page_id_t, bool, comp> full_page_map;
+
+typedef struct IPL_INFO
+{
+  uint64_t ipl_start_offset;
+  uint64_t ipl_write_pointer;
+  bool have_to_flush;
+}ipl_info;
+
+extern map<page_id_t, ipl_info, comp> ipl_map; // (page_id , offset in NVDIMM IPL regions)
 // global offset which manages overall NVDIMM region
-#define IPL_LOG_REGION_SZ	(1024*32) // 128KB로 변경, 많은 page가 생성.
+#define IPL_LOG_REGION_SZ	(1024*8) // 128KB로 변경, 많은 page가 생성.
 
 extern uint64_t nvdimm_offset;
 
