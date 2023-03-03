@@ -16,7 +16,6 @@ std::tr1::unordered_map<ulint, ipl_info> ipl_map;
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
 uint64_t nvdimm_offset = 0;
-
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -52,7 +51,6 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
   NVDIMM_INFO_PRINT("Current kernel does not recognize NVDIMM as the persistenct memory \n \
       We force to set the environment variable PMEM_IS_PMEM_FORCE \n \
       We call mync() instead of mfense()\n");
-
 	// (jhpark): actually, nvdimm_ptr is extern variable ... 
   return nvdimm_ptr;
 }

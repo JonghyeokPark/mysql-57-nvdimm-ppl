@@ -103,10 +103,9 @@ typedef struct IPL_INFO
 
 extern std::tr1::unordered_map<ulint, ipl_info> ipl_map; // (page_id , offset in NVDIMM IPL regions)
 // global offset which manages overall NVDIMM region
-#define IPL_LOG_REGION_SZ	(1024*8) // 128KB로 변경, 많은 page가 생성.
+#define IPL_LOG_REGION_SZ	(1024UL*8UL) // 128KB로 변경, 많은 page가 생성.
 
 extern uint64_t nvdimm_offset;
-
 // log header
 typedef struct ipl_log_header {
   ulint body_len; //log를 적용할 len

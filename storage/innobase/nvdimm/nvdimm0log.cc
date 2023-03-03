@@ -55,7 +55,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	uint64_t ipl_start_offset = 0;
 	uint64_t ipl_write_pointer = 0;
 
-
+//수정좀 해보기.
 	if (it == ipl_map.end()) {
 		// - First write
 		insert_new_ipl_info(page_id);
@@ -153,6 +153,7 @@ void nvdimm_ipl_erase(page_id_t page_id) { // 굳이 page가 들어갈 필요는
 	memset(ptr, 0x00, IPL_LOG_REGION_SZ);
 	flush_cache(ptr, IPL_LOG_REGION_SZ);
 	it->second.ipl_write_pointer = 0;
+	it->second.have_to_flush=false;
 	// ib::info() << page_id.space() << ":" << page_id.page_no()  << " IPL delete finish!";
 
 	return;
