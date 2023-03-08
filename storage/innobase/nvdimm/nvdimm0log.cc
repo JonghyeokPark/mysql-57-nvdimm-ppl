@@ -24,54 +24,55 @@
 #include "mtr0log.h"
 #include "page0page.h"
 
-void insert_new_ipl_info(page_id_t page_id){
-	ipl_info new_ipl_info;
-	new_ipl_info.ipl_start_offset = nvdimm_offset;
-	new_ipl_info.ipl_write_pointer = 0;
-	new_ipl_info.have_to_flush = false;
+
+void alloc_new_ipl_info(page_id_t page_id){
+	//Check nvdimm region is full.
+	ut_ad(nvdimm_info->nvdimm_offset < ULONG_MAX);
+	ipl_info * new_ipl_info = static_cast<ipl_info *>(ut_zalloc_nokey(sizeof(ipl_info)));
+	new_ipl_info->ipl_start_offset = nvdimm_info->nvdimm_offset;
+	new_ipl_info->ipl_write_pointer = 0;
+	new_ipl_info->have_to_flush = false;
+	mutex_create(LATCH_ID_IPL_PER_PAGE, &new_ipl_info->ipl_per_page_mutex);
+	mutex_enter(&new_ipl_info->ipl_per_page_mutex);
 	ipl_map.insert(std::make_pair(page_id.fold(), new_ipl_info));
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
 }
 
-void nvdimm_ipl_initialize() {
-	// TODO(jhpark): initialize IPL-related data structures 
-	// For now, we use static allocation scheme.
-	// We will support dynamic mapping for IPL region
-	NVDIMM_INFO_PRINT("NVDIMM IPL Region Initialization!\n");
-}
 
 bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog_id_t type) {
 	// step1. get offset in NVDIMM IPL region from ipl_map table
-
-	if (nvdimm_offset >= ULONG_MAX) {
-		std::cerr << "we need more ... NVDIMMM region\n";
-		exit(1);
-	}
-
 	mtr_t temp_mtr;
-	mtr_start(&temp_mtr);
-	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-	
-	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
+	std::tr1::unordered_map<ulint, ipl_info * >::iterator it;
 	uint64_t ipl_start_offset = 0;
 	uint64_t ipl_write_pointer = 0;
+	IPL_LOG_HDR log_hdr;
 
-//수정좀 해보기.
+	mtr_start(&temp_mtr);
+	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+	mutex_enter(&nvdimm_info->ipl_map_mutex);
+	it = ipl_map.find(page_id.fold());
+	
+	//if first write, alloc the new ipl info
 	if (it == ipl_map.end()) {
-		// - First write
-		insert_new_ipl_info(page_id);
-		ipl_start_offset = nvdimm_offset;
-		nvdimm_offset += IPL_LOG_REGION_SZ;
+		mutex_enter(&nvdimm_info->nvdimm_offset_mutex);
+		alloc_new_ipl_info(page_id);
+		ipl_start_offset = nvdimm_info->nvdimm_offset;
 		ipl_write_pointer = 0;
-	} else {
-		ipl_start_offset = it->second.ipl_start_offset;
-		ipl_write_pointer = it->second.ipl_write_pointer;
+		nvdimm_info->nvdimm_offset += IPL_LOG_REGION_SZ;
+		mutex_exit(&nvdimm_info->nvdimm_offset_mutex);
 	}
-
+	else{
+		mutex_exit(&nvdimm_info->ipl_map_mutex);
+		mutex_enter(&it->second->ipl_per_page_mutex);
+		ipl_start_offset = it->second->ipl_start_offset;
+		ipl_write_pointer = it->second->ipl_write_pointer;
+	}
 
 	// step2. check capacity 
 	if (ipl_write_pointer + len + sizeof(IPL_LOG_HDR) >= IPL_LOG_REGION_SZ) {
-    	fprintf(stderr, "Cannot Save the log, Add the Flush (%u, %u)\n", page_id.space(), page_id.page_no());
-		nvdimm_ipl_add_split_merge_map(page_id);
+    	// fprintf(stderr, "Cannot Save the log, Add the Flush (%u, %u)\n", page_id.space(), page_id.page_no());
+		it->second->have_to_flush = true;
+		mutex_exit(&it->second->ipl_per_page_mutex);
 		return false;
 	}
 
@@ -79,7 +80,6 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	// To recovery the page, we need (type, ptr, end_ptr)
 	// look up the log0recv.cc: recv_parse_or_apply_log_rec_body()
 	// page별로, sequential하게 log 저장 (hdr, body) : (hdr, body) ...
-	IPL_LOG_HDR log_hdr;
   	log_hdr.body_len = len;
   	log_hdr.type = type;
 
@@ -95,34 +95,38 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	ipl_write_pointer += len;
 
 	//IPL write pointer 업데이트
+	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	it = ipl_map.find(page_id.fold());
-	it->second.ipl_write_pointer = ipl_write_pointer;
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
+	it->second->ipl_write_pointer = ipl_write_pointer;
 
-	// fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu start_offset %lu wp:%lu\n", page_id.space(), page_id.page_no(), log_hdr.type, log_hdr.body_len, ipl_map[page_id], ipl_wp[page_id] );
+	// fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu start_offset %lu wp:%lu\n", page_id.space(), page_id.page_no(), log_hdr.type, log_hdr.body_len, ipl_start_offset, ipl_write_pointer);
+	mutex_exit(&it->second->ipl_per_page_mutex);
   	mtr_commit(&temp_mtr);
 	return true;
 }
 
 void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
+	// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying start!";
 
 	mtr_t temp_mtr;
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+	buf_page_mutex_enter(block);
 
 	// step1. read current IPL log using page_id
+	mutex_enter(&nvdimm_info->ipl_map_mutex);
+	std::tr1::unordered_map<ulint, ipl_info *>::iterator it = ipl_map.find(page_id.fold());
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
 
-	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
-
-	uint64_t ipl_start_offset = it->second.ipl_start_offset;
-	uint64_t write_pointer = it->second.ipl_write_pointer;
-
+	mutex_enter(&it->second->ipl_per_page_mutex);
+	uint64_t ipl_start_offset = it->second->ipl_start_offset;
+	uint64_t write_pointer = it->second->ipl_write_pointer;
 	byte * start_ptr = nvdimm_ptr + ipl_start_offset; 
 	byte * end_ptr = nvdimm_ptr + ipl_start_offset + write_pointer; // log
+	mutex_exit(&it->second->ipl_per_page_mutex);
 
-	// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying start!";
-	
   	while (start_ptr < end_ptr) {
-
 		// log_hdr를 가져와서 저장
 		IPL_LOG_HDR log_hdr;
 		memcpy(&log_hdr, start_ptr, sizeof(IPL_LOG_HDR));
@@ -135,64 +139,72 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
 		start_ptr += log_hdr.body_len;
 	}
   	temp_mtr.discard_modifications();
+	
+	buf_page_mutex_exit(block);
 	mtr_commit(&temp_mtr);
 	// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying finish!";
 	return;
 }
 
 
-void nvdimm_ipl_erase(page_id_t page_id) { // 굳이 page가 들어갈 필요는 없음.
-	// When the page is flushed, we need to delete IPL log from NVDIMM
-	// step1. read current IPL log using page_id
-	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
-	uint64_t ipl_start_offset = it->second.ipl_start_offset;
-	
-	// step2. delete IPL Logs 
-	unsigned char* ptr = nvdimm_ptr + ipl_start_offset;
-	// ib::info() << page_id.space() << ":" << page_id.page_no()  << " IPL delete start!";
-	memset(ptr, 0x00, IPL_LOG_REGION_SZ);
-	flush_cache(ptr, IPL_LOG_REGION_SZ);
-	it->second.ipl_write_pointer = 0;
-	it->second.have_to_flush=false;
-	// ib::info() << page_id.space() << ":" << page_id.page_no()  << " IPL delete finish!";
-
-	return;
-}
-
 bool nvdimm_ipl_lookup(page_id_t page_id) {
 	// return true, 
 	// if page exists in IPL region and IPL log is written
-	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
-	if(it == ipl_map.end() || it->second.ipl_write_pointer == 0){
+	mutex_enter(&nvdimm_info->ipl_map_mutex);
+	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(page_id.fold());
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
+	if(it == ipl_map.end()){
 		return false;
 	}
+	else {
+		mutex_enter(&it->second->ipl_per_page_mutex);
+		if(it->second->ipl_write_pointer == 0){
+			mutex_exit(&it->second->ipl_per_page_mutex);
+			return false;
+		}
+	}
+	mutex_exit(&it->second->ipl_per_page_mutex);
 	return true;
 }
 
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
-	//Function to page is splited or merge
-	// ib::info() << "(" <<page_id.space() << ", " << page_id.page_no() << ")" << " Add split_merge_map!";
-	//is not in split merge map
-	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
-
+	mutex_enter(&nvdimm_info->ipl_map_mutex);
+	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(page_id.fold());
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
 	if(it != ipl_map.end()){
-		it->second.have_to_flush = true;
+		mutex_enter(&it->second->ipl_per_page_mutex);
+		it->second->have_to_flush = true;
+		mutex_exit(&it->second->ipl_per_page_mutex);
 	}
 	
 }
 
 void nvdimm_ipl_remove_split_merge_map(page_id_t page_id){
-	//Function to page is splited or merge
-	if(nvdimm_ipl_lookup(page_id)){
-		nvdimm_ipl_erase(page_id);
+	mutex_enter(&nvdimm_info->ipl_map_mutex);
+	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(page_id.fold());
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
+	if(it != ipl_map.end()){
+		mutex_enter(&it->second->ipl_per_page_mutex);
+		unsigned char* ptr = nvdimm_ptr + it->second->ipl_start_offset;
+		memset(ptr, 0x00, IPL_LOG_REGION_SZ);
+		flush_cache(ptr, IPL_LOG_REGION_SZ);
+		it->second->ipl_write_pointer = 0;
+		it->second->have_to_flush=false;
+		mutex_exit(&it->second->ipl_per_page_mutex);
 	}
 }
 
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
-	std::tr1::unordered_map<ulint, ipl_info>::iterator it = ipl_map.find(page_id.fold());
-
-	if(it == ipl_map.end()) return false;
-	return it->second.have_to_flush; 
+	mutex_enter(&nvdimm_info->ipl_map_mutex);
+	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(page_id.fold());
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
+	if(it == ipl_map.end()) {
+		return false;
+	}
+	mutex_enter(&it->second->ipl_per_page_mutex);
+	bool return_value = it->second->have_to_flush;
+	mutex_exit(&it->second->ipl_per_page_mutex);
+	return return_value;
 }
 
 

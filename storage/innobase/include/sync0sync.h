@@ -88,6 +88,8 @@ extern mysql_pfs_key_t	rtr_ssn_mutex_key;
 extern mysql_pfs_key_t	redo_rseg_mutex_key;
 extern mysql_pfs_key_t	noredo_rseg_mutex_key;
 extern mysql_pfs_key_t page_zip_stat_per_index_mutex_key;
+extern mysql_pfs_key_t nvdimm_offset_mutex_key;
+extern mysql_pfs_key_t ipl_map_mutex_key;
 # ifdef UNIV_DEBUG
 extern mysql_pfs_key_t	rw_lock_debug_mutex_key;
 # endif /* UNIV_DEBUG */

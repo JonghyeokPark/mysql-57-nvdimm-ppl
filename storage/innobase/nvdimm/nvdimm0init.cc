@@ -11,11 +11,11 @@
 #include <errno.h>
 #include <stddef.h>
 
-std::tr1::unordered_map<ulint, ipl_info> ipl_map;
+std::tr1::unordered_map<ulint, ipl_info * > ipl_map;
 
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
-uint64_t nvdimm_offset = 0;
+nvdimm_system * nvdimm_info = NULL;
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -23,6 +23,7 @@ uint64_t nvdimm_offset = 0;
 @param[in] pool_size 	mmaped file size
 @return true if mmaped file creation / initilzation is failed
 */
+
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size) {
  
 	// (jhpark): check mmaped file existence
@@ -51,7 +52,12 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
   NVDIMM_INFO_PRINT("Current kernel does not recognize NVDIMM as the persistenct memory \n \
       We force to set the environment variable PMEM_IS_PMEM_FORCE \n \
       We call mync() instead of mfense()\n");
-	// (jhpark): actually, nvdimm_ptr is extern variable ... 
+
+  /*Make NVDIMM structure*/
+  nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
+  mutex_create(LATCH_ID_NVDIMM_OFFSET, &nvdimm_info->nvdimm_offset_mutex);
+  mutex_create(LATCH_ID_IPL_MAP_MUTEX, &nvdimm_info->ipl_map_mutex);
+
   return nvdimm_ptr;
 }
 

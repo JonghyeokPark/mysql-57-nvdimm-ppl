@@ -1419,6 +1419,12 @@ sync_latch_meta_init()
 
 	LATCH_ADD_MUTEX(NOREDO_RSEG, SYNC_NOREDO_RSEG, noredo_rseg_mutex_key);
 
+	LATCH_ADD_MUTEX(NVDIMM_OFFSET, SYNC_NVDIMM_OFFSET, nvdimm_offset_mutex_key);
+
+	LATCH_ADD_MUTEX(IPL_PER_PAGE, SYNC_IPL_PER_PAGE, PFS_NOT_INSTRUMENTED);
+
+	LATCH_ADD_MUTEX(IPL_MAP_MUTEX, SYNC_IPL_MAP_MUTEX, ipl_map_mutex_key);
+
 #ifdef UNIV_DEBUG
 	/* Mutex names starting with '.' are not tracked. They are assumed
 	to be diagnostic mutexes used in debugging. */

@@ -120,6 +120,7 @@ extern ulong	srv_n_spin_wait_rounds;
 
 #define mutex_free(M)			mutex_destroy(M)
 
+
 #ifdef UNIV_DEBUG
 /**
 Checks that the mutex has been initialized. */
@@ -130,9 +131,11 @@ Checks that the current thread owns the mutex. Works only
 in the debug version. */
 #define mutex_own(M)			(M)->is_owned()
 #else
-#define mutex_own(M)			/* No op */
+#define mutex_own(M)			
 #define mutex_validate(M)		/* No op */
 #endif /* UNIV_DEBUG */
+
+
 
 /** Iterate over the mutex meta data */
 class MutexMonitor {

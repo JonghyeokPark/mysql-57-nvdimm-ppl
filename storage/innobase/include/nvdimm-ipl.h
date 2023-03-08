@@ -17,7 +17,9 @@
 #include <iostream>
 #include <tr1/unordered_map>
 
+
 #include "buf0buf.h" 
+
 
 // TDOO(jhpark): make this variable configurable
 #define NVDIMM_MAP_SIZE	ULONG_MAX;
@@ -81,6 +83,7 @@ extern int nvdimm_fd;
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size);
 void nvdimm_free(const uint64_t pool_size);
 
+
 // compare for page_id
 struct comp
 {
@@ -93,19 +96,32 @@ struct comp
         return l.space() < r.space();
     }
 };
+typedef ib_mutex_t my_mutex;
+
 
 typedef struct IPL_INFO
 {
   uint64_t ipl_start_offset;
   uint64_t ipl_write_pointer;
   bool have_to_flush;
+  my_mutex ipl_per_page_mutex;
 }ipl_info;
 
-extern std::tr1::unordered_map<ulint, ipl_info> ipl_map; // (page_id , offset in NVDIMM IPL regions)
+typedef struct NVDIMM_SYSTEM
+{
+  uint64_t nvdimm_offset;
+  my_mutex nvdimm_offset_mutex;
+  my_mutex ipl_map_mutex;
+}nvdimm_system;
+
+
+extern std::tr1::unordered_map<ulint,ipl_info *> ipl_map; // (page_id , offset in NVDIMM IPL regions)
+extern nvdimm_system * nvdimm_info;
+
 // global offset which manages overall NVDIMM region
 #define IPL_LOG_REGION_SZ	(1024UL*8UL) // 128KB로 변경, 많은 page가 생성.
 
-extern uint64_t nvdimm_offset;
+
 // log header
 typedef struct ipl_log_header {
   ulint body_len; //log를 적용할 len
@@ -113,12 +129,11 @@ typedef struct ipl_log_header {
 } IPL_LOG_HDR;
 
 /* IPL operations */
-void nvdimm_ipl_initialize();
+void alloc_new_ipl_info(page_id_t page_id);
 bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog_id_t type);
 void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block);
-void nvdimm_ipl_erase(page_id_t page_id);
 //bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
-void insert_new_ipl_info(page_id_t page_id);
+
 bool nvdimm_ipl_lookup(page_id_t page_id);
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id);
 void nvdimm_ipl_remove_split_merge_map(page_id_t page_id);

@@ -898,39 +898,9 @@ add_log_to_ipl(
 
 	len = rec_end - body;
 
-	
-	// switch(type){
-	// 	case MLOG_REC_INSERT:
-	// 	case MLOG_COMP_REC_INSERT:
-	// 	case MLOG_REC_UPDATE_IN_PLACE:
-	// 	case MLOG_COMP_REC_UPDATE_IN_PLACE:
-	// 	case MLOG_REC_DELETE:
-	// 	case MLOG_COMP_REC_DELETE:			
-	// 		break;
-	// 	default:
-	// 		break;
-	// }
-	// fprintf(stderr, "page: (%u, %u)\n"
-	// 		"is_system_or_undo_tablespace : %d\n"
-	// 		"nvdimm_ipl_is_split_or_merge_page: %d\n"
-	// 		"page_is_leaf : %d\n"
-	// 		"buf_page_in_file: %d\n",
-	// 		space, page_no,
-	// 		is_system_or_undo_tablespace(space),
-	// 		nvdimm_ipl_is_split_or_merge_page(page_id),
-	// 		page_is_leaf(buf_block->frame),
-	// 		buf_page_in_file(buf_page));
-
 	if(!is_system_or_undo_tablespace(space) && !nvdimm_ipl_is_split_or_merge_page(page_id)
 		&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
-		if(!nvdimm_ipl_add(page_id, body, len, type)){
-			// fprintf(stderr, "Do not save the log (%lu, %lu)\n", space, page_no);
-		}
-	}
-	else{
-		if(nvdimm_ipl_lookup(page_id)){
-			nvdimm_ipl_add_split_merge_map(page_id);
-		}
+		nvdimm_ipl_add(page_id, body, len, type);
 	}
 
 	
