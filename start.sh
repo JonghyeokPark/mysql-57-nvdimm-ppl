@@ -1,6 +1,6 @@
 #!/bin/bash
 
-test_data_path=/test_data_micron
+test_data_path=/test_data
 test_log_path=/home/vldb/mysql-57-nvdimm-ipl/test_log
 nvdimm_file_path=/dram_simulate
 bld_path=/home/vldb/mysql-57-nvdimm-ipl/bld

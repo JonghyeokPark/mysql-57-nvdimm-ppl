@@ -543,6 +543,11 @@ page_copy_rec_list_end_no_locks(
 	ulint*		offsets		= offsets_;
 	rec_offs_init(offsets_);
 
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(block->page.id);
+	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+#endif
+
 	page_cur_position(rec, block, &cur1);
 
 	if (page_cur_is_before_first(&cur1)) {
@@ -632,6 +637,11 @@ page_copy_rec_list_end(
 	predefined supremum record. */
 
 	mtr_log_t	log_mode = MTR_LOG_NONE;
+
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(block->page.id);
+	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+#endif
 
 	if (new_page_zip) {
 		log_mode = mtr_set_log_mode(mtr, MTR_LOG_NONE);

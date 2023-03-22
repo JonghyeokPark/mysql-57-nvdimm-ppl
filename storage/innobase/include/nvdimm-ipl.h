@@ -102,7 +102,7 @@ typedef ib_mutex_t my_mutex;
 typedef struct IPL_INFO
 {
   uint64_t ipl_start_offset;
-  uint64_t ipl_write_pointer;
+  ulint ipl_write_pointer;
   bool have_to_flush;
   my_mutex ipl_per_page_mutex;
 }ipl_info;
@@ -136,7 +136,7 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block);
 
 bool nvdimm_ipl_lookup(page_id_t page_id);
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id);
-void nvdimm_ipl_remove_split_merge_map(page_id_t page_id);
+bool nvdimm_ipl_remove_split_merge_map(page_id_t page_id);
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 
 

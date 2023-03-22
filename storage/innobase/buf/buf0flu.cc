@@ -1113,10 +1113,12 @@ buf_flush_write_block_low(
 		}
 		
 	} else {
-		fil_io(request,
-		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-		frame, bpage);
-		nvdimm_ipl_remove_split_merge_map(bpage->id);
+		if(nvdimm_ipl_remove_split_merge_map(bpage->id)){
+			fil_io(request,
+			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+			frame, bpage);
+		}
+		
 	}
 #else
 		fil_io(request,
@@ -3191,11 +3193,11 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 
 		case BUF_FLUSH_LIST:
 			/* Flush all pages */
-			// do {
-			// 	pc_request(ULINT_MAX, LSN_MAX);
-			// 	while (pc_flush_slot() > 0) {}
-			// } while (!pc_wait_finished(&n_flushed_lru,
-			// 			   &n_flushed_list));
+			do {
+				pc_request(ULINT_MAX, LSN_MAX);
+				while (pc_flush_slot() > 0) {}
+			} while (!pc_wait_finished(&n_flushed_lru,
+						   &n_flushed_list));
 			break;
 
 		default:

@@ -27,7 +27,6 @@
 
 void alloc_new_ipl_info(page_id_t page_id){
 	//Check nvdimm region is full.
-	ut_ad(nvdimm_info->nvdimm_offset < ULONG_MAX);
 	ipl_info * new_ipl_info = static_cast<ipl_info *>(ut_zalloc_nokey(sizeof(ipl_info)));
 	new_ipl_info->ipl_start_offset = nvdimm_info->nvdimm_offset;
 	new_ipl_info->ipl_write_pointer = 0;
@@ -44,26 +43,30 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	mtr_t temp_mtr;
 	std::tr1::unordered_map<ulint, ipl_info * >::iterator it;
 	uint64_t ipl_start_offset = 0;
-	uint64_t ipl_write_pointer = 0;
+	ulint ipl_write_pointer = 0;
 	IPL_LOG_HDR log_hdr;
-
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	it = ipl_map.find(page_id.fold());
-	
 	//if first write, alloc the new ipl info
 	if (it == ipl_map.end()) {
 		mutex_enter(&nvdimm_info->nvdimm_offset_mutex);
 		alloc_new_ipl_info(page_id);
 		ipl_start_offset = nvdimm_info->nvdimm_offset;
 		ipl_write_pointer = 0;
+		if(nvdimm_info->nvdimm_offset >= ULONG_MAX - 8024UL){
+			fprintf(stderr, "Overflow!2\n");
+			mutex_exit(&nvdimm_info->nvdimm_offset_mutex);
+			mutex_exit(&it->second->ipl_per_page_mutex);
+			return false;
+		}
 		nvdimm_info->nvdimm_offset += IPL_LOG_REGION_SZ;
 		mutex_exit(&nvdimm_info->nvdimm_offset_mutex);
 	}
 	else{
-		mutex_exit(&nvdimm_info->ipl_map_mutex);
 		mutex_enter(&it->second->ipl_per_page_mutex);
+		mutex_exit(&nvdimm_info->ipl_map_mutex);
 		ipl_start_offset = it->second->ipl_start_offset;
 		ipl_write_pointer = it->second->ipl_write_pointer;
 	}
@@ -95,9 +98,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 	ipl_write_pointer += len;
 
 	//IPL write pointer 업데이트
-	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	it = ipl_map.find(page_id.fold());
-	mutex_exit(&nvdimm_info->ipl_map_mutex);
 	it->second->ipl_write_pointer = ipl_write_pointer;
 
 	// fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu start_offset %lu wp:%lu\n", page_id.space(), page_id.page_no(), log_hdr.type, log_hdr.body_len, ipl_start_offset, ipl_write_pointer);
@@ -117,11 +118,11 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
 	// step1. read current IPL log using page_id
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	std::tr1::unordered_map<ulint, ipl_info *>::iterator it = ipl_map.find(page_id.fold());
+	mutex_enter(&it->second->ipl_per_page_mutex);
 	mutex_exit(&nvdimm_info->ipl_map_mutex);
 
-	mutex_enter(&it->second->ipl_per_page_mutex);
 	uint64_t ipl_start_offset = it->second->ipl_start_offset;
-	uint64_t write_pointer = it->second->ipl_write_pointer;
+	ulint write_pointer = it->second->ipl_write_pointer;
 	byte * start_ptr = nvdimm_ptr + ipl_start_offset; 
 	byte * end_ptr = nvdimm_ptr + ipl_start_offset + write_pointer; // log
 	mutex_exit(&it->second->ipl_per_page_mutex);
@@ -152,12 +153,13 @@ bool nvdimm_ipl_lookup(page_id_t page_id) {
 	// if page exists in IPL region and IPL log is written
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(page_id.fold());
-	mutex_exit(&nvdimm_info->ipl_map_mutex);
 	if(it == ipl_map.end()){
+		mutex_exit(&nvdimm_info->ipl_map_mutex);
 		return false;
 	}
 	else {
 		mutex_enter(&it->second->ipl_per_page_mutex);
+		mutex_exit(&nvdimm_info->ipl_map_mutex);
 		if(it->second->ipl_write_pointer == 0){
 			mutex_exit(&it->second->ipl_per_page_mutex);
 			return false;
@@ -168,21 +170,38 @@ bool nvdimm_ipl_lookup(page_id_t page_id) {
 }
 
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
+	// fprintf(stderr, "ipl_add page(%u, %u)\n", page_id.space(), page_id.page_no());
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(page_id.fold());
-	mutex_exit(&nvdimm_info->ipl_map_mutex);
 	if(it != ipl_map.end()){
+		
 		mutex_enter(&it->second->ipl_per_page_mutex);
 		it->second->have_to_flush = true;
 		mutex_exit(&it->second->ipl_per_page_mutex);
+		mutex_exit(&nvdimm_info->ipl_map_mutex);	
 	}
+	else{
+		mutex_enter(&nvdimm_info->nvdimm_offset_mutex);
+		alloc_new_ipl_info(page_id);
+		it = ipl_map.find(page_id.fold());
+		it->second->have_to_flush = true;
+		if(nvdimm_info->nvdimm_offset >= ULONG_MAX - 8024UL){
+			fprintf(stderr, "Overflow!2\n");
+			mutex_exit(&nvdimm_info->nvdimm_offset_mutex);
+			mutex_exit(&it->second->ipl_per_page_mutex);
+			return;
+		}
+		nvdimm_info->nvdimm_offset += IPL_LOG_REGION_SZ;
+		mutex_exit(&nvdimm_info->nvdimm_offset_mutex);
+		mutex_exit(&it->second->ipl_per_page_mutex);
+	}
+	
 	
 }
 
-void nvdimm_ipl_remove_split_merge_map(page_id_t page_id){
+bool nvdimm_ipl_remove_split_merge_map(page_id_t page_id){
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(page_id.fold());
-	mutex_exit(&nvdimm_info->ipl_map_mutex);
 	if(it != ipl_map.end()){
 		mutex_enter(&it->second->ipl_per_page_mutex);
 		unsigned char* ptr = nvdimm_ptr + it->second->ipl_start_offset;
@@ -192,16 +211,19 @@ void nvdimm_ipl_remove_split_merge_map(page_id_t page_id){
 		it->second->have_to_flush=false;
 		mutex_exit(&it->second->ipl_per_page_mutex);
 	}
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
+	return true;
 }
 
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(page_id.fold());
-	mutex_exit(&nvdimm_info->ipl_map_mutex);
 	if(it == ipl_map.end()) {
+		mutex_exit(&nvdimm_info->ipl_map_mutex);
 		return false;
 	}
 	mutex_enter(&it->second->ipl_per_page_mutex);
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
 	bool return_value = it->second->have_to_flush;
 	mutex_exit(&it->second->ipl_per_page_mutex);
 	return return_value;

@@ -55,6 +55,7 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 
   /*Make NVDIMM structure*/
   nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
+  nvdimm_info->nvdimm_offset = 0;
   mutex_create(LATCH_ID_NVDIMM_OFFSET, &nvdimm_info->nvdimm_offset_mutex);
   mutex_create(LATCH_ID_IPL_MAP_MUTEX, &nvdimm_info->ipl_map_mutex);
 
