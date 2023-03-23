@@ -22,7 +22,6 @@
 
 
 // TDOO(jhpark): make this variable configurable
-#define NVDIMM_MAP_SIZE	ULONG_MAX;
 
 #define NVDIMM_MMAP_FILE_NAME         			"nvdimm_mmap_file"
 #define NVDIMM_MMAP_MAX_FILE_NAME_LENGTH    10000
@@ -117,9 +116,10 @@ typedef struct NVDIMM_SYSTEM
 
 extern std::tr1::unordered_map<ulint,ipl_info *> ipl_map; // (page_id , offset in NVDIMM IPL regions)
 extern nvdimm_system * nvdimm_info;
+extern uint64_t max_log_size;
 
 // global offset which manages overall NVDIMM region
-#define IPL_LOG_REGION_SZ	(1024UL*8UL) // 128KB로 변경, 많은 page가 생성.
+#define IPL_LOG_REGION_SZ	(1024 * 4) // 128KB로 변경, 많은 page가 생성.
 
 
 // log header
