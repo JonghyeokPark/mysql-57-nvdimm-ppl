@@ -56,7 +56,7 @@ bool nvdimm_ipl_add(const page_id_t page_id, unsigned char *log, ulint len, mlog
 		alloc_new_ipl_info(page_id);
 		ipl_start_offset = nvdimm_info->nvdimm_offset;
 		ipl_write_pointer = 0;
-		if(nvdimm_info->nvdimm_offset + 8024 >= max_log_size){
+		if(nvdimm_info->nvdimm_offset + 4096 >= max_log_size){
 			fprintf(stderr, "Overflow!2\n");
 			mutex_exit(&nvdimm_info->nvdimm_offset_mutex);
 			mutex_exit(&it->second->ipl_per_page_mutex);
@@ -140,6 +140,7 @@ void nvdimm_ipl_log_apply(page_id_t page_id, buf_block_t* block) {
 		recv_parse_or_apply_log_rec_body(log_hdr.type, start_ptr, start_ptr + log_hdr.body_len, page_id.space(), page_id.page_no(), block, &temp_mtr);
 		start_ptr += log_hdr.body_len;
 	}
+	fprintf(stderr,"[apply]ipl page: (%u, %u) oldest: %zu, newest: %zu\n", block->page.id.space(), block->page.id.page_no(), block->page.oldest_modification, block->page.newest_modification);
   	temp_mtr.discard_modifications();
 	
 	buf_page_mutex_exit(block);
@@ -186,7 +187,7 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 		alloc_new_ipl_info(page_id);
 		it = ipl_map.find(page_id.fold());
 		it->second->have_to_flush = true;
-		if(nvdimm_info->nvdimm_offset + 8024 >= max_log_size){
+		if(nvdimm_info->nvdimm_offset + 4096 >= max_log_size){
 			fprintf(stderr, "Overflow!2\n");
 			mutex_exit(&nvdimm_info->nvdimm_offset_mutex);
 			mutex_exit(&it->second->ipl_per_page_mutex);

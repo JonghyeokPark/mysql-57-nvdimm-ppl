@@ -1091,7 +1091,6 @@ buf_flush_write_block_low(
 		ulint	type = IORequest::WRITE | IORequest::DO_NOT_WAKE;
 
 		IORequest	request(type);
-
 //block_flush
 #ifdef UNIV_NVDIMM_IPL
 
@@ -1102,6 +1101,7 @@ buf_flush_write_block_low(
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage) == DB_SUCCESS)
 		{
+			fprintf(stderr,"[flush]ipl page: (%u, %u) oldest: %zu, newest: %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
 			// fprintf(stderr, "[NVDIMM_BLOCK]ipl page: (%u, %u) frame: %p\n", bpage->id.space(),
 			//  bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 			buf_page_io_complete(bpage, sync);
