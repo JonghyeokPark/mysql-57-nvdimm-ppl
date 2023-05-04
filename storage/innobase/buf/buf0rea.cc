@@ -127,9 +127,6 @@ buf_read_page_low(
 	buf_page_t*	bpage;
 	*err = DB_SUCCESS;
 
-	if(nvdimm_ipl_lookup(page_id)){
-		sync = true;
-	}
 	// if(buf_page_peek(page_id)){
 	// 	fprintf(stderr, "page is in hash (%u, %u)\n", page_id.space(), page_id.page_no());
 	// }
@@ -163,8 +160,11 @@ buf_read_page_low(
 	bpage = buf_page_init_for_read(err, mode, page_id, page_size, unzip);
 
 	if (bpage == NULL) {
-
 		return(0);
+	}
+	
+	if(bpage->is_iplized){
+		sync = true;
 	}
 
 	DBUG_PRINT("ib_buf", ("read page %u:%u size=%u unzip=%u,%s",
@@ -247,7 +247,7 @@ buf_read_page_low(
 	// else{
 	// 	fprintf(stderr, "Not in hash (%u, %u)\n", page_id.space(), page_id.page_no());
 	// }
-	if (nvdimm_ipl_lookup(page_id)){
+	if (bpage->is_iplized){
 		//page를 완전히 가져오고 실행해보기
 		// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",page_id.space(), page_id.page_no(), bpage);
 		mtr_t temp_mtr;

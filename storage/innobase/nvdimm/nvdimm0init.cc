@@ -16,7 +16,8 @@ std::tr1::unordered_map<ulint, ipl_info * > ipl_map;
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
 nvdimm_system * nvdimm_info = NULL;
-uint64_t max_log_size;
+std::queue<unsigned char *> static_ipl_queue;
+std::queue<unsigned char *> dynamic_ipl_queue;
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -24,6 +25,35 @@ uint64_t max_log_size;
 @param[in] pool_size 	mmaped file size
 @return true if mmaped file creation / initilzation is failed
 */
+
+bool make_static_and_dynamic_ipl_region(){
+  nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
+  nvdimm_info->static_ipl_size = (1024UL + 512) * 1024UL * 1024UL; // static ipl size : 1GB
+  nvdimm_info->dynamic_ipl_size = 512 * 1024 * 1024UL; // dynamic ipl size : 1GB
+
+  nvdimm_info->static_ipl_per_page_size = 256; // per page static size : 256B
+  nvdimm_info->dynamic_ipl_per_page_size = 1024; // per page dynamic size : 1KB
+
+  nvdimm_info->static_ipl_count = 0; 
+  nvdimm_info->dynamic_ipl_count = 0;
+
+  nvdimm_info->static_ipl_max_page_count = nvdimm_info->static_ipl_size / nvdimm_info->static_ipl_per_page_size; // static ipl max page count : 4M
+  nvdimm_info->dynamic_ipl_max_page_count = nvdimm_info->dynamic_ipl_size / nvdimm_info->dynamic_ipl_per_page_size; // dynamic ipl max page count : 1M
+
+  nvdimm_info->static_start_pointer = nvdimm_ptr;
+  nvdimm_info->dynamic_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_size;
+
+  make_static_indirection_queue(nvdimm_info->static_start_pointer, nvdimm_info->static_ipl_size, nvdimm_info->static_ipl_max_page_count);
+  make_dynamic_indirection_queue(nvdimm_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_size, nvdimm_info->dynamic_ipl_max_page_count);
+
+  mutex_create(LATCH_ID_STATIC_REGION, &nvdimm_info->static_region_mutex);
+  mutex_create(LATCH_ID_DYNAMIC_REGION, &nvdimm_info->dynamic_region_mutex);
+  mutex_create(LATCH_ID_IPL_MAP_MUTEX, &nvdimm_info->ipl_map_mutex);
+  return true;
+}
+
+
+//1차 목표, static하게 구현한거 새로운 구조로 바꿔보기.
 
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size) {
  
@@ -54,13 +84,12 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
       We force to set the environment variable PMEM_IS_PMEM_FORCE \n \
       We call mync() instead of mfense()\n");
 
+  //make static and dynamic ipl region
+  if(make_static_and_dynamic_ipl_region()){
+    NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
+  }
   /*Make NVDIMM structure*/
-  nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
-  nvdimm_info->nvdimm_offset = 0;
-  max_log_size = pool_size;
-  mutex_create(LATCH_ID_NVDIMM_OFFSET, &nvdimm_info->nvdimm_offset_mutex);
-  mutex_create(LATCH_ID_IPL_MAP_MUTEX, &nvdimm_info->ipl_map_mutex);
-
+  
   return nvdimm_ptr;
 }
 
@@ -73,3 +102,10 @@ void nvdimm_free(const uint64_t pool_size) {
   close(nvdimm_fd);
   NVDIMM_INFO_PRINT("munmap nvdimm mmaped file\n");
 }
+
+
+
+
+
+//고민을 해보면, 각 page별 ipl 영역에 space_id, page_no를 지정하면 굳이 hashtable을 저장할 필요가 없다.
+//hash table은 메모리에 존재해도 됨.

@@ -41,8 +41,12 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0srv.h"
 #include <ostream>
 
+
 // Forward declaration
 struct fil_addr_t;
+/*UNIV_NVDIMM_IPL*/
+struct IPL_INFO;
+void page_is_iplized(buf_page_t * bpage);
 
 /** @name Modes for buf_page_get_gen */
 /* @{ */
@@ -331,10 +335,6 @@ private:
                 const page_id_t&        page_id);
 };
 
-#ifdef UNIV_NVDIMM_IPL
-bool nvdimm_ipl_lookup(page_id_t page_id);
-bool nvdimm_ipl_merge(page_id_t page_id, buf_page_t * page);
-#endif
 
 /** Print the given page_id_t object.
 @param[in,out]	out	the output stream
@@ -1693,6 +1693,12 @@ public:
 					or buf_block_t::mutex. */
 # endif /* UNIV_DEBUG */
 #endif /* !UNIV_HOTBACKUP */
+
+/*UNIV_NVDIMM_IPL*/
+	IPL_INFO *	page_ipl_info;
+	bool 		is_iplized;
+	bool 		is_split_page;
+
 };
 
 /** The buffer control block structure */

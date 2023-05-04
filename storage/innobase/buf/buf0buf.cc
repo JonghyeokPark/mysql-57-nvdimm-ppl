@@ -5001,6 +5001,9 @@ buf_page_init_low(
 	bpage->oldest_modification = 0;
 	HASH_INVALIDATE(bpage, hash);
 
+/*UNIV_NVDIMM_IPL*/
+	set_for_ipl_page(bpage);
+
 	ut_d(bpage->file_page_was_freed = FALSE);
 }
 

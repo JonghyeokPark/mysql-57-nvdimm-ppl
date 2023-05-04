@@ -1859,7 +1859,7 @@ innobase_start_or_create_for_mysql(void)
 		char nvdimm_file_path[NVDIMM_MMAP_MAX_FILE_NAME_LENGTH];
 		sprintf(nvdimm_file_path, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
 		//const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";
-		size_t srv_nvdimm_pool_size = 14 * 1024;
+		size_t srv_nvdimm_pool_size = 2 * 1024;
 		uint64_t pool_size = srv_nvdimm_pool_size * 1024 * 1024UL;
 
 		nvdimm_ptr = nvdimm_create_or_initialize(nvdimm_file_path, pool_size);

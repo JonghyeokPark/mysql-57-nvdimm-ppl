@@ -409,8 +409,11 @@ static PSI_mutex_info all_innodb_mutexes[] = {
 	PSI_KEY(recv_writer_mutex),
 	PSI_KEY(redo_rseg_mutex),
 	PSI_KEY(noredo_rseg_mutex),
-	PSI_KEY(nvdimm_offset_mutex),
+ #ifdef UNIV_NVDIMM_IPL
+ 	PSI_KEY(nvdimm_static_region_mutex),
+	PSI_KEY(nvdimm_dynamic_region_mutex),
 	PSI_KEY(ipl_map_mutex),
+ #endif /* UNIV_NVDIMM_IPL */
 #  ifdef UNIV_DEBUG
 	PSI_KEY(rw_lock_debug_mutex),
 #  endif /* UNIV_DEBUG */

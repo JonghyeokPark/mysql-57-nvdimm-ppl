@@ -1093,20 +1093,18 @@ buf_flush_write_block_low(
 		IORequest	request(type);
 //block_flush
 #ifdef UNIV_NVDIMM_IPL
-
 	
-	if (nvdimm_ipl_lookup(bpage->id) && !nvdimm_ipl_is_split_or_merge_page(bpage->id)) {
-		
+	if (bpage->is_iplized && !bpage->is_split_page) {
+
 		if(fil_io(request,
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage) == DB_SUCCESS)
 		{
-			fprintf(stderr,"[flush]ipl page: (%u, %u) oldest: %zu, newest: %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
 			// fprintf(stderr, "[NVDIMM_BLOCK]ipl page: (%u, %u) frame: %p\n", bpage->id.space(),
 			//  bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
-			buf_page_io_complete(bpage, sync);
-			buf_LRU_stat_inc_io();
-			return;
+			//buf_page_io_complete(bpage, sync);
+			//buf_LRU_stat_inc_io();
+			// return;
 		}
 		else{
 			fprintf(stderr, "Error!\n");
@@ -1125,7 +1123,6 @@ buf_flush_write_block_low(
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage);
 #endif
-
 		
 	} else if (flush_type == BUF_FLUSH_SINGLE_PAGE) {
 		buf_dblwr_write_single_page(bpage, sync);
