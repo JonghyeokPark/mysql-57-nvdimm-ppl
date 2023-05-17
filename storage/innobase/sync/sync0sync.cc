@@ -76,7 +76,6 @@ mysql_pfs_key_t page_zip_stat_per_index_mutex_key;
 #ifdef UNIV_NVDIMM_IPL
 mysql_pfs_key_t nvdimm_static_region_mutex_key;
 mysql_pfs_key_t nvdimm_dynamic_region_mutex_key;
-mysql_pfs_key_t ipl_per_page_mutex_key;
 mysql_pfs_key_t ipl_map_mutex_key;
 #endif /* UNIV_NVDIMM_IPL */
 # ifdef UNIV_DEBUG

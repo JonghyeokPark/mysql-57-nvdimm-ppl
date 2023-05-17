@@ -3619,9 +3619,18 @@ buf_block_try_discard_uncompressed(
 	buf_pool_mutex_enter(buf_pool);
 
 	bpage = buf_page_hash_get(buf_pool, page_id);
-
+// #ifdef UNIV_NVDIMM_IPL
+// 	bool is_iplized = bpage->is_iplized;
+// 	page_id_t page_id_copy = bpage->id;
+// 	IPL_INFO * ipl_info_copy = bpage->page_ipl_info;
+// #endif
+	
 	if (bpage) {
 		buf_LRU_free_page(bpage, false);
+		// if(is_iplized){
+		// 	nvdimm_ipl_remove_from_LRU(ipl_info_copy,page_id_copy);
+		// }
+		
 	}
 
 	buf_pool_mutex_exit(buf_pool);

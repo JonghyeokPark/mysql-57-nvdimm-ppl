@@ -1093,30 +1093,38 @@ buf_flush_write_block_low(
 		IORequest	request(type);
 //block_flush
 #ifdef UNIV_NVDIMM_IPL
-	
-	if (bpage->is_iplized && !bpage->is_split_page) {
-
-		if(fil_io(request,
-		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-		frame, bpage) == DB_SUCCESS)
-		{
-			// fprintf(stderr, "[NVDIMM_BLOCK]ipl page: (%u, %u) frame: %p\n", bpage->id.space(),
-			//  bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
-			//buf_page_io_complete(bpage, sync);
-			//buf_LRU_stat_inc_io();
-			// return;
+	if (bpage->is_iplized){
+		if(!bpage->is_split_page){
+			if(fil_io(request,
+			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+			frame, bpage) == DB_SUCCESS)
+			{
+				insert_page_ipl_info_in_hash_table(bpage);
+				// fprintf(stderr, "[Not Flush]ipl page: (%u, %u) frame: %p\n", bpage->id.space(),
+				//  bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
+				buf_page_io_complete(bpage, sync);
+				buf_LRU_stat_inc_io();
+				return;
+			}
+			else{
+				fprintf(stderr, "Error!\n");
+			}
 		}
 		else{
-			fprintf(stderr, "Error!\n");
-		}
+			// fprintf(stderr, "[FLUSH]split ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+			if(nvdimm_ipl_remove_split_merge_map(bpage, bpage->id)){
+				fil_io(request,
+				sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+				frame, bpage);
+			}
 		
-	} else {
-		if(nvdimm_ipl_remove_split_merge_map(bpage->id)){
-			fil_io(request,
-			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-			frame, bpage);
 		}
-		
+	}
+	else{
+		// fprintf(stderr, "[FLUSH] Normal page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+		fil_io(request,
+		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+		frame, bpage);
 	}
 #else
 		fil_io(request,
@@ -1126,11 +1134,11 @@ buf_flush_write_block_low(
 		
 	} else if (flush_type == BUF_FLUSH_SINGLE_PAGE) {
 		buf_dblwr_write_single_page(bpage, sync);
-		fprintf(stderr, "[NVDIMM_FLUSH] Double Write\n");
+		// fprintf(stderr, "[NVDIMM_FLUSH] Double Write\n");
 	} else {
 		ut_ad(!sync);
 		buf_dblwr_add_to_batch(bpage);
-		fprintf(stderr, "[NVDIMM_FLUSH] Double Write\n");
+		// fprintf(stderr, "[NVDIMM_FLUSH] Double Write\n");
 	}
 
 	/* When doing single page flushing the IO is done synchronously
@@ -1679,7 +1687,7 @@ buf_flush_LRU_list_batch(
 		BPageMutex*	block_mutex = buf_page_get_mutex(bpage);
 
 		mutex_enter(block_mutex);
-
+		//msj
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
 			clean and is not IO-fixed or buffer fixed. */
@@ -2228,6 +2236,12 @@ buf_flush_single_page_from_LRU(
 
 		mutex_enter(block_mutex);
 
+	#ifdef UNIV_NVDIMM_IPL
+		bool is_iplized = bpage->is_iplized;
+		page_id_t page_id_copy = bpage->id;
+		IPL_INFO * ipl_info_copy = bpage->page_ipl_info;
+	#endif
+
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
 			clean and is not IO-fixed or buffer fixed. */
@@ -2236,6 +2250,9 @@ buf_flush_single_page_from_LRU(
 			if (buf_LRU_free_page(bpage, true)) {
 				buf_pool_mutex_exit(buf_pool);
 				freed = true;
+				// if(is_iplized){
+				// 	nvdimm_ipl_remove_from_LRU(ipl_info_copy,page_id_copy);
+				// }
 				break;
 			}
 

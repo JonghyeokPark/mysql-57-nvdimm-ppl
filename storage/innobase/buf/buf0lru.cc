@@ -50,6 +50,9 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0mon.h"
 #include "lock0lock.h"
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
 /** The number of blocks from the LRU_old pointer onward, including
 the block pointed to, must be buf_pool->LRU_old_ratio/BUF_LRU_OLD_RATIO_DIV
 of the whole LRU list length, except that the tolerance defined below
@@ -1016,12 +1019,22 @@ buf_LRU_free_from_unzip_LRU_list(
 		buf_block_t*	prev_block;
 
 		prev_block = UT_LIST_GET_PREV(unzip_LRU, block);
+	#ifdef UNIV_NVDIMM_IPL
+		buf_page_t * bpage = (buf_page_t *) block;
+		bool is_iplized = bpage->is_iplized;
+		page_id_t page_id_copy = bpage->id;
+		IPL_INFO * ipl_info_copy = bpage->page_ipl_info;
+	#endif
 
 		ut_ad(buf_block_get_state(block) == BUF_BLOCK_FILE_PAGE);
 		ut_ad(block->in_unzip_LRU_list);
 		ut_ad(block->page.in_LRU_list);
 
 		freed = buf_LRU_free_page(&block->page, false);
+		// if(is_iplized){
+		// 	nvdimm_ipl_remove_from_LRU(ipl_info_copy,page_id_copy);
+		// }
+
 
 		block = prev_block;
 	}
@@ -2094,7 +2107,6 @@ func_exit:
 	}
 
 	buf_LRU_block_free_hashed_page((buf_block_t*) bpage);
-
 	return(true);
 }
 

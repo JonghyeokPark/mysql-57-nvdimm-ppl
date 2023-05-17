@@ -5817,42 +5817,46 @@ fil_io(
 			req_type, node->name, node->handle, buf, offset, len);
 	}
 #else /* UNIV_HOTBACKUP */
-// #ifdef UNIV_NVDIMM_IPL
-// 	if (nvdimm_ipl_lookup(page_id) && req_type.is_write() && !req_type.is_log() && !nvdimm_ipl_is_split_or_merge_page(page_id)) {
-// 		// block flush code from page_io_complete;
-// 		err = DB_SUCCESS;
-// 		mutex_enter(&fil_system->mutex);
+#ifdef UNIV_NVDIMM_IPL
+	if(message != NULL){
+		buf_page_t * bpage = (buf_page_t *) message;
+		if (bpage->is_iplized && req_type.is_write() && !req_type.is_log() && !bpage->is_split_page) {
+			// block flush code from page_io_complete;
+			err = DB_SUCCESS;
+			mutex_enter(&fil_system->mutex);
 
-// 		fil_node_complete_io_for_ipl_log(node, fil_system, req_type);
+			fil_node_complete_io_for_ipl_log(node, fil_system, req_type);
 
-// 		mutex_exit(&fil_system->mutex);
+			mutex_exit(&fil_system->mutex);
 
-// 		return err;
-		
-// 		// block flush code from page_io_complete;
-// 	} else {
-// 		err = os_aio(
-// 			req_type,
-// 			mode, node->name, node->handle, buf, offset, len,
-// 			fsp_is_system_temporary(page_id.space())
-// 			? false : srv_read_only_mode,
-// 			node, message);
-// 	}
-// #else
-// 		err = os_aio(
-// 			req_type,
-// 			mode, node->name, node->handle, buf, offset, len,
-// 			fsp_is_system_temporary(page_id.space())
-// 			? false : srv_read_only_mode,
-// 			node, message);
-// #endif
-	err = os_aio(
-		req_type,
-		mode, node->name, node->handle, buf, offset, len,
-		fsp_is_system_temporary(page_id.space())
-		? false : srv_read_only_mode,
-		node, message);
-	/* Queue the aio request */
+			return err;
+			
+			// block flush code from page_io_complete;
+		} else {
+			err = os_aio(
+				req_type,
+				mode, node->name, node->handle, buf, offset, len,
+				fsp_is_system_temporary(page_id.space())
+				? false : srv_read_only_mode,
+				node, message);
+		}
+	}
+	else{
+		err = os_aio(
+			req_type,
+			mode, node->name, node->handle, buf, offset, len,
+			fsp_is_system_temporary(page_id.space())
+			? false : srv_read_only_mode,
+			node, message);
+	}
+#endif
+	// err = os_aio(
+	// 	req_type,
+	// 	mode, node->name, node->handle, buf, offset, len,
+	// 	fsp_is_system_temporary(page_id.space())
+	// 	? false : srv_read_only_mode,
+	// 	node, message);
+	// /* Queue the aio request */
 	
 
 #endif /* UNIV_HOTBACKUP */

@@ -247,6 +247,7 @@ buf_read_page_low(
 	// else{
 	// 	fprintf(stderr, "Not in hash (%u, %u)\n", page_id.space(), page_id.page_no());
 	// }
+	// fprintf(stderr, "Read bpage: (%u, %u) %p\n",page_id.space(), page_id.page_no(), bpage);
 	if (bpage->is_iplized){
 		//page를 완전히 가져오고 실행해보기
 		// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",page_id.space(), page_id.page_no(), bpage);
@@ -254,7 +255,7 @@ buf_read_page_low(
 		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 		mtr_start(&temp_mtr);
 		if(buf_page_io_complete(bpage, false)){
-			nvdimm_ipl_log_apply(page_id, (buf_block_t*) bpage);
+			nvdimm_ipl_log_apply((buf_block_t*) bpage);
 		}
 		else{
 			fprintf(stderr, "Page io not complete\n");

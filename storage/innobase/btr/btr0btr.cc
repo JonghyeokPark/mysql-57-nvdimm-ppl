@@ -1672,9 +1672,6 @@ btr_root_raise_and_insert(
 	/* Copy the records from root to the new page one by one. */
 #ifdef UNIV_NVDIMM_IPL
 	nvdimm_ipl_add_split_merge_map(new_block->page.id);
-	// if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
-	// 	nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
-	// }
 #endif
 
 	if (0

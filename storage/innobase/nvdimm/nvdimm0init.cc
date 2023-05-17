@@ -16,8 +16,6 @@ std::tr1::unordered_map<ulint, ipl_info * > ipl_map;
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
 nvdimm_system * nvdimm_info = NULL;
-std::queue<unsigned char *> static_ipl_queue;
-std::queue<unsigned char *> dynamic_ipl_queue;
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -32,7 +30,7 @@ bool make_static_and_dynamic_ipl_region(){
   nvdimm_info->dynamic_ipl_size = 512 * 1024 * 1024UL; // dynamic ipl size : 1GB
 
   nvdimm_info->static_ipl_per_page_size = 256; // per page static size : 256B
-  nvdimm_info->dynamic_ipl_per_page_size = 1024; // per page dynamic size : 1KB
+  nvdimm_info->dynamic_ipl_per_page_size = 1024 * 4; // per page dynamic size : 1KB
 
   nvdimm_info->static_ipl_count = 0; 
   nvdimm_info->dynamic_ipl_count = 0;
@@ -42,9 +40,9 @@ bool make_static_and_dynamic_ipl_region(){
 
   nvdimm_info->static_start_pointer = nvdimm_ptr;
   nvdimm_info->dynamic_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_size;
-
-  make_static_indirection_queue(nvdimm_info->static_start_pointer, nvdimm_info->static_ipl_size, nvdimm_info->static_ipl_max_page_count);
-  make_dynamic_indirection_queue(nvdimm_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_size, nvdimm_info->dynamic_ipl_max_page_count);
+  fprintf(stderr, "static start pointer : %p, dynamic start pointer : %p\n", nvdimm_info->static_start_pointer, nvdimm_info->dynamic_start_pointer);
+  make_static_indirection_queue(nvdimm_info->static_start_pointer, nvdimm_info->static_ipl_per_page_size, nvdimm_info->static_ipl_max_page_count);
+  make_dynamic_indirection_queue(nvdimm_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_per_page_size, nvdimm_info->dynamic_ipl_max_page_count);
 
   mutex_create(LATCH_ID_STATIC_REGION, &nvdimm_info->static_region_mutex);
   mutex_create(LATCH_ID_DYNAMIC_REGION, &nvdimm_info->dynamic_region_mutex);
