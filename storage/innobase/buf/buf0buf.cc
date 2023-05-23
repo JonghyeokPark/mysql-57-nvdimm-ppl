@@ -3627,9 +3627,6 @@ buf_block_try_discard_uncompressed(
 	
 	if (bpage) {
 		buf_LRU_free_page(bpage, false);
-		// if(is_iplized){
-		// 	nvdimm_ipl_remove_from_LRU(ipl_info_copy,page_id_copy);
-		// }
 		
 	}
 

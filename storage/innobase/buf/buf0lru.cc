@@ -1019,22 +1019,12 @@ buf_LRU_free_from_unzip_LRU_list(
 		buf_block_t*	prev_block;
 
 		prev_block = UT_LIST_GET_PREV(unzip_LRU, block);
-	#ifdef UNIV_NVDIMM_IPL
-		buf_page_t * bpage = (buf_page_t *) block;
-		bool is_iplized = bpage->is_iplized;
-		page_id_t page_id_copy = bpage->id;
-		IPL_INFO * ipl_info_copy = bpage->page_ipl_info;
-	#endif
 
 		ut_ad(buf_block_get_state(block) == BUF_BLOCK_FILE_PAGE);
 		ut_ad(block->in_unzip_LRU_list);
 		ut_ad(block->page.in_LRU_list);
 
 		freed = buf_LRU_free_page(&block->page, false);
-		// if(is_iplized){
-		// 	nvdimm_ipl_remove_from_LRU(ipl_info_copy,page_id_copy);
-		// }
-
 
 		block = prev_block;
 	}

@@ -106,6 +106,8 @@ struct IPL_INFO
   unsigned char* static_region_pointer;
   unsigned char* dynamic_region_pointer;
   ulint page_ipl_region_size;
+  lsn_t oldest_modification;
+  lsn_t newest_modification;
 };
 
 typedef IPL_INFO ipl_info;
@@ -168,6 +170,10 @@ bool nvdimm_ipl_remove_split_merge_map(buf_page_t * bpage, page_id_t page_id);
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 bool nvdimm_ipl_remove_from_LRU(ipl_info * page_ipl_info, page_id_t page_id);
+bool page_is_remove_page(buf_page_t * bpage, buf_flush_t flush_type);
+void set_lsn_for_checkpoint_page(buf_page_t * bpage);
+void set_page_for_clean_ipl(buf_page_t * bpage);
+bool page_is_lru_with_ipl_dynamic_page(buf_page_t * bpage, buf_flush_t flush_type);
 
 
 

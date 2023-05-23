@@ -59,6 +59,8 @@ ipl_info * alloc_static_ipl_info_and_region(page_id_t page_id){
 	new_ipl_info->static_region_pointer = get_static_ipl_address(page_id);
 	new_ipl_info->dynamic_region_pointer = NULL;
 	new_ipl_info->page_ipl_region_size = IPL_LOG_HEADER_SIZE;
+	new_ipl_info->newest_modification = 0;
+	new_ipl_info->oldest_modification = 0;
 	return new_ipl_info;
 }
 
@@ -185,8 +187,8 @@ bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 	if(!write_ipl_log_header_and_body(bpage, len, type, log)){
 		return_value = false;
 	}
+	// fprintf(stderr, "log add, Page id : (%u, %u) Type : %d len: %lu, static pointer : %p, dynamic pointer : %p ipl_len : %u\n",page_id.space(), page_id.page_no(), type, len, bpage->page_ipl_info->static_region_pointer, bpage->page_ipl_info->dynamic_region_pointer, bpage->page_ipl_info->page_ipl_region_size);
 
-	// fprintf(stderr, "[NVDIMM_ADD_LOG]: Add log complete: (%u, %u), type: %u, len: %lu start_offset %lu wp:%lu\n", page_id.space(), page_id.page_no(), log_hdr.type, log_hdr.body_len, static_region_pointer, page_ipl_region_size);
   	mtr_commit(&temp_mtr);
 	return return_value;
 }
@@ -291,20 +293,20 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 	// fprintf(stderr, "ipl_add page(%u, %u)\n", page_id.space(), page_id.page_no());
 	//buf_page_hash_get_s_locked로 시도해보기.
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
+	buf_page_t * buf_page = buf_page_get_also_watch(buf_pool, page_id);
 	buf_page->is_split_page = true;
 }
 
 bool nvdimm_ipl_remove_split_merge_map(buf_page_t * bpage, page_id_t page_id){
+	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p, page_ipl_info : %p\n", page_id.space(), page_id.page_no(), bpage->page_ipl_info->static_region_pointer, bpage->page_ipl_info->dynamic_region_pointer, bpage->page_ipl_info);
 	ipl_info * page_ipl_info = bpage->page_ipl_info;
-	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p, page_ipl_info : %p\n", page_id.space(), page_id.page_no(), page_ipl_info->static_region_pointer, page_ipl_info->dynamic_region_pointer, bpage->page_ipl_info);
+	bpage->is_iplized = false;
+	bpage->is_split_page = false;
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
+	ipl_map.erase(page_id.fold());
 	if(free_dynamic_address_to_indirection_queue(page_ipl_info->dynamic_region_pointer) && free_static_address_to_indirection_queue(page_ipl_info->static_region_pointer)){
-		ipl_map.erase(page_id.fold());
 		ut_free(bpage->page_ipl_info);
-		bpage->page_ipl_info = NULL;
-		bpage->is_iplized = false;
-		bpage->is_split_page = false;
+		bpage->page_ipl_info = NULL; // 확인해보기.
 		mutex_exit(&nvdimm_info->ipl_map_mutex);
 		return true;
 	}
@@ -336,7 +338,7 @@ void set_for_ipl_page(buf_page_t* bpage){
 }
 
 bool nvdimm_ipl_remove_from_LRU(ipl_info * page_ipl_info, page_id_t page_id){
-	fprintf(stderr, "LRU Remove page(%u, %u), static: %p, dynamic: %p, page_ipl_info : %p\n", page_id.space(), page_id.page_no(), page_ipl_info->static_region_pointer, page_ipl_info->dynamic_region_pointer, page_ipl_info);
+	// fprintf(stderr, "LRU Remove page(%u, %u), static: %p, dynamic: %p, page_ipl_info : %p\n", page_id.space(), page_id.page_no(), page_ipl_info->static_region_pointer, page_ipl_info->dynamic_region_pointer, page_ipl_info);
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	if(free_dynamic_address_to_indirection_queue(page_ipl_info->dynamic_region_pointer) && free_static_address_to_indirection_queue(page_ipl_info->static_region_pointer)){
 		ipl_map.erase(page_id.fold());
@@ -347,14 +349,39 @@ bool nvdimm_ipl_remove_from_LRU(ipl_info * page_ipl_info, page_id_t page_id){
 
 }
 
-//Checkpoint가 되면서 write을 스킵해서 많은 공간을 가지고 있는 애들은 free하기.
-// bool page_is_remove_page(buf_page_t * bpage, buf_flush_t flush_type){
-// 	if(!bpage->is_iplized){
-// 		return false;
-// 	}
-// 	if(flush_type == BUF_FLUSH_LRU && bpage->oldest_modification == 0){
-// 		fprintf(stderr, "Clean Page but LRU!\n");
-// 		return true;
-// 	}
-// 	return false;
-// }
+// Checkpoint가 된 페이지인지 확인하기.
+bool page_is_remove_page(buf_page_t * bpage, buf_flush_t flush_type){
+	ipl_info * page_ipl_info = bpage->page_ipl_info;
+	if(page_ipl_info == NULL){
+		return false;
+	}
+	if(flush_type == BUF_FLUSH_LRU && bpage->is_iplized && page_ipl_info->dynamic_region_pointer != NULL && page_ipl_info->newest_modification != 0, page_ipl_info->oldest_modification != 0){
+		return true;
+	}
+	return false;
+}
+
+void set_lsn_for_checkpoint_page(buf_page_t * bpage){
+	ipl_info * page_ipl_info = bpage->page_ipl_info;
+	page_ipl_info->oldest_modification = bpage->oldest_modification;
+	page_ipl_info->newest_modification = bpage->newest_modification;
+	// fprintf(stderr, "Set lsn for Checkpoint page_id:(%u, %u) oldest : %zu, newest : %lu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, page_ipl_info->newest_modification);
+}
+
+void set_page_for_clean_ipl(buf_page_t * bpage){
+	ipl_info * page_ipl_info = bpage->page_ipl_info;
+	bpage->oldest_modification = page_ipl_info->oldest_modification;
+	bpage->newest_modification = page_ipl_info->newest_modification;
+	bpage->buf_fix_count = 0;
+	buf_page_set_io_fix(bpage, BUF_IO_NONE);
+	bpage->is_split_page = true;
+	// fprintf(stderr, "Make dirty page page_id:(%u, %u) oldest : %zu, newest : %lu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, page_ipl_info->newest_modification);
+}
+
+bool page_is_lru_with_ipl_dynamic_page(buf_page_t * bpage, buf_flush_t flush_type){
+	ipl_info * page_ipl_info = bpage->page_ipl_info;
+	if( page_ipl_info->dynamic_region_pointer != NULL && flush_type == BUF_FLUSH_LRU){
+		return true;
+	}
+	return false;
+}

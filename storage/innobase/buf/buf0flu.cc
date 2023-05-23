@@ -583,12 +583,22 @@ buf_flush_ready_for_replace(
 	ut_ad(mutex_own(buf_page_get_mutex(bpage)));
 	ut_ad(bpage->in_LRU_list);
 
+	//nvdimm
 	if (buf_page_in_file(bpage)) {
-
-		return(bpage->oldest_modification == 0
-		       && bpage->buf_fix_count == 0
-		       && buf_page_get_io_fix(bpage) == BUF_IO_NONE);
+		//ipl화 되어서 flush 스킵해서 clean한 page인지 확인.
+		if(bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
+			if(page_is_remove_page(bpage, (buf_flush_t)bpage->flush_type)){
+				/* The page is a ipl remove page. */
+				set_page_for_clean_ipl(bpage);
+				return(false);
+			}
+			return true;
+		}
+		else{
+			return FALSE;
+		}
 	}
+	//nvdimm
 
 	ib::fatal() << "Buffer block " << bpage << " state " <<  bpage->state
 		<< " in the LRU list!";
@@ -617,6 +627,17 @@ buf_flush_ready_for_flush(
 
 	if (bpage->oldest_modification == 0
 	    || buf_page_get_io_fix(bpage) != BUF_IO_NONE) {
+			//nvdimm
+			// if(flush_type == BUF_FLUSH_LIST){
+			// 	fprintf(stderr, "[BUF_FLUSH_LIST]Clean page (%u, %u) oldest : %zu, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, buf_page_get_io_fix(bpage));
+			// }
+			// else if(flush_type== BUF_FLUSH_LRU){
+			// 	fprintf(stderr, "[BUF_FLUSH_LRU]Clean page (%u, %u) oldest : %zu, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, buf_page_get_io_fix(bpage));
+			// }
+			// else if(flush_type == BUF_FLUSH_SINGLE_PAGE){
+			// 	fprintf(stderr, "[BUF_FLUSH_SINGLE_PAGE]Clean page (%u, %u) oldest : %zu, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, buf_page_get_io_fix(bpage));
+			// }
+			//nvdimm
 		return(false);
 	}
 
@@ -626,6 +647,17 @@ buf_flush_ready_for_flush(
 	case BUF_FLUSH_LIST:
 	case BUF_FLUSH_LRU:
 	case BUF_FLUSH_SINGLE_PAGE:
+		//nvdimm
+		// if(flush_type == BUF_FLUSH_LIST){
+		// 		fprintf(stderr, "[BUF_FLUSH_LIST]Dirty page (%u, %u) oldest : %zu, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, buf_page_get_io_fix(bpage));
+		// 	}
+		// 	else if(flush_type== BUF_FLUSH_LRU){
+		// 		fprintf(stderr, "[BUF_FLUSH_LRU]Dirty page (%u, %u) oldest : %zu, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, buf_page_get_io_fix(bpage));
+		// 	}
+		// 	else if(flush_type == BUF_FLUSH_SINGLE_PAGE){
+		// 		fprintf(stderr, "[BUF_FLUSH_SINGLE_PAGE]Dirty page (%u, %u) oldest : %zu, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, buf_page_get_io_fix(bpage));
+		// 	}
+		//nvdimm
 		return(true);
 
 	case BUF_FLUSH_N_TYPES:
@@ -1095,20 +1127,34 @@ buf_flush_write_block_low(
 #ifdef UNIV_NVDIMM_IPL
 	if (bpage->is_iplized){
 		if(!bpage->is_split_page){
-			if(fil_io(request,
-			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-			frame, bpage) == DB_SUCCESS)
-			{
-				insert_page_ipl_info_in_hash_table(bpage);
-				// fprintf(stderr, "[Not Flush]ipl page: (%u, %u) frame: %p\n", bpage->id.space(),
-				//  bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
-				buf_page_io_complete(bpage, sync);
-				buf_LRU_stat_inc_io();
-				return;
+			if(page_is_lru_with_ipl_dynamic_page(bpage, flush_type) || flush_type == BUF_FLUSH_SINGLE_PAGE){
+				// fprintf(stderr, "Return Dynamic Page (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+				if(nvdimm_ipl_remove_split_merge_map(bpage, bpage->id)){
+					fil_io(request,
+					sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+					frame, bpage);
+				}
 			}
 			else{
-				fprintf(stderr, "Error!\n");
+				if(flush_type == BUF_FLUSH_LIST){
+					set_lsn_for_checkpoint_page(bpage);
+				}
+				if(fil_io(request,
+				sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+				frame, bpage) == DB_SUCCESS)
+				{
+					insert_page_ipl_info_in_hash_table(bpage);
+					// fprintf(stderr, "[Not Flush]ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+					buf_page_io_complete(bpage, sync);
+					buf_LRU_stat_inc_io();
+					return;
+				}
+				else{
+					fprintf(stderr, "Error!\n");
+				}
+
 			}
+			
 		}
 		else{
 			// fprintf(stderr, "[FLUSH]split ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
@@ -2236,12 +2282,6 @@ buf_flush_single_page_from_LRU(
 
 		mutex_enter(block_mutex);
 
-	#ifdef UNIV_NVDIMM_IPL
-		bool is_iplized = bpage->is_iplized;
-		page_id_t page_id_copy = bpage->id;
-		IPL_INFO * ipl_info_copy = bpage->page_ipl_info;
-	#endif
-
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
 			clean and is not IO-fixed or buffer fixed. */
@@ -2250,9 +2290,6 @@ buf_flush_single_page_from_LRU(
 			if (buf_LRU_free_page(bpage, true)) {
 				buf_pool_mutex_exit(buf_pool);
 				freed = true;
-				// if(is_iplized){
-				// 	nvdimm_ipl_remove_from_LRU(ipl_info_copy,page_id_copy);
-				// }
 				break;
 			}
 

@@ -26,11 +26,11 @@ nvdimm_system * nvdimm_info = NULL;
 
 bool make_static_and_dynamic_ipl_region(){
   nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
-  nvdimm_info->static_ipl_size = (1024UL + 512) * 1024UL * 1024UL; // static ipl size : 1GB
-  nvdimm_info->dynamic_ipl_size = 512 * 1024 * 1024UL; // dynamic ipl size : 1GB
+  nvdimm_info->static_ipl_size = (1024UL + 512) * 1024UL * 1024UL; // static ipl size : 1.5GB
+  nvdimm_info->dynamic_ipl_size = 512 * 1024 * 1024UL; // dynamic ipl size : 0.5GB
 
-  nvdimm_info->static_ipl_per_page_size = 256; // per page static size : 256B
-  nvdimm_info->dynamic_ipl_per_page_size = 1024 * 4; // per page dynamic size : 1KB
+  nvdimm_info->static_ipl_per_page_size = 512; // per page static size : 512B
+  nvdimm_info->dynamic_ipl_per_page_size = 1024 * 8; // per page dynamic size : 1KB
 
   nvdimm_info->static_ipl_count = 0; 
   nvdimm_info->dynamic_ipl_count = 0;
