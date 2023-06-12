@@ -250,7 +250,7 @@ buf_read_page_low(
 	// fprintf(stderr, "Read bpage: (%u, %u) %p\n",page_id.space(), page_id.page_no(), bpage);
 	if (bpage->is_iplized){
 		//page를 완전히 가져오고 실행해보기
-		// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",page_id.space(), page_id.page_no(), bpage);
+		fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",page_id.space(), page_id.page_no(), bpage);
 		mtr_t temp_mtr;
 		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 		mtr_start(&temp_mtr);

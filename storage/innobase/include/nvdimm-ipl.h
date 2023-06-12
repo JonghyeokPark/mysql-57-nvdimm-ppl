@@ -97,7 +97,7 @@ void nvdimm_free(const uint64_t pool_size);
 #define PAGE_NO_OFFSET 4UL
 #define DYNAMIC_ADDRESS_OFFSET 8UL
 #define IPL_LOG_HEADER_SIZE 16UL
-#define STATIC_MAX_SIZE 240UL
+#define STATIC_MAX_SIZE (1024UL - IPL_LOG_HEADER_SIZE)
 typedef ib_mutex_t my_mutex;
 
 
@@ -108,6 +108,7 @@ struct IPL_INFO
   ulint page_ipl_region_size;
   lsn_t oldest_modification;
   lsn_t newest_modification;
+  bool is_dirtified;
 };
 
 typedef IPL_INFO ipl_info;
@@ -169,11 +170,11 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id);
 bool nvdimm_ipl_remove_split_merge_map(buf_page_t * bpage, page_id_t page_id);
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
-bool nvdimm_ipl_remove_from_LRU(ipl_info * page_ipl_info, page_id_t page_id);
-bool page_is_remove_page(buf_page_t * bpage, buf_flush_t flush_type);
-void set_lsn_for_checkpoint_page(buf_page_t * bpage);
-void set_page_for_clean_ipl(buf_page_t * bpage);
-bool page_is_lru_with_ipl_dynamic_page(buf_page_t * bpage, buf_flush_t flush_type);
+void print_page_info(buf_page_t * bpage);
+bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
+bool check_clean_checkpoint_page(buf_page_t * bpage);
+void make_dirty_clean_checkpoint_page(buf_page_t * bpage);
+bool is_dirtified_page(buf_page_t * bpage);
 
 
 
@@ -200,13 +201,3 @@ unsigned char* nvdimm_ipl_log_apply(
 */
 
 #endif // end-of-header
-
-// #ifdef UNIV_NVDIMM_IPL
-// 	bool is_iplized = bpage->is_iplized;
-// 	page_id_t page_id_copy = bpage->id;
-// 	IPL_INFO * ipl_info_copy = bpage->page_ipl_info;
-// #endif
-
-// if(is_iplized){
-//   nvdimm_ipl_remove_from_LRU(ipl_info_copy,page_id_copy);
-// }
