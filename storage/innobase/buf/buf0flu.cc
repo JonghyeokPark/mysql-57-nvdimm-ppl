@@ -585,13 +585,17 @@ buf_flush_ready_for_replace(
 
 	if (buf_page_in_file(bpage)) {
 		//ipl화 되어서 flush 스킵해서 clean한 page인지 확인.
-		if(bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
+		if(!bpage->is_dirtified && bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
+			// fprintf(stderr, "buf_flush_ready_for_replace: clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
 			return true;
 		}
 		return false;
 			
 	}
-
+	//nvdimm 여기까지 들어와서 scheduling이 변동되는 경우 is_dirtified 된 경우 스킵
+	if(bpage->is_dirtified){
+		return (FALSE);
+	}
 	ib::fatal() << "Buffer block " << bpage << " state " <<  bpage->state
 		<< " in the LRU list!";
 
@@ -620,15 +624,15 @@ buf_flush_ready_for_flush(
 	if (bpage->oldest_modification == 0
 	    || buf_page_get_io_fix(bpage) != BUF_IO_NONE) {
 			//nvdimm
-			if(flush_type == BUF_FLUSH_LIST){
-				fprintf(stderr, "[BUF_FLUSH_LIST]Clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
-			}
-			else if(flush_type== BUF_FLUSH_LRU){
-				fprintf(stderr, "[BUF_FLUSH_LRU]Clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
-			}
-			else if(flush_type == BUF_FLUSH_SINGLE_PAGE){
-				fprintf(stderr, "[BUF_FLUSH_SINGLE_PAGE]Clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
-			}
+			// if(flush_type == BUF_FLUSH_LIST){
+			// 	fprintf(stderr, "[BUF_FLUSH_LIST]Clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
+			// }
+			// else if(flush_type== BUF_FLUSH_LRU){
+			// 	fprintf(stderr, "[BUF_FLUSH_LRU]Clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
+			// }
+			// else if(flush_type == BUF_FLUSH_SINGLE_PAGE){
+			// 	fprintf(stderr, "[BUF_FLUSH_SINGLE_PAGE]Clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
+			// }
 			//nvdimm
 		return(false);
 	}
@@ -640,15 +644,15 @@ buf_flush_ready_for_flush(
 	case BUF_FLUSH_LRU:
 	case BUF_FLUSH_SINGLE_PAGE:
 		//nvdimm
-		if(flush_type == BUF_FLUSH_LIST){
-				fprintf(stderr, "[BUF_FLUSH_LIST]Dirty page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
-			}
-			else if(flush_type== BUF_FLUSH_LRU){
-				fprintf(stderr, "[BUF_FLUSH_LRU]Dirty page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
-			}
-			else if(flush_type == BUF_FLUSH_SINGLE_PAGE){
-				fprintf(stderr, "[BUF_FLUSH_SINGLE_PAGE]Dirty page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
-			}
+		// if(flush_type == BUF_FLUSH_LIST){
+		// 		fprintf(stderr, "[BUF_FLUSH_LIST]Dirty page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
+		// 	}
+		// 	else if(flush_type== BUF_FLUSH_LRU){
+		// 		fprintf(stderr, "[BUF_FLUSH_LRU]Dirty page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
+		// 	}
+		// 	else if(flush_type == BUF_FLUSH_SINGLE_PAGE){
+		// 		fprintf(stderr, "[BUF_FLUSH_SINGLE_PAGE]Dirty page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
+		// 	}
 		//nvdimm
 		return(true);
 
@@ -677,7 +681,7 @@ buf_flush_remove(
 
 	/* Important that we adjust the hazard pointer before removing
 	the bpage from flush list. */
-	fprintf(stderr, "buf_flush_remove: page : (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+	// fprintf(stderr, "buf_flush_remove: page : (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	buf_pool->flush_hp.adjust(bpage);
 
 	switch (buf_page_get_state(bpage)) {
@@ -816,8 +820,14 @@ buf_flush_write_complete(
 	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
 
 	ut_ad(bpage);
+	if(bpage->is_dirtified){
+		fprintf(stderr, "Skip flush_list remove : (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+		bpage->oldest_modification = bpage->newest_modification;
+	}
+	else{
+		buf_flush_remove(bpage);
+	}
 	
-	buf_flush_remove(bpage);
 
 	flush_type = buf_page_get_flush_type(bpage);
 	buf_pool->n_flush[flush_type]--;
@@ -1142,11 +1152,9 @@ buf_flush_write_block_low(
 		
 	} else if (flush_type == BUF_FLUSH_SINGLE_PAGE) {
 		buf_dblwr_write_single_page(bpage, sync);
-		// fprintf(stderr, "[NVDIMM_FLUSH] Double Write\n");
 	} else {
 		ut_ad(!sync);
 		buf_dblwr_add_to_batch(bpage);
-		// fprintf(stderr, "[NVDIMM_FLUSH] Double Write\n");
 	}
 
 	/* When doing single page flushing the IO is done synchronously
@@ -1693,9 +1701,17 @@ buf_flush_LRU_list_batch(
 		buf_pool->lru_hp.set(prev);
 
 		BPageMutex*	block_mutex = buf_page_get_mutex(bpage);
-		//nvdimm
-		//여기가 flush 내릴 방법이 필요함
 		mutex_enter(block_mutex);
+		//nvdimm
+		if(check_clean_checkpoint_page(bpage)){
+			fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
+			bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
+			bpage->is_dirtified = true;
+			mutex_exit(block_mutex);
+			buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_LRU, false);
+			count++;
+			goto finish_write;
+		}
 		//msj
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
@@ -1717,7 +1733,7 @@ buf_flush_LRU_list_batch(
 			ut_ad(buf_pool->lru_hp.is_hp(prev));
 			mutex_exit(block_mutex);
 		}
-
+finish_write:
 		ut_ad(!mutex_own(block_mutex));
 		ut_ad(buf_pool_mutex_own(buf_pool));
 
@@ -1817,7 +1833,6 @@ buf_do_flush_list_batch(
 	     && bpage->oldest_modification < lsn_limit;
 	     bpage = buf_pool->flush_hp.get(),
 	     ++scanned) {
-		print_page_info(bpage);
 		buf_page_t*	prev;
 		ut_a(bpage->oldest_modification > 0);
 		ut_ad(bpage->in_flush_list);
@@ -3888,4 +3903,229 @@ FlushObserver::flush()
 			os_thread_sleep(2000);
 		}
 	}
+}
+
+//checpoint됐으며 dyanmic ipl영역을 가지는 clean page flush custom 함수
+ibool
+buf_flush_ipl_clean_checkpointed_page( 
+/*===========*/
+	buf_pool_t*	buf_pool,	/*!< in: buffer pool instance */
+	buf_page_t*	bpage,		/*!< in: buffer control block */
+	buf_flush_t	flush_type,	/*!< in: type of flush */
+	bool		sync)		/*!< in: true if sync IO request */
+{
+	BPageMutex*	block_mutex;
+
+	ut_ad(flush_type < BUF_FLUSH_N_TYPES);
+	ut_ad(buf_pool_mutex_own(buf_pool));
+	ut_ad(buf_page_in_file(bpage));
+
+	block_mutex = buf_page_get_mutex(bpage);
+	ut_ad(mutex_own(block_mutex));
+
+	bool	is_uncompressed;
+
+	is_uncompressed = (buf_page_get_state(bpage) == BUF_BLOCK_FILE_PAGE);
+	ut_ad(is_uncompressed == (block_mutex != &buf_pool->zip_mutex));
+
+	ibool		flush;
+	rw_lock_t*	rw_lock;
+	bool		no_fix_count = bpage->buf_fix_count == 0;
+
+	if (!is_uncompressed) {
+		flush = TRUE;
+		rw_lock = NULL;
+	} else if (!(no_fix_count || flush_type == BUF_FLUSH_LIST)
+		   || (!no_fix_count
+		       && srv_shutdown_state <= SRV_SHUTDOWN_CLEANUP
+		       && fsp_is_system_temporary(bpage->id.space()))) {
+		/* This is a heuristic, to avoid expensive SX attempts. */
+		/* For table residing in temporary tablespace sync is done
+		using IO_FIX and so before scheduling for flush ensure that
+		page is not fixed. */
+		flush = FALSE;
+	} else {
+		rw_lock = &reinterpret_cast<buf_block_t*>(bpage)->lock;
+		if (flush_type != BUF_FLUSH_LIST) {
+			flush = rw_lock_sx_lock_nowait(rw_lock, BUF_IO_WRITE);
+		} else {
+			/* Will SX lock later */
+			flush = TRUE;
+		}
+	}
+
+	if (flush) {
+
+		/* We are committed to flushing by the time we get here */
+
+		buf_page_set_io_fix(bpage, BUF_IO_WRITE);
+
+		buf_page_set_flush_type(bpage, flush_type);
+
+		if (buf_pool->n_flush[flush_type] == 0) {
+			os_event_reset(buf_pool->no_flush[flush_type]);
+		}
+
+		++buf_pool->n_flush[flush_type];
+
+		mutex_exit(block_mutex);
+
+		buf_pool_mutex_exit(buf_pool);
+
+		if (flush_type == BUF_FLUSH_LIST
+		    && is_uncompressed
+		    && !rw_lock_sx_lock_nowait(rw_lock, BUF_IO_WRITE)) {
+
+			if (!fsp_is_system_temporary(bpage->id.space())) {
+				/* avoiding deadlock possibility involves
+				doublewrite buffer, should flush it, because
+				it might hold the another block->lock. */
+				buf_dblwr_flush_buffered_writes();
+			} else {
+				buf_dblwr_sync_datafiles();
+			}
+
+			rw_lock_sx_lock_gen(rw_lock, BUF_IO_WRITE);
+		}
+
+		/* If there is an observer that want to know if the asynchronous
+		flushing was sent then notify it.
+		Note: we set flush observer to a page with x-latch, so we can
+		guarantee that notify_flush and notify_remove are called in pair
+		with s-latch on a uncompressed page. */
+		if (bpage->flush_observer != NULL) {
+			buf_pool_mutex_enter(buf_pool);
+
+			bpage->flush_observer->notify_flush(buf_pool, bpage);
+
+			buf_pool_mutex_exit(buf_pool);
+		}
+
+		/* Even though bpage is not protected by any mutex at this
+		point, it is safe to access bpage, because it is io_fixed and
+		oldest_modification != 0.  Thus, it cannot be relocated in the
+		buffer pool or removed from flush_list or LRU_list. */
+
+		buf_flush_ipl_clean_checkpointed_block_low(bpage, flush_type, sync);
+
+	}
+
+	return(flush);
+}
+void
+buf_flush_ipl_clean_checkpointed_block_low(
+/*======================*/
+	buf_page_t*	bpage,		/*!< in: buffer block to write */
+	buf_flush_t	flush_type,	/*!< in: type of flush */
+	bool		sync)		/*!< in: true if sync IO request */
+{
+	page_t*	frame = NULL;
+
+#ifdef UNIV_DEBUG
+	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
+	ut_ad(!buf_pool_mutex_own(buf_pool));
+#endif /* UNIV_DEBUG */
+
+	DBUG_PRINT("ib_buf", ("flush %s %u page " UINT32PF ":" UINT32PF,
+			      sync ? "sync" : "async", (unsigned) flush_type,
+			      bpage->id.space(), bpage->id.page_no()));
+
+	ut_ad(buf_page_in_file(bpage));
+
+	/* We are not holding buf_pool->mutex or block_mutex here.
+	Nevertheless, it is safe to access bpage, because it is
+	io_fixed and oldest_modification != 0.  Thus, it cannot be
+	relocated in the buffer pool or removed from flush_list or
+	LRU_list. */
+	ut_ad(!buf_pool_mutex_own(buf_pool));
+	ut_ad(!buf_page_get_mutex(bpage)->is_owned());
+	ut_ad(buf_page_get_io_fix(bpage) == BUF_IO_WRITE);
+
+#ifdef UNIV_IBUF_COUNT_DEBUG
+	ut_a(ibuf_count_get(bpage->id) == 0);
+#endif /* UNIV_IBUF_COUNT_DEBUG */
+
+	ut_ad(bpage->newest_modification != 0);
+
+	/* Force the log to the disk before writing the modified block */
+	if (!srv_read_only_mode) {
+		log_write_up_to(bpage->newest_modification, true);
+	}
+
+	switch (buf_page_get_state(bpage)) {
+	case BUF_BLOCK_POOL_WATCH:
+	case BUF_BLOCK_ZIP_PAGE: /* The page should be dirty. */
+	case BUF_BLOCK_NOT_USED:
+	case BUF_BLOCK_READY_FOR_USE:
+	case BUF_BLOCK_MEMORY:
+	case BUF_BLOCK_REMOVE_HASH:
+		ut_error;
+		break;
+	case BUF_BLOCK_ZIP_DIRTY:
+		frame = bpage->zip.data;
+
+		mach_write_to_8(frame + FIL_PAGE_LSN,
+				bpage->newest_modification);
+
+		ut_a(page_zip_verify_checksum(frame, bpage->size.physical()));
+		break;
+	case BUF_BLOCK_FILE_PAGE:
+		frame = bpage->zip.data;
+		if (!frame) {
+			frame = ((buf_block_t*) bpage)->frame;
+		}
+
+		buf_flush_init_for_writing(
+			reinterpret_cast<const buf_block_t*>(bpage),
+			reinterpret_cast<const buf_block_t*>(bpage)->frame,
+			bpage->zip.data ? &bpage->zip : NULL,
+			bpage->newest_modification,
+			fsp_is_checksum_disabled(bpage->id.space()));
+		break;
+	}
+
+	/* Disable use of double-write buffer for temporary tablespace.
+	Given the nature and load of temporary tablespace doublewrite buffer
+	adds an overhead during flushing. */
+
+	if (!srv_use_doublewrite_buf
+	    || buf_dblwr == NULL
+	    || srv_read_only_mode
+	    || fsp_is_system_temporary(bpage->id.space())) {
+
+		ut_ad(!srv_read_only_mode
+		      || fsp_is_system_temporary(bpage->id.space()));
+
+		ulint	type = IORequest::WRITE | IORequest::DO_NOT_WAKE;
+
+		IORequest	request(type);
+
+		//여기서 split page flag를 활성화 시켜서 write를 수행한다.
+		//nvdimm_ipl_remove_split_merge_map 필요
+
+		if(nvdimm_ipl_remove_split_merge_map(bpage, bpage->id)){
+			fprintf(stderr, "[FLUSH]Clean checkpointer dynamic page: (%u, %u) frmae: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
+			
+			fil_io(request,
+			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
+			frame, bpage);
+			// buf_page_io_complete(bpage, sync);
+		}
+		// if (sync) {
+		// 	ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
+		// 	fil_flush(bpage->id.space()); //catch_flush
+
+		// 	/* true means we want to evict this page from the
+		// 	LRU list as well. */
+		// 	buf_page_io_complete(bpage, true);
+		// }
+		
+	}
+
+	/* Increment the counter of I/O operations used
+	for selecting LRU policy. */
+	buf_LRU_stat_inc_io();
+	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
+	buf_pool_mutex_enter(buf_pool);
+	ut_ad(buf_pool_mutex_own(buf_pool));
 }

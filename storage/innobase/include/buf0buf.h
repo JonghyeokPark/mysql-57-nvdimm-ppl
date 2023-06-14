@@ -1698,6 +1698,7 @@ public:
 	IPL_INFO *	page_ipl_info;
 	bool 		is_iplized;
 	bool 		is_split_page;
+	bool 		is_dirtified;
 
 };
 

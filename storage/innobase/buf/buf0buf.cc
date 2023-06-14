@@ -5898,6 +5898,8 @@ corrupt:
 		by the caller explicitly. */
 		if (buf_page_get_flush_type(bpage) == BUF_FLUSH_LRU) {
 			evict = true;
+			// fprintf(stderr, "evicting page page_id: (%u, %u)\n",
+				// bpage->id.space(), bpage->id.page_no());
 		}
 
 		if (evict) {

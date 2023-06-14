@@ -384,7 +384,7 @@ btr_cur_latch_leaves(
 			cursor->left_block = get_block;
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(get_block->frame), page_get_page_no(get_block->frame));
 #ifdef UNIV_BTR_DEBUG
-			// fprintf(stderr, "btr_page_get_prev: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_prev(get_block->frame, mtr));
+			// fprintf(stderr, "btr_page_get_next: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_next(get_block->frame, mtr));
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
 			ut_a(page_is_comp(get_block->frame)
 			     == page_is_comp(page));

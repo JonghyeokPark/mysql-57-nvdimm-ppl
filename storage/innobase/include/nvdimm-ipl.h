@@ -106,9 +106,6 @@ struct IPL_INFO
   unsigned char* static_region_pointer;
   unsigned char* dynamic_region_pointer;
   ulint page_ipl_region_size;
-  lsn_t oldest_modification;
-  lsn_t newest_modification;
-  bool is_dirtified;
 };
 
 typedef IPL_INFO ipl_info;
@@ -130,8 +127,6 @@ typedef struct NVDIMM_SYSTEM
   uint dynamic_ipl_per_page_size;
   uint dynamic_ipl_count;
   uint dynamic_ipl_max_page_count;
-
- 
 }nvdimm_system;
 
 typedef struct APPLY_LOG_INFO
@@ -173,8 +168,6 @@ void set_for_ipl_page(buf_page_t* bpage);
 void print_page_info(buf_page_t * bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
 bool check_clean_checkpoint_page(buf_page_t * bpage);
-void make_dirty_clean_checkpoint_page(buf_page_t * bpage);
-bool is_dirtified_page(buf_page_t * bpage);
 
 
 

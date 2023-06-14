@@ -1621,6 +1621,7 @@ buf_LRU_remove_block(
 	buf_pool->stat.LRU_bytes -= bpage->size.physical();
 
 	buf_unzip_LRU_remove_block_if_needed(bpage);
+	// fprintf(stderr, "buf_LRU_remove_block block : page_id:(%u, %u) frame: %p\n",bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 
 	/* If the LRU list is so short that LRU_old is not defined,
 	clear the "old" flags and return */
@@ -1893,6 +1894,7 @@ buf_LRU_free_page(
 		/* Do not completely free dirty blocks. */
 
 		if (bpage->oldest_modification) {
+			// fprintf(stderr, "[FAIL] buf_LRU_free_page: page_id: (%u, %u) frame: %u\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 			goto func_exit;
 		}
 	} else if (bpage->oldest_modification > 0
@@ -2096,7 +2098,8 @@ func_exit:
 		mutex_exit(block_mutex);
 	}
 
-	buf_LRU_block_free_hashed_page((buf_block_t*) bpage);
+	buf_LRU_block_free_hashed_page((buf_block_t*) bpage); // 왜 잘못된게 넘어갈까?
+	// fprintf(stderr, "buf_LRU_block_free_hashed_page block frame: %p\n", ((buf_block_t*) bpage)->frame);
 	return(true);
 }
 
@@ -2168,6 +2171,7 @@ buf_LRU_block_free_non_file_page(
 		ut_d(block->in_withdraw_list = TRUE);
 	} else {
 		UT_LIST_ADD_FIRST(buf_pool->free, &block->page);
+		// fprintf(stderr, "Success add page to free list: (%u, %u) frmae: %p\n", block->frame);
 		ut_d(block->page.in_free_list = TRUE);
 	}
 
@@ -2428,6 +2432,7 @@ buf_LRU_block_free_hashed_page(
 	buf_page_mutex_enter(block);
 
 	if (buf_pool->flush_rbt == NULL) {
+		// fprintf(stderr, "Reset page number: (%u, %u) frmae: %p\n", block->page.id.space(), block->page.id.page_no(), block->frame);
 		block->page.id.reset(ULINT32_UNDEFINED, ULINT32_UNDEFINED);
 	}
 
