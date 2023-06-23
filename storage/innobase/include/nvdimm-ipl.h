@@ -97,7 +97,6 @@ void nvdimm_free(const uint64_t pool_size);
 #define PAGE_NO_OFFSET 4UL
 #define DYNAMIC_ADDRESS_OFFSET 8UL
 #define IPL_LOG_HEADER_SIZE 16UL
-#define STATIC_MAX_SIZE (1024UL - IPL_LOG_HEADER_SIZE)
 typedef ib_mutex_t my_mutex;
 
 
@@ -118,15 +117,15 @@ typedef struct NVDIMM_SYSTEM
 
   unsigned char* static_start_pointer;
   uint64_t static_ipl_size;
-  uint static_ipl_per_page_size;
+  uint64_t static_ipl_per_page_size;
   uint static_ipl_count;
-  uint static_ipl_max_page_count;
+  uint64_t static_ipl_max_page_count;
   
   unsigned char* dynamic_start_pointer;
   uint64_t dynamic_ipl_size;
-  uint dynamic_ipl_per_page_size;
+  uint64_t dynamic_ipl_per_page_size;
   uint dynamic_ipl_count;
-  uint dynamic_ipl_max_page_count;
+  uint64_t dynamic_ipl_max_page_count;
 }nvdimm_system;
 
 typedef struct APPLY_LOG_INFO
@@ -140,8 +139,28 @@ typedef struct APPLY_LOG_INFO
 
 }apply_log_info;
 
+namespace std {
+    namespace tr1 {
+        template <>
+        struct hash<page_id_t> {
+            size_t operator()(const page_id_t& key) const {
+                // space와 page_no를 해싱하여 해시 값을 반환합니다.
+                // 해싱 로직을 구현합니다.
 
-extern std::tr1::unordered_map<ulint,ipl_info *> ipl_map; // (page_id , offset in NVDIMM IPL regions)
+                // std::hash를 사용하여 space와 page_no를 해싱합니다.
+                // 필요에 따라 space와 page_no의 해시 함수를 개별적으로 정의할 수도 있습니다.
+                size_t spaceHash = std::tr1::hash<ib_uint32_t>()(key.space());
+                size_t pageHash = std::tr1::hash<ib_uint32_t>()(key.page_no());
+
+                // spaceHash와 pageHash를 조합하여 최종 해시 값을 반환합니다.
+                // ex) spaceHash ^ pageHash
+                return spaceHash ^ pageHash;
+            }
+        };
+    }
+}
+
+extern std::tr1::unordered_map<page_id_t,ipl_info *> ipl_map; // (page_id , offset in NVDIMM IPL regions)
 extern nvdimm_system * nvdimm_info;
 
 /* IPL operations */
@@ -167,7 +186,7 @@ bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 void print_page_info(buf_page_t * bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
-bool check_clean_checkpoint_page(buf_page_t * bpage);
+bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush);
 
 
 

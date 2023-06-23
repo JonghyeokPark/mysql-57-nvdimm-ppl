@@ -11,7 +11,7 @@
 #include <errno.h>
 #include <stddef.h>
 
-std::tr1::unordered_map<ulint, ipl_info * > ipl_map;
+std::tr1::unordered_map<page_id_t, ipl_info * > ipl_map;
 
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
@@ -24,13 +24,13 @@ nvdimm_system * nvdimm_info = NULL;
 @return true if mmaped file creation / initilzation is failed
 */
 
-bool make_static_and_dynamic_ipl_region(){
+bool make_static_and_dynamic_ipl_region(){ //여기서 static 크기 바꿔주면 STATIC_MAX_SIZE 바꿔줘야함.
   nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
-  nvdimm_info->static_ipl_size = (1024UL + 512) * 1024UL * 1024UL; // static ipl size : 1.5GB
-  nvdimm_info->dynamic_ipl_size = 512 * 1024 * 1024UL; // dynamic ipl size : 0.5GB
+  nvdimm_info->static_ipl_size = (1024UL + 824) * 1024UL * 1024UL; // static ipl size : 1,8GB
+  nvdimm_info->dynamic_ipl_size = 200 * 1024 * 1024UL; // dynamic ipl size : 0.2GB
 
-  nvdimm_info->static_ipl_per_page_size = 1024; // per page static size : 512B
-  nvdimm_info->dynamic_ipl_per_page_size = 1024 * 8; // per page dynamic size : 1KB
+  nvdimm_info->static_ipl_per_page_size = 1200; // per page static size : 1.2ㅏㅠ
+  nvdimm_info->dynamic_ipl_per_page_size = 1024 * 8; // per page dynamic size : 8KB
 
   nvdimm_info->static_ipl_count = 0; 
   nvdimm_info->dynamic_ipl_count = 0;
@@ -39,7 +39,7 @@ bool make_static_and_dynamic_ipl_region(){
   nvdimm_info->dynamic_ipl_max_page_count = nvdimm_info->dynamic_ipl_size / nvdimm_info->dynamic_ipl_per_page_size; // dynamic ipl max page count : 1M
 
   nvdimm_info->static_start_pointer = nvdimm_ptr;
-  nvdimm_info->dynamic_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_size;
+  nvdimm_info->dynamic_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_per_page_size * nvdimm_info->static_ipl_max_page_count ;
   fprintf(stderr, "static start pointer : %p, dynamic start pointer : %p\n", nvdimm_info->static_start_pointer, nvdimm_info->dynamic_start_pointer);
   make_static_indirection_queue(nvdimm_info->static_start_pointer, nvdimm_info->static_ipl_per_page_size, nvdimm_info->static_ipl_max_page_count);
   make_dynamic_indirection_queue(nvdimm_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_per_page_size, nvdimm_info->dynamic_ipl_max_page_count);

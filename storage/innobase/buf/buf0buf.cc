@@ -5869,6 +5869,15 @@ corrupt:
 		buf_pool->stat.n_pages_read++;
 
 		if (uncompressed) {
+			if (bpage->is_iplized){
+				//page를 완전히 가져오고 실행해보기
+				// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",bpage->id.space(), bpage->id.page_no(), bpage);
+				mtr_t temp_mtr;
+				mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+				mtr_start(&temp_mtr);
+				nvdimm_ipl_log_apply((buf_block_t*) bpage);
+				mtr_commit(&temp_mtr);
+			}
 			rw_lock_x_unlock_gen(&((buf_block_t*) bpage)->lock,
 					     BUF_IO_READ);
 		}

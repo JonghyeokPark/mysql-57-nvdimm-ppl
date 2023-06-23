@@ -209,7 +209,7 @@ bool copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 		
 		memcpy(apply_log_buffer + offset, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
 		flush_cache(apply_log_buffer + offset, apply_info->log_len);
-		offset += STATIC_MAX_SIZE;
+		offset += nvdimm_info->static_ipl_per_page_size	- IPL_LOG_HEADER_SIZE;
 
 		uint dynamic_region_size = apply_info->log_len - (nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
 		// fprintf(stderr, "dynamic_region_size: %u\n", dynamic_region_size);
@@ -243,7 +243,6 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 	}
 	temp_mtr->discard_modifications();
 	mtr_commit(temp_mtr);
-	buf_page_mutex_exit(apply_info->block);
 }
 
 void nvdimm_ipl_log_apply(buf_block_t* block) {
@@ -254,7 +253,6 @@ void nvdimm_ipl_log_apply(buf_block_t* block) {
 	mtr_t temp_mtr;
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-	buf_page_mutex_enter(block);
 
 	// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying start!";
 	// ib::info() << "have_to_flush : " <<apply_page->is_split_page << "is_iplized : " << apply_page->is_iplized ;
@@ -273,8 +271,7 @@ void nvdimm_ipl_log_apply(buf_block_t* block) {
 	if(copy_log_to_mem_to_apply(&apply_info, &temp_mtr)){
 		// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying finish!";
 	}
-  	
-	
+
 	return;
 }
 
@@ -283,9 +280,9 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	// fprintf(stderr, "Save ipl info page(%u, %u), static: %p, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->page_ipl_info->static_region_pointer, bpage->page_ipl_info->dynamic_region_pointer);
 	page_id_t page_id = bpage->id;
-	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(page_id.fold());
+	std::tr1::unordered_map<page_id_t, ipl_info * >::iterator it = ipl_map.find(bpage->id);
 	if(it == ipl_map.end()){
-		ipl_map.insert(std::make_pair(page_id.fold(), bpage->page_ipl_info));
+		ipl_map.insert(std::make_pair(bpage->id, bpage->page_ipl_info));
 	}
 	mutex_exit(&nvdimm_info->ipl_map_mutex);
 }
@@ -300,18 +297,17 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 
 bool nvdimm_ipl_remove_split_merge_map(buf_page_t * bpage, page_id_t page_id){
 	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p, page_ipl_info : %p\n", page_id.space(), page_id.page_no(), bpage->page_ipl_info->static_region_pointer, bpage->page_ipl_info->dynamic_region_pointer, bpage->page_ipl_info);
+	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	ipl_info * page_ipl_info = bpage->page_ipl_info;
 	bpage->is_iplized = false;
 	bpage->is_split_page = false;
-	mutex_enter(&nvdimm_info->ipl_map_mutex);
-	ipl_map.erase(page_id.fold());
+	ipl_map.erase(page_id);
 	if(free_dynamic_address_to_indirection_queue(page_ipl_info->dynamic_region_pointer) && free_static_address_to_indirection_queue(page_ipl_info->static_region_pointer)){
 		ut_free(bpage->page_ipl_info);
 		bpage->page_ipl_info = NULL; // 확인해보기.
-		mutex_exit(&nvdimm_info->ipl_map_mutex);
-		return true;
 	}
-
+	mutex_exit(&nvdimm_info->ipl_map_mutex);
+	return true;
 }
 
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
@@ -323,7 +319,7 @@ bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
 
 void set_for_ipl_page(buf_page_t* bpage){
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
-	std::tr1::unordered_map<ulint, ipl_info * >::iterator it = ipl_map.find(bpage->id.fold());
+	std::tr1::unordered_map<page_id_t, ipl_info * >::iterator it = ipl_map.find(bpage->id);
 	if(it != ipl_map.end()){
 		// fprintf(stderr, "Read ipl page! page_id(%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		bpage->is_iplized = true;
@@ -389,10 +385,11 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 	return false;
 }
 
-bool check_clean_checkpoint_page(buf_page_t * bpage){
+bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush){
 	if(bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
-		if(bpage->is_iplized){
+		if(bpage->is_iplized && !bpage->is_split_page){
 			ipl_info * page_ipl_info = bpage->page_ipl_info;
+			if(is_single_page_flush)	return true; // single_page flush인 경우
 			if(page_ipl_info->dynamic_region_pointer != NULL){
 				return true;
 			}
@@ -400,4 +397,3 @@ bool check_clean_checkpoint_page(buf_page_t * bpage){
 	}
 	return false;
 }
-

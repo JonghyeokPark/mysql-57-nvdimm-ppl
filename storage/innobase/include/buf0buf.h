@@ -306,6 +306,13 @@ public:
 	{
 		return(a.space() == m_space && a.page_no() == m_page_no);
 	}
+	/** Check if a given page_id_t object is equal to the current one.
+	@param[in]	a	page_id_t object to compare
+	@return true if equal */
+	inline bool operator==(const page_id_t& a) const
+	{
+		return(a.space() == m_space && a.page_no() == m_page_no);
+	}
 
 private:
 

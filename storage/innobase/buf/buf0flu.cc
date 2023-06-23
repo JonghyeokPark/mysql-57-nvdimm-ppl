@@ -623,17 +623,6 @@ buf_flush_ready_for_flush(
 
 	if (bpage->oldest_modification == 0
 	    || buf_page_get_io_fix(bpage) != BUF_IO_NONE) {
-			//nvdimm
-			// if(flush_type == BUF_FLUSH_LIST){
-			// 	fprintf(stderr, "[BUF_FLUSH_LIST]Clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
-			// }
-			// else if(flush_type== BUF_FLUSH_LRU){
-			// 	fprintf(stderr, "[BUF_FLUSH_LRU]Clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
-			// }
-			// else if(flush_type == BUF_FLUSH_SINGLE_PAGE){
-			// 	fprintf(stderr, "[BUF_FLUSH_SINGLE_PAGE]Clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
-			// }
-			//nvdimm
 		return(false);
 	}
 
@@ -643,17 +632,6 @@ buf_flush_ready_for_flush(
 	case BUF_FLUSH_LIST:
 	case BUF_FLUSH_LRU:
 	case BUF_FLUSH_SINGLE_PAGE:
-		//nvdimm
-		// if(flush_type == BUF_FLUSH_LIST){
-		// 		fprintf(stderr, "[BUF_FLUSH_LIST]Dirty page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
-		// 	}
-		// 	else if(flush_type== BUF_FLUSH_LRU){
-		// 		fprintf(stderr, "[BUF_FLUSH_LRU]Dirty page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
-		// 	}
-		// 	else if(flush_type == BUF_FLUSH_SINGLE_PAGE){
-		// 		fprintf(stderr, "[BUF_FLUSH_SINGLE_PAGE]Dirty page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(),bpage->oldest_modification, bpage->newest_modification);
-		// 	}
-		//nvdimm
 		return(true);
 
 	case BUF_FLUSH_N_TYPES:
@@ -821,8 +799,8 @@ buf_flush_write_complete(
 
 	ut_ad(bpage);
 	if(bpage->is_dirtified){
-		fprintf(stderr, "Skip flush_list remove : (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
-		bpage->oldest_modification = bpage->newest_modification;
+		// fprintf(stderr, "Skip flush_list remove : (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+		// bpage->oldest_modification = bpage->newest_modification;
 	}
 	else{
 		buf_flush_remove(bpage);
@@ -1703,9 +1681,9 @@ buf_flush_LRU_list_batch(
 		BPageMutex*	block_mutex = buf_page_get_mutex(bpage);
 		mutex_enter(block_mutex);
 		//nvdimm
-		if(check_clean_checkpoint_page(bpage)){
-			fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
-			bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
+		if(check_clean_checkpoint_page(bpage, false)){
+			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
+			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
 			bpage->is_dirtified = true;
 			mutex_exit(block_mutex);
 			buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_LRU, false);
@@ -2260,6 +2238,15 @@ buf_flush_single_page_from_LRU(
 
 		mutex_enter(block_mutex);
 
+		if(check_clean_checkpoint_page(bpage, true)){
+			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
+			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
+			//여기서 mutex를 풀어줄지 실행해보기 생각하기.
+			bpage->is_dirtified = true;
+			freed = buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
+			goto clean_flush_end;
+		}
+
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
 			clean and is not IO-fixed or buffer fixed. */
@@ -2284,7 +2271,7 @@ buf_flush_single_page_from_LRU(
 
 			freed = buf_flush_page(
 				buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
-
+clean_flush_end:
 			if (freed) {
 				break;
 			}
@@ -4104,21 +4091,22 @@ buf_flush_ipl_clean_checkpointed_block_low(
 		//nvdimm_ipl_remove_split_merge_map 필요
 
 		if(nvdimm_ipl_remove_split_merge_map(bpage, bpage->id)){
-			fprintf(stderr, "[FLUSH]Clean checkpointer dynamic page: (%u, %u) frmae: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
+			// fprintf(stderr, "[FLUSH]Clean checkpointer dynamic page: (%u, %u) frmae: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 			
 			fil_io(request,
 			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 			frame, bpage);
-			// buf_page_io_complete(bpage, sync);
 		}
-		// if (sync) {
-		// 	ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
-		// 	fil_flush(bpage->id.space()); //catch_flush
+		if (sync) { // single page flush인 경우
+			ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
+			fil_flush(bpage->id.space()); //catch_flush
 
-		// 	/* true means we want to evict this page from the
-		// 	LRU list as well. */
-		// 	buf_page_io_complete(bpage, true);
-		// }
+			/* true means we want to evict this page from the
+			LRU list as well. */
+			buf_page_io_complete(bpage, true);
+			buf_LRU_stat_inc_io();
+			return;
+		}
 		
 	}
 
