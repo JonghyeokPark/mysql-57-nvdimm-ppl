@@ -593,9 +593,9 @@ buf_flush_ready_for_replace(
 			
 	}
 	//nvdimm 여기까지 들어와서 scheduling이 변동되는 경우 is_dirtified 된 경우 스킵
-	if(bpage->is_dirtified){
-		return (FALSE);
-	}
+	// if(bpage->is_dirtified){
+	// 	return (FALSE);
+	// }
 	ib::fatal() << "Buffer block " << bpage << " state " <<  bpage->state
 		<< " in the LRU list!";
 
@@ -799,6 +799,11 @@ buf_flush_write_complete(
 
 	ut_ad(bpage);
 	if(bpage->is_dirtified){
+		if (bpage->flush_observer != NULL) {
+			bpage->flush_observer->notify_remove(buf_pool, bpage);
+
+			bpage->flush_observer = NULL;
+		}
 		// fprintf(stderr, "Skip flush_list remove : (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		// bpage->oldest_modification = bpage->newest_modification;
 	}
@@ -2237,7 +2242,7 @@ buf_flush_single_page_from_LRU(
 		block_mutex = buf_page_get_mutex(bpage);
 
 		mutex_enter(block_mutex);
-
+		//nvdimm
 		if(check_clean_checkpoint_page(bpage, true)){
 			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
 			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);

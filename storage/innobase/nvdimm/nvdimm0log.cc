@@ -28,6 +28,7 @@
 
 unsigned char * get_static_ipl_address(page_id_t page_id){
 	unsigned char * static_ipl_address = alloc_static_address_from_indirection_queue();
+	if(static_ipl_address == NULL)	return NULL; // 더이상 할당할 static이 없는 경우
 	ulint offset = 0;
 	mach_write_to_4(static_ipl_address + offset, page_id.space());
 	offset += 4;
@@ -39,11 +40,8 @@ unsigned char * get_static_ipl_address(page_id_t page_id){
 }
 
 bool alloc_dynamic_ipl_region(ipl_info * page_ipl_info){
-	if(page_ipl_info->page_ipl_region_size >= nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size){ // 일단, 1KB + 256Byte까지만 할당 가능하게 하기.
-		fprintf(stderr, "Error Max page_ipl_region_size\n");
-		return false;
-	}
 	unsigned char * dynamic_address = alloc_dynamic_address_from_indirection_queue();
+	if(dynamic_address == NULL)	return false; 
 	unsigned char * pointer_to_store_dynamic_address = page_ipl_info->static_region_pointer + DYNAMIC_ADDRESS_OFFSET;
 	mach_write_to_8(pointer_to_store_dynamic_address, (uint64_t)dynamic_address);
 	flush_cache(pointer_to_store_dynamic_address, 8);
@@ -54,8 +52,10 @@ bool alloc_dynamic_ipl_region(ipl_info * page_ipl_info){
 
 ipl_info * alloc_static_ipl_info_and_region(page_id_t page_id){
 	//Check nvdimm region is full.
+	unsigned char * static_ipl_address = get_static_ipl_address(page_id);
+	if(static_ipl_address == NULL)	return NULL;
 	ipl_info * new_ipl_info = static_cast<ipl_info *>(ut_zalloc_nokey(sizeof(ipl_info)));
-	new_ipl_info->static_region_pointer = get_static_ipl_address(page_id);
+	new_ipl_info->static_region_pointer = static_ipl_address;
 	new_ipl_info->dynamic_region_pointer = NULL;
 	new_ipl_info->page_ipl_region_size = IPL_LOG_HEADER_SIZE;
 	// fprintf(stderr, "alloc_static_ipl_info_and_region page_id: (%u, %u), static_ipl: %p\n", page_id.space(), page_id.page_no(), new_ipl_info->static_region_pointer);
@@ -145,7 +145,8 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 	if(remain_len > 0){
 		if(page_ipl_info->dynamic_region_pointer == NULL){
 			if(!alloc_dynamic_ipl_region(page_ipl_info)){
-				//Dynamic 영역을 할당 받을 수 없는 경우.
+				//Dynamic 영역을 할당 받을 수 없는 경우, page를 flush하고 새로 할당받기
+				bpage->is_split_page = true;
 				free(write_ipl_log_buffer);
 				return false;
 			}
@@ -176,16 +177,21 @@ bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 	// fprintf(stderr, "Add log start! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), type, len);
 	//if first write, alloc the new ipl info
 	// fprintf(stderr, "buffer size: %zu\n", max_log_size);
-	if (bpage->page_ipl_info == NULL) {
-		bpage->is_iplized = true;
+	if (!bpage->is_iplized) {
 		bpage->page_ipl_info = alloc_static_ipl_info_and_region(page_id);
+		if(bpage->page_ipl_info == NULL){
+			bpage->is_split_page = true;
+			mtr_commit(&temp_mtr);
+			return false;
+		}
+		bpage->is_iplized = true;
 	}
 
 	bool return_value = true;
 	if(!write_ipl_log_header_and_body(bpage, len, type, log)){
 		return_value = false;
 	}
-	if(return_value){
+		if(return_value){
 		// fprintf(stderr, "log add, Page id : (%u, %u) Type : %d len: %lu, static pointer : %p, dynamic pointer : %p ipl_len : %u\n",page_id.space(), page_id.page_no(), type, len, bpage->page_ipl_info->static_region_pointer, bpage->page_ipl_info->dynamic_region_pointer, bpage->page_ipl_info->page_ipl_region_size);
 	}
 	

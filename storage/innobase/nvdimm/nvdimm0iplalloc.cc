@@ -22,13 +22,13 @@ void make_static_indirection_queue(unsigned char * static_start_pointer, uint64_
 unsigned char * alloc_static_address_from_indirection_queue(){
   mutex_enter(&nvdimm_info->static_region_mutex);
   if(static_ipl_queue.empty()){
-      fprintf(stderr, "Error : static_ipl_queue is empty\n");
+      // fprintf(stderr, "Error : static_ipl_queue is empty\n");
       mutex_exit(&nvdimm_info->static_region_mutex);
       return NULL;
   }
   unsigned char * ret = static_ipl_queue.front();
   static_ipl_queue.pop();
-  fprintf(stderr, "Available static region : %u\n", static_ipl_queue.size());
+  fprintf(stderr, "static_ipl usage : %d\n", nvdimm_info->static_ipl_max_page_count - static_ipl_queue.size());
   mutex_exit(&nvdimm_info->static_region_mutex);
   return ret;
 }
@@ -63,13 +63,13 @@ void make_dynamic_indirection_queue(unsigned char * dynamic_start_pointer, uint6
 unsigned char * alloc_dynamic_address_from_indirection_queue(){
   mutex_enter(&nvdimm_info->dynamic_region_mutex);
   if(dynamic_ipl_queue.empty()){
-      fprintf(stderr, "Error : dynamic_ipl_queue is empty\n");
+      // fprintf(stderr, "Error : dynamic_ipl_queue is empty\n");
       mutex_exit(&nvdimm_info->dynamic_region_mutex);
       return NULL;
   }
   unsigned char * ret = dynamic_ipl_queue.front();
   dynamic_ipl_queue.pop();
-  fprintf(stderr, "Available Dynamic region : %u\n", dynamic_ipl_queue.size());
+  fprintf(stderr, "dynamic_ipl usage: %d\n", nvdimm_info->dynamic_ipl_max_page_count - dynamic_ipl_queue.size());
   mutex_exit(&nvdimm_info->dynamic_region_mutex);
   return ret;
 }
