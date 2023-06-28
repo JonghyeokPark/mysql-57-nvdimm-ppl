@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if [ $# -ne 2] 
+then
+	echo "usage: ./build.sh PASSWORD --ipl"
+	exit 1
+fi
+
 BASE_DIR=`pwd -P`
 BUILD_DIR=$BASE_DIR/bld
 PASSWD=$1
@@ -16,10 +22,10 @@ rm -rf CMakeCache.txt
 echo $PASSWD | sudo -S rm -rf CMakeFiles/*
 
 # Build and install the source code
-if [ "$1" = "--origin" ]; then
+if [ "$2" = "--origin" ]; then
   # No caching
   BUILD_FLAGS=""
-elif [ "$1" = "--ipl" ]; then
+elif [ "$2" = "--ipl" ]; then
   # Enable Flash-Friendly Checkpoint
   BUILD_FLAGS="-DUNIV_NVDIMM_IPL"
 else
@@ -36,4 +42,3 @@ cmake .. -DWITH_DEBUG=0 -DCMAKE_C_FLAGS="$BUILD_FLAGS" -DCMAKE_CXX_FLAGS="$BUILD
 
 make -j
 echo $PASSWD | sudo -S make install
-
