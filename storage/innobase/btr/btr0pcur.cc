@@ -446,10 +446,14 @@ btr_pcur_move_to_next_page(
 		page_id_t(block->page.id.space(), next_page_no),
 		block->page.size, mode,
 		btr_pcur_get_btr_cur(cursor)->index, mtr);
+	
 
 	next_page = buf_block_get_frame(next_block);
 #ifdef UNIV_BTR_DEBUG
 	ut_a(page_is_comp(next_page) == page_is_comp(page));
+	// fprintf(stderr, "btr_page_get_prev: (%lu, %lu)\n", page_get_space_id(next_block->frame), btr_page_get_prev(next_block->frame, mtr));
+	// fprintf(stderr, "btr_pcur_get_block: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
+	// fprintf(stderr, "next_block: (%lu, %lu)\n",page_get_space_id(next_block->frame), page_get_page_no(next_block->frame));
 	ut_a(btr_page_get_prev(next_page, mtr)
 	     == btr_pcur_get_block(cursor)->page.id.page_no());
 #endif /* UNIV_BTR_DEBUG */

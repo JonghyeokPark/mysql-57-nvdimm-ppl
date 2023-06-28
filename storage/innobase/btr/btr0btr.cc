@@ -1432,6 +1432,14 @@ func_exit:
 				mtr, page, index, type,
 				page_zip ? 1 : 0);
 
+		ulint		space;
+		ulint		offset;
+
+		space = mach_read_from_4(page + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
+		offset = mach_read_from_4(page + FIL_PAGE_OFFSET);
+		page_id_t page_id(space, offset);
+		nvdimm_ipl_add_split_merge_map(page_id);
+
 		/* For compressed pages write the compression level. */
 		if (log_ptr && page_zip) {
 			mach_write_to_1(log_ptr, z_level);
@@ -1662,6 +1670,9 @@ btr_root_raise_and_insert(
 	btr_page_set_prev(new_page, new_page_zip, FIL_NULL, mtr);
 
 	/* Copy the records from root to the new page one by one. */
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+#endif
 
 	if (0
 #ifdef UNIV_ZIP_COPY
@@ -2634,7 +2645,13 @@ func_start:
 	new_page_zip = buf_block_get_page_zip(new_block);
 	btr_page_create(new_block, new_page_zip, cursor->index,
 			btr_page_get_level(page, mtr), mtr);
-
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+	nvdimm_ipl_add_split_merge_map(block->page.id);
+	// if (nvdimm_ipl_lookup(block->page.id)) {
+	// 	nvdimm_ipl_erase(block->page.id);
+	// }
+#endif
 	/* 3. Calculate the first record on the upper half-page, and the
 	first record (move_limit) on original page which ends up on the
 	upper half */

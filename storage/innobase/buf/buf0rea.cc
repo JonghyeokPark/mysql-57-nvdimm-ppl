@@ -40,6 +40,11 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0start.h"
 #include "srv0srv.h"
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#include "page0page.h"
+#endif
+
 /** There must be at least this many pages in buf_pool in the area to start
 a random read-ahead */
 #define BUF_READ_AHEAD_RANDOM_THRESHOLD(b)	\
@@ -120,8 +125,14 @@ buf_read_page_low(
 	bool			unzip)
 {
 	buf_page_t*	bpage;
-
 	*err = DB_SUCCESS;
+
+	// if(buf_page_peek(page_id)){
+	// 	fprintf(stderr, "page is in hash (%u, %u)\n", page_id.space(), page_id.page_no());
+	// }
+	// else{
+	// 	fprintf(stderr, "Not in hash (%u, %u)\n", page_id.space(), page_id.page_no());
+	// }
 
 	if (page_id.space() == TRX_SYS_SPACE
 	    && buf_dblwr_page_inside(page_id.page_no())) {
@@ -149,8 +160,11 @@ buf_read_page_low(
 	bpage = buf_page_init_for_read(err, mode, page_id, page_size, unzip);
 
 	if (bpage == NULL) {
-
 		return(0);
+	}
+	
+	if(bpage->is_iplized){
+		sync = true;
 	}
 
 	DBUG_PRINT("ib_buf", ("read page %u:%u size=%u unzip=%u,%s",
@@ -161,7 +175,6 @@ buf_read_page_low(
 			      sync ? "sync" : "async"));
 
 	ut_ad(buf_page_in_file(bpage));
-
 	if (sync) {
 		thd_wait_begin(NULL, THD_WAIT_DISKIO);
 	}
@@ -188,8 +201,9 @@ buf_read_page_low(
 		}
 	);
 
-	IORequest	request(type | IORequest::READ);
 
+
+	IORequest	request(type | IORequest::READ);
 	*err = fil_io(
 		request, sync, page_id, page_size, 0, page_size.physical(),
 		dst, bpage);
@@ -220,6 +234,39 @@ buf_read_page_low(
 		ut_error;
 	}
 
+
+
+	// log_apply_function
+	// First, check the if log for the page is in the IPL.
+	// Second, apply the log record to the page.
+#ifdef UNIV_NVDIMM_IPL
+	// page_header_print(((buf_block_t*) bpage)->frame);
+	// if(buf_page_peek(page_id)){
+	// 	fprintf(stderr, "page is in hash (%u, %u)\n", page_id.space(), page_id.page_no());
+	// }
+	// else{
+	// 	fprintf(stderr, "Not in hash (%u, %u)\n", page_id.space(), page_id.page_no());
+	// }
+	// fprintf(stderr, "Read bpage: (%u, %u) frame: %p\n",page_id.space(), page_id.page_no(),((buf_block_t*) bpage)->frame);
+	// if (bpage->is_iplized){
+	// 	//page를 완전히 가져오고 실행해보기
+	// 	// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",page_id.space(), page_id.page_no(), bpage);
+	// 	mtr_t temp_mtr;
+	// 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+	// 	mtr_start(&temp_mtr);
+	// 	if(buf_page_io_complete(bpage, false)){
+	// 		nvdimm_ipl_log_apply((buf_block_t*) bpage);
+	// 	}
+	// 	else{
+	// 		fprintf(stderr, "Page io not complete\n");
+	// 		return(0);
+	// 	}
+		
+	// 	mtr_commit(&temp_mtr);
+	// 	return(1);
+	// }
+#endif
+
 	if (sync) {
 		/* The i/o is already completed when we arrive from
 		fil_read */
@@ -227,6 +274,8 @@ buf_read_page_low(
 			return(0);
 		}
 	}
+
+	
 
 	return(1);
 }
@@ -382,7 +431,6 @@ read_ahead:
 		const page_id_t	cur_page_id(page_id.space(), i);
 
 		if (!ibuf_bitmap_page(cur_page_id, page_size)) {
-
 			count += buf_read_page_low(
 				&err, false,
 				IORequest::DO_NOT_WAKE,
@@ -441,7 +489,6 @@ buf_read_page(
 	acquire the buffer pool mutex before acquiring the block
 	mutex, required for updating the page state. The acquire
 	of the buffer pool mutex becomes an expensive bottleneck. */
-
 	count = buf_read_page_low(
 		&err, true,
 		0, BUF_READ_ANY_PAGE, page_id, page_size, false);
@@ -826,7 +873,6 @@ buf_read_ibuf_merge_pages(
 		}
 
 		dberr_t	err;
-
 		buf_read_page_low(&err,
 				  sync && (i + 1 == n_stored),
 				  0,
@@ -901,7 +947,7 @@ buf_read_recv_pages(
 					<< " pending reads";
 			}
 		}
-
+		
 		if ((i + 1 == n_stored) && sync) {
 			buf_read_page_low(
 				&err, true,

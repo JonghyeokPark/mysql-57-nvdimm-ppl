@@ -33,11 +33,15 @@ Created 11/26/1995 Heikki Tuuri
 #include "log0log.h"
 #include "row0trunc.h"
 
-#include "log0recv.h"
+
 
 #ifdef UNIV_NONINL
 #include "mtr0mtr.ic"
 #endif /* UNIV_NONINL */
+
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
 
 /** Iterate over a memo block in reverse. */
 template <typename Functor>
@@ -464,6 +468,64 @@ mtr_t::is_block_dirtied(const buf_block_t* block)
 	return(block->page.oldest_modification == 0);
 }
 
+static
+ulint
+recv_parse_log_rec(
+	mlog_id_t*	type,
+	byte*		ptr,
+	byte*		end_ptr,
+	ulint*		space,
+	ulint*		page_no,
+	bool		apply,
+	byte**		body)
+{
+	byte*	new_ptr;
+
+	*body = NULL;
+
+	UNIV_MEM_INVALID(type, sizeof *type);
+	UNIV_MEM_INVALID(space, sizeof *space);
+	UNIV_MEM_INVALID(page_no, sizeof *page_no);
+	UNIV_MEM_INVALID(body, sizeof *body);
+
+	if (ptr == end_ptr) {
+		return(0);
+	}
+
+	switch (*ptr) {
+	case MLOG_MULTI_REC_END:
+	case MLOG_DUMMY_RECORD:
+		*type = static_cast<mlog_id_t>(*ptr);
+		return(1);
+	case MLOG_CHECKPOINT:
+		if (end_ptr < ptr + SIZE_OF_MLOG_CHECKPOINT) {
+			return(0);
+		}
+		*type = static_cast<mlog_id_t>(*ptr);
+		return(SIZE_OF_MLOG_CHECKPOINT);
+	case MLOG_MULTI_REC_END | MLOG_SINGLE_REC_FLAG:
+	case MLOG_DUMMY_RECORD | MLOG_SINGLE_REC_FLAG:
+	case MLOG_CHECKPOINT | MLOG_SINGLE_REC_FLAG:
+		return(0);
+	}
+
+	new_ptr = mlog_parse_initial_log_record(ptr, end_ptr, type, space,
+						page_no);
+	*body = new_ptr;
+
+	if (UNIV_UNLIKELY(!new_ptr)) {
+		return(0);
+	}
+
+	new_ptr = recv_parse_or_apply_log_rec_body(
+	*type, new_ptr, end_ptr, *space, *page_no, NULL, NULL);
+
+	if (UNIV_UNLIKELY(new_ptr == NULL)) {
+		return(0);
+	}
+	return(new_ptr - ptr);
+}
+
 /** Write the block contents to the REDO log */
 struct mtr_write_log_t {
 	/** Append a block to the redo log buffer.
@@ -474,6 +536,8 @@ struct mtr_write_log_t {
 		return(true);
 	}
 };
+
+
 
 /** Append records to the system-wide redo log buffer.
 @param[in]	log	redo log records */
@@ -490,6 +554,7 @@ mtr_write_log(
 
 	log_reserve_and_open(len);
 	log->for_each_block(write_log);
+
 	log_close();
 }
 
@@ -802,6 +867,167 @@ mtr_t::release_page(const void* ptr, mtr_memo_type_t type)
 	ut_ad(0);
 }
 
+/* Add mtr_log to ipl using page_id
+   Get idea from log0recv.cc:recv_add_to_hash_table() */
+void 
+add_log_to_ipl(
+	mlog_id_t	type,		/*!< in: log record type */
+	ulint		space,		/*!< in: space id */
+	ulint		page_no,	/*!< in: page number */
+	byte*		body,		/*!< in: log record body */
+	byte*		rec_end)
+{
+	ulint			len;
+	const page_id_t	page_id(space, page_no);
+
+//leaf page만 거르기 위한 부분 추가.
+	buf_pool_t * buf_pool = buf_pool_get(page_id);
+	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
+	buf_block_t * buf_block = buf_page_get_block(buf_page);
+	ut_ad(buf_block != NULL);
+// page_is_leaf는 page_type만받기 때문에 위 과정을 통해서 page를 가져오는게 중요하다
+
+	ut_ad(type != MLOG_FILE_DELETE);
+	ut_ad(type != MLOG_FILE_CREATE2);
+	ut_ad(type != MLOG_FILE_RENAME2);
+	ut_ad(type != MLOG_FILE_NAME);
+	ut_ad(type != MLOG_DUMMY_RECORD);
+	ut_ad(type != MLOG_CHECKPOINT);
+	ut_ad(type != MLOG_INDEX_LOAD);
+	ut_ad(type != MLOG_TRUNCATE);
+
+	len = rec_end - body;
+
+	if(!is_system_or_undo_tablespace(space) && !nvdimm_ipl_is_split_or_merge_page(page_id)
+		&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
+		nvdimm_ipl_add(body, len, type, buf_page);
+	}
+
+	
+}
+
+/* Parse the sequential log to single mtr_log
+   Get idea from log0recv.cc:recv_parse_log_recs() */
+bool
+my_recv_parse_log_recs(byte * start_ptr, ulint log_len)
+{
+	byte*		ptr;
+	byte*		end_ptr;
+	ulint 		offset = 0;
+	bool		single_rec;
+	ulint		len;
+	mlog_id_t	type;
+	ulint		space;
+	ulint		page_no;
+	byte*		body;
+	
+loop:
+	ptr = start_ptr + offset;
+	end_ptr = start_ptr + log_len;
+
+	if(ptr == end_ptr){
+		return false;
+	}
+
+	switch (*ptr)
+	{
+		case MLOG_CHECKPOINT:
+		case MLOG_DUMMY_RECORD:
+			single_rec = true;
+			break;
+		default:
+			single_rec = !!(*ptr & MLOG_SINGLE_REC_FLAG);
+	}
+
+	if(single_rec){
+		len = recv_parse_log_rec(&type, ptr, end_ptr, &space,
+					 &page_no, true, &body);
+		// fprintf(stderr, "[single record for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
+		if (len == 0) {
+			return(false);
+		}
+		offset += len;
+		switch(type){
+			case MLOG_DUMMY_RECORD:
+			case MLOG_CHECKPOINT:
+			case MLOG_FILE_NAME:
+			case MLOG_FILE_DELETE:
+			case MLOG_FILE_CREATE2:
+			case MLOG_FILE_RENAME2:
+			case MLOG_TRUNCATE:
+				break;
+			default:
+				add_log_to_ipl(type, space, page_no, body, ptr + len);
+				break;
+		}
+	}
+	else{
+
+		// for(;;){
+		// 	bool	only_mlog_file	= true;
+		// 	ulint	mlog_rec_len	= 0;
+
+		// 	len = recv_parse_log_rec(&type, ptr, end_ptr, &space, &page_no, false, &body);
+		// 	fprintf(stderr, "[first for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
+		// 	if (len == 0) {
+		// 		return(false);
+		// 	}
+		// 	if(type == MLOG_CHECKPOINT || (*ptr & MLOG_SINGLE_REC_FLAG)){
+		// 		return true;
+		// 	}
+		// 	if (type != MLOG_FILE_NAME && only_mlog_file == true) {
+		// 		only_mlog_file = false;
+		// 	}
+		// 	if (only_mlog_file) {
+		// 		mlog_rec_len += len;
+		// 		offset += len;
+		// 	}
+
+		// 	ptr += len;
+
+		// 	if (type == MLOG_MULTI_REC_END) {
+		// 		break;
+		// 	}
+		// }
+
+		// ptr = start_ptr + offset;
+		
+		for(;;){
+			len = recv_parse_log_rec(&type, ptr, end_ptr, &space, &page_no, false, &body);
+			// fprintf(stderr, "[second for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
+
+			if (len == 0) { //corrput log인 경우는 베재해서 이 코드 작성
+				return(false);
+			}
+			
+			ut_a(len != 0); 
+
+			offset += len;
+			switch(type){
+				case MLOG_MULTI_REC_END:
+				/* Found the end mark for the records */
+					goto loop;
+				case MLOG_FILE_NAME:
+				case MLOG_FILE_DELETE:
+				case MLOG_FILE_CREATE2:
+				case MLOG_FILE_RENAME2:
+				case MLOG_INDEX_LOAD:
+				case MLOG_TRUNCATE:
+					/* These were already handled by
+					recv_parse_log_rec() and
+					recv_parse_or_apply_log_rec_body(). */
+					break;
+				default:
+					add_log_to_ipl(type, space, page_no, body, ptr + len);
+					break;
+			}
+			ptr += len;
+		}
+	}
+
+	goto loop;
+}
+
 /** Prepare to write the mini-transaction log to the redo log buffer.
 @return number of bytes to write in finish_write() */
 ulint
@@ -891,6 +1117,14 @@ mtr_t::Command::finish_write(
 	ut_ad(m_impl->m_log.size() == len);
 	ut_ad(len > 0);
 
+	#ifdef UNIV_NVDIMM_IPL
+		test_type test;
+		test.init(m_impl->m_log.size());
+		m_impl->m_log.for_each_block(test);
+		my_recv_parse_log_recs(test.buffer, test.log_size);
+		test.free_mem();
+	#endif
+
 	if (m_impl->m_log.is_small()) {
 		const mtr_buf_t::block_t*	front = m_impl->m_log.front();
 		ut_ad(len <= front->used());
@@ -909,8 +1143,13 @@ mtr_t::Command::finish_write(
 	mtr_write_log_t	write_log;
 	m_impl->m_log.for_each_block(write_log);
 
+	// sequential m_log를 전부 저장할 buffer를 할당
+	// sequential m_log를 parsing.
+	
+	
 	m_end_lsn = log_close();
 }
+
 
 /** Release the latches and blocks acquired by this mini-transaction */
 void
@@ -1108,5 +1347,7 @@ mtr_t::print() const
 		<< m_impl.m_memo.size() << " bytes log size "
 		<< get_log()->size() << " bytes";
 }
+
+
 
 #endif /* UNIV_DEBUG */

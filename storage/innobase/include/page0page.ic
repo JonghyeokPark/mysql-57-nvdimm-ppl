@@ -244,7 +244,6 @@ page_header_set_ptr(
 	}
 
 	ut_ad((field != PAGE_HEAP_TOP) || offs);
-
 	page_header_set_field(page, page_zip, field, offs);
 }
 
@@ -713,7 +712,6 @@ page_dir_set_n_heap(
 	ut_ad(n_heap < 0x8000);
 	ut_ad(!page_zip || n_heap
 	      == (page_header_get_field(page, PAGE_N_HEAP) & 0x7fff) + 1);
-
 	page_header_set_field(page, page_zip, PAGE_N_HEAP, n_heap
 			      | (0x8000
 				 & page_header_get_field(page, PAGE_N_HEAP)));
@@ -1095,12 +1093,10 @@ page_mem_alloc_free(
 	next_offs = rec_get_next_offs(old_rec, page_is_comp(page));
 	ut_ad(next_rec == (next_offs ? page + next_offs : NULL));
 #endif
-
 	page_header_set_ptr(page, page_zip, PAGE_FREE, next_rec);
 
 	garbage = page_header_get_field(page, PAGE_GARBAGE);
 	ut_ad(garbage >= need);
-
 	page_header_set_field(page, page_zip, PAGE_GARBAGE, garbage - need);
 }
 
@@ -1247,7 +1243,6 @@ page_mem_free(
 	page_header_set_ptr(page, page_zip, PAGE_FREE, rec);
 
 	garbage = page_header_get_field(page, PAGE_GARBAGE);
-
 	page_header_set_field(page, page_zip, PAGE_GARBAGE,
 			      garbage + rec_offs_size(offsets));
 

@@ -320,6 +320,9 @@ btr_cur_latch_leaves(
 		if (latch_leaves.blocks[0] != NULL) {
 			ut_a(page_is_comp(latch_leaves.blocks[0]->frame)
 				== page_is_comp(page));
+
+			// fprintf(stderr, "btr_page_get_next: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_next(latch_leaves.blocks[0]->frame, mtr));
+			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
 			ut_a(btr_page_get_next(
 				latch_leaves.blocks[0]->frame, mtr)
 				== page_get_page_no(page));
@@ -345,11 +348,16 @@ btr_cur_latch_leaves(
 				page_id_t(page_id.space(), right_page_no),
 				page_size, RW_X_LATCH, cursor->index, mtr);
 			latch_leaves.blocks[2] = get_block;
+			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(get_block->frame), page_get_page_no(get_block->frame));
 #ifdef UNIV_BTR_DEBUG
 			ut_a(page_is_comp(get_block->frame)
 			     == page_is_comp(page));
+			// fprintf(stderr, "btr_page_get_prev: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_prev(get_block->frame, mtr));
+			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
+			// fprintf(stderr, "getblock: (%lu, %lu)\n",page_get_space_id(get_block->frame), page_get_page_no(get_block->frame));
 			ut_a(btr_page_get_prev(get_block->frame, mtr)
 			     == page_get_page_no(page));
+			
 #endif /* UNIV_BTR_DEBUG */
 			if (spatial) {
 				cursor->rtr_info->tree_blocks[
@@ -374,7 +382,10 @@ btr_cur_latch_leaves(
 				page_size, mode, cursor->index, mtr);
 			latch_leaves.blocks[0] = get_block;
 			cursor->left_block = get_block;
+			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(get_block->frame), page_get_page_no(get_block->frame));
 #ifdef UNIV_BTR_DEBUG
+			// fprintf(stderr, "btr_page_get_next: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_next(get_block->frame, mtr));
+			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
 			ut_a(page_is_comp(get_block->frame)
 			     == page_is_comp(page));
 			ut_a(btr_page_get_next(get_block->frame, mtr)
@@ -3473,6 +3484,10 @@ btr_cur_pessimistic_insert(
 
 	*big_rec = big_rec_vec;
 
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
+#endif
+
 	return(DB_SUCCESS);
 }
 
@@ -4646,6 +4661,17 @@ return_after_reservations:
 
 	*big_rec = big_rec_vec;
 
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
+  // (jhpark): skip split/merge page from IPLization path
+//   nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
+//   if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
+// 	fprintf(stderr, "splited update Page: (%lu, %lu)\n", btr_cur_get_block(cursor)->page.id.space(), btr_cur_get_block(cursor)->page.id.page_no());
+//     // nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
+//   }
+#endif
+
+
 	return(err);
 }
 
@@ -5418,6 +5444,12 @@ return_after_reservations:
 	if (n_reserved > 0) {
 		fil_space_release_free_extents(index->space, n_reserved);
 	}
+
+
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
+#endif
+
 
 	return(ret);
 }

@@ -298,8 +298,11 @@ enum latch_level_t {
 	/** This can be used to suppress order checking. */
 	SYNC_NO_ORDER_CHECK,
 
+	SYNC_STATIC_REGION,
+	SYNC_DYNAMIC_REGION,
+	SYNC_IPL_MAP_MUTEX,
 	/** Maximum level value */
-	SYNC_LEVEL_MAX = SYNC_NO_ORDER_CHECK
+	SYNC_LEVEL_MAX = SYNC_IPL_MAP_MUTEX
 };
 
 /** Each latch has an ID. This id is used for creating the latch and to look
@@ -391,7 +394,10 @@ enum latch_id_t {
 	LATCH_ID_SYNC_DEBUG_MUTEX,
 	LATCH_ID_MASTER_KEY_ID_MUTEX,
 	LATCH_ID_TEST_MUTEX,
-	LATCH_ID_MAX = LATCH_ID_TEST_MUTEX
+	LATCH_ID_STATIC_REGION,
+	LATCH_ID_DYNAMIC_REGION,
+	LATCH_ID_IPL_MAP_MUTEX,
+	LATCH_ID_MAX = LATCH_ID_IPL_MAP_MUTEX
 };
 
 #ifndef UNIV_INNOCHECKSUM

@@ -31,9 +31,9 @@ Created 11/5/1995 Heikki Tuuri
 *******************************************************/
 
 #include "ha_prototypes.h"
-
 #include "page0size.h"
 #include "buf0buf.h"
+
 #ifdef UNIV_NONINL
 #include "buf0buf.ic"
 #endif
@@ -117,6 +117,7 @@ struct set_numa_interleave_t
 #else
 #define NUMA_MEMPOLICY_INTERLEAVE_IN_SCOPE
 #endif /* HAVE_LIBNUMA */
+
 
 /*
 		IMPLEMENTATION OF THE BUFFER POOL
@@ -3426,7 +3427,6 @@ buf_pool_watch_remove(
 #endif /* UNIV_DEBUG */
 
 	ut_ad(buf_pool_mutex_own(buf_pool));
-
 	HASH_DELETE(buf_page_t, hash, buf_pool->page_hash, watch->id.fold(),
 		    watch);
 	ut_d(watch->in_page_hash = FALSE);
@@ -3619,9 +3619,15 @@ buf_block_try_discard_uncompressed(
 	buf_pool_mutex_enter(buf_pool);
 
 	bpage = buf_page_hash_get(buf_pool, page_id);
-
+// #ifdef UNIV_NVDIMM_IPL
+// 	bool is_iplized = bpage->is_iplized;
+// 	page_id_t page_id_copy = bpage->id;
+// 	IPL_INFO * ipl_info_copy = bpage->page_ipl_info;
+// #endif
+	
 	if (bpage) {
 		buf_LRU_free_page(bpage, false);
+		
 	}
 
 	buf_pool_mutex_exit(buf_pool);
@@ -4113,7 +4119,6 @@ loop:
 	hash_lock = buf_page_hash_lock_s_confirm(hash_lock, buf_pool, page_id);
 
 	if (block != NULL) {
-
 		/* If the guess is a compressed page descriptor that
 		has been allocated by buf_page_alloc_descriptor(),
 		it may have been freed by buf_relocate(). */
@@ -4135,11 +4140,15 @@ loop:
 	}
 
 	if (!block || buf_pool_watch_is_sentinel(buf_pool, &block->page)) {
+		if(block != NULL){
+		}
+		else{
+		}
 		rw_lock_s_unlock(hash_lock);
 		block = NULL;
 	}
-
 	if (block == NULL) {
+		
 		/* Page not in buf_pool: needs to be read from file */
 
 		if (mode == BUF_GET_IF_IN_POOL_OR_WATCH) {
@@ -4197,9 +4206,9 @@ loop:
 		}
 
 		if (buf_read_page(page_id, page_size)) {
+			
 			buf_read_ahead_random(page_id, page_size,
 					      ibuf_inside(mtr));
-
 			retries = 0;
 		} else if (retries < BUF_PAGE_READ_MAX_RETRIES) {
 			++retries;
@@ -4269,7 +4278,6 @@ got_block:
 			return(NULL);
 		}
 	}
-
 	switch (buf_block_get_state(fix_block)) {
 		buf_page_t*	bpage;
 
@@ -4999,6 +5007,9 @@ buf_page_init_low(
 	bpage->oldest_modification = 0;
 	HASH_INVALIDATE(bpage, hash);
 
+/*UNIV_NVDIMM_IPL*/
+	set_for_ipl_page(bpage);
+
 	ut_d(bpage->file_page_was_freed = FALSE);
 }
 
@@ -5302,10 +5313,8 @@ buf_page_init_for_read(
 			ut_ad(buf_pool_watch_is_sentinel(buf_pool, watch_page));
 			buf_pool_watch_remove(buf_pool, watch_page);
 		}
-
 		HASH_INSERT(buf_page_t, hash, buf_pool->page_hash,
 			    bpage->id.fold(), bpage);
-
 		rw_lock_x_unlock(hash_lock);
 
 		/* The block must be put to the LRU list, to the old blocks.
@@ -5697,7 +5706,6 @@ buf_page_io_complete(
 
 			ib::error() << "Reading page " << bpage->id
 				<< ", which is in the doublewrite buffer!";
-
 		} else if (read_space_id == 0 && read_page_no == 0) {
 			/* This is likely an uninitialized page. */
 		} else if ((bpage->id.space() != 0
@@ -5824,11 +5832,11 @@ corrupt:
 		    && !srv_is_tablespace_truncated(bpage->id.space())
 		    && fil_page_get_type(frame) == FIL_PAGE_INDEX
 		    && page_is_leaf(frame)) {
-
 			ibuf_merge_or_delete_for_page(
 				(buf_block_t*) bpage, bpage->id,
 				&bpage->size, TRUE);
 		}
+
 	}
 
 	buf_pool_mutex_enter(buf_pool);
@@ -5861,6 +5869,15 @@ corrupt:
 		buf_pool->stat.n_pages_read++;
 
 		if (uncompressed) {
+			if (bpage->is_iplized){
+				//page를 완전히 가져오고 실행해보기
+				// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",bpage->id.space(), bpage->id.page_no(), bpage);
+				mtr_t temp_mtr;
+				mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+				mtr_start(&temp_mtr);
+				nvdimm_ipl_log_apply((buf_block_t*) bpage);
+				mtr_commit(&temp_mtr);
+			}
 			rw_lock_x_unlock_gen(&((buf_block_t*) bpage)->lock,
 					     BUF_IO_READ);
 		}
@@ -5890,6 +5907,8 @@ corrupt:
 		by the caller explicitly. */
 		if (buf_page_get_flush_type(bpage) == BUF_FLUSH_LRU) {
 			evict = true;
+			// fprintf(stderr, "evicting page page_id: (%u, %u)\n",
+				// bpage->id.space(), bpage->id.page_no());
 		}
 
 		if (evict) {

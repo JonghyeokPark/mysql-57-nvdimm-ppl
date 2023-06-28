@@ -151,6 +151,7 @@ PageBulk::init()
 	m_rec_no = page_header_get_field(new_page, PAGE_N_RECS);
 
 	ut_d(m_total_data = 0);
+	fprintf(stderr, "PageBulk init 1\n");
 	page_header_set_field(m_page, NULL, PAGE_HEAP_TOP, UNIV_PAGE_SIZE - 1);
 
 	return(DB_SUCCESS);
@@ -287,12 +288,16 @@ PageBulk::finish()
 
 	ut_ad(!dict_index_is_spatial(m_index));
 	page_dir_set_n_slots(m_page, NULL, 2 + slot_index);
+	fprintf(stderr, "PageBulk finish 1\n");
 	page_header_set_ptr(m_page, NULL, PAGE_HEAP_TOP, m_heap_top);
 	page_dir_set_n_heap(m_page, NULL, PAGE_HEAP_NO_USER_LOW + m_rec_no);
+	fprintf(stderr, "PageBulk finish 2\n");
 	page_header_set_field(m_page, NULL, PAGE_N_RECS, m_rec_no);
-
+	fprintf(stderr, "PageBulk finish 3\n");
 	page_header_set_ptr(m_page, NULL, PAGE_LAST_INSERT, m_cur_rec);
+	fprintf(stderr, "PageBulk finish 4\n");
 	page_header_set_field(m_page, NULL, PAGE_DIRECTION, PAGE_RIGHT);
+	fprintf(stderr, "PageBulk finish 5\n");
 	page_header_set_field(m_page, NULL, PAGE_N_DIRECTION, 0);
 
 	m_block->skip_flush_check = false;

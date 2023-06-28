@@ -38,6 +38,7 @@ Created 12/7/1995 Heikki Tuuri
 #ifndef UNIV_HOTBACKUP
 # include "dict0boot.h"
 
+
 /********************************************************//**
 Catenates n bytes to the mtr log. */
 void
@@ -220,6 +221,8 @@ mlog_parse_nbytes(
 					 + offset, val);
 			}
 			mach_write_to_4(page + offset, val);
+		}
+		else{
 		}
 		break;
 	default:
@@ -462,6 +465,7 @@ mlog_open_and_write_index(
 		}
 
 		log_start = log_ptr = mlog_open(mtr, alloc);
+		
 
 		if (!log_ptr) {
 			return(NULL); /* logging is disabled */
@@ -575,7 +579,7 @@ mlog_parse_index(
 	ind->table = table;
 	ind->n_uniq = (unsigned int) n_uniq;
 	if (n_uniq != n) {
-		ut_a(n_uniq + DATA_ROLL_PTR <= n);
+		ut_a(n_uniq + DATA_ROLL_PTR <= n); // open issue
 		ind->type = DICT_CLUSTERED;
 	}
 	if (comp) {

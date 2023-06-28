@@ -50,6 +50,9 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0mon.h"
 #include "lock0lock.h"
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
 /** The number of blocks from the LRU_old pointer onward, including
 the block pointed to, must be buf_pool->LRU_old_ratio/BUF_LRU_OLD_RATIO_DIV
 of the whole LRU list length, except that the tolerance defined below
@@ -839,7 +842,6 @@ scan_again:
 		ut_ad(!bpage->in_flush_list);
 
 		/* Remove from the LRU list. */
-
 		if (buf_LRU_block_remove_hashed(bpage, true)) {
 			buf_LRU_block_free_hashed_page((buf_block_t*) bpage);
 		} else {
@@ -1619,6 +1621,7 @@ buf_LRU_remove_block(
 	buf_pool->stat.LRU_bytes -= bpage->size.physical();
 
 	buf_unzip_LRU_remove_block_if_needed(bpage);
+	// fprintf(stderr, "buf_LRU_remove_block block : page_id:(%u, %u) frame: %p\n",bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 
 	/* If the LRU list is so short that LRU_old is not defined,
 	clear the "old" flags and return */
@@ -1891,6 +1894,7 @@ buf_LRU_free_page(
 		/* Do not completely free dirty blocks. */
 
 		if (bpage->oldest_modification) {
+			// fprintf(stderr, "[FAIL] buf_LRU_free_page: page_id: (%u, %u) frame: %u\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 			goto func_exit;
 		}
 	} else if (bpage->oldest_modification > 0
@@ -2094,8 +2098,8 @@ func_exit:
 		mutex_exit(block_mutex);
 	}
 
-	buf_LRU_block_free_hashed_page((buf_block_t*) bpage);
-
+	buf_LRU_block_free_hashed_page((buf_block_t*) bpage); // 왜 잘못된게 넘어갈까?
+	// fprintf(stderr, "buf_LRU_block_free_hashed_page block frame: %p\n", ((buf_block_t*) bpage)->frame);
 	return(true);
 }
 
@@ -2108,8 +2112,6 @@ buf_LRU_block_free_non_file_page(
 {
 	void*		data;
 	buf_pool_t*	buf_pool = buf_pool_from_block(block);
-
-	ut_ad(buf_pool_mutex_own(buf_pool));
 	ut_ad(buf_page_mutex_own(block));
 
 	switch (buf_block_get_state(block)) {
@@ -2124,6 +2126,7 @@ buf_LRU_block_free_non_file_page(
 	ut_ad(!block->page.in_free_list);
 	ut_ad(!block->page.in_flush_list);
 	ut_ad(!block->page.in_LRU_list);
+	
 
 	buf_block_set_state(block, BUF_BLOCK_NOT_USED);
 
@@ -2168,6 +2171,7 @@ buf_LRU_block_free_non_file_page(
 		ut_d(block->in_withdraw_list = TRUE);
 	} else {
 		UT_LIST_ADD_FIRST(buf_pool->free, &block->page);
+		// fprintf(stderr, "Success add page to free list: (%u, %u) frmae: %p\n", block->frame);
 		ut_d(block->page.in_free_list = TRUE);
 	}
 
@@ -2318,7 +2322,7 @@ buf_LRU_block_remove_hashed(
 	ut_ad(!bpage->in_zip_hash);
 	ut_ad(bpage->in_page_hash);
 	ut_d(bpage->in_page_hash = FALSE);
-
+	ut_ad(buf_pool_mutex_own(buf_pool));
 	HASH_DELETE(buf_page_t, hash, buf_pool->page_hash, bpage->id.fold(),
 		    bpage);
 
@@ -2428,6 +2432,7 @@ buf_LRU_block_free_hashed_page(
 	buf_page_mutex_enter(block);
 
 	if (buf_pool->flush_rbt == NULL) {
+		// fprintf(stderr, "Reset page number: (%u, %u) frmae: %p\n", block->page.id.space(), block->page.id.page_no(), block->frame);
 		block->page.id.reset(ULINT32_UNDEFINED, ULINT32_UNDEFINED);
 	}
 
@@ -2455,7 +2460,6 @@ buf_LRU_free_one_page(
 
 	rw_lock_x_lock(hash_lock);
 	mutex_enter(block_mutex);
-
 	if (buf_LRU_block_remove_hashed(bpage, true)) {
 		buf_LRU_block_free_hashed_page((buf_block_t*) bpage);
 	}

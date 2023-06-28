@@ -1667,7 +1667,9 @@ or if it is a MLOG_FILE_ operation
 @param[in,out]	mtr		mini-transaction, or NULL if
 a page log record should not be applied
 @return log record end, NULL if not a complete record */
+#ifndef UNIV_NVDIMM_IPL
 static
+#endif
 byte*
 recv_parse_or_apply_log_rec_body(
 	mlog_id_t	type,

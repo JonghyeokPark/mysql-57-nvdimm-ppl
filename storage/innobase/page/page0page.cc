@@ -252,7 +252,6 @@ page_mem_alloc_heap(
 
 	if (avl_space >= need) {
 		block = page_header_get_ptr(page, PAGE_HEAP_TOP);
-
 		page_header_set_ptr(page, page_zip, PAGE_HEAP_TOP,
 				    block + need);
 		*heap_no = page_dir_get_n_heap(page);
@@ -581,6 +580,12 @@ page_copy_rec_list_end_no_locks(
 	if (UNIV_LIKELY_NULL(heap)) {
 		mem_heap_free(heap);
 	}
+// #ifdef UNIV_NVDIMM_IPL
+// 	ib::info() << "page_copy_rec_list_end_no_locks: "
+// 		<< "block " << block->page.id
+// 		<< " new_block " << new_block->page.id;
+// 	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+// #endif
 }
 
 #ifndef UNIV_HOTBACKUP
@@ -633,6 +638,11 @@ page_copy_rec_list_end(
 	predefined supremum record. */
 
 	mtr_log_t	log_mode = MTR_LOG_NONE;
+
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map(block->page.id);
+	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+#endif
 
 	if (new_page_zip) {
 		log_mode = mtr_set_log_mode(mtr, MTR_LOG_NONE);
@@ -1052,7 +1062,6 @@ delete_all:
 
 	/* Reset the last insert info in the page header and increment
 	the modify clock for the frame */
-
 	page_header_set_ptr(page, page_zip, PAGE_LAST_INSERT, NULL);
 
 	/* The page gets invalid for optimistic searches: increment the
@@ -1176,10 +1185,8 @@ delete_all:
 
 	page_rec_set_next(last_rec, page_header_get_ptr(page, PAGE_FREE));
 	page_header_set_ptr(page, NULL, PAGE_FREE, rec);
-
 	page_header_set_field(page, NULL, PAGE_GARBAGE, size
 			      + page_header_get_field(page, PAGE_GARBAGE));
-
 	page_header_set_field(page, NULL, PAGE_N_RECS,
 			      (ulint)(page_get_n_recs(page) - n_recs));
 }
@@ -1678,7 +1685,7 @@ page_rec_get_n_recs_before(
 	return((ulint) n);
 }
 
-#ifndef UNIV_HOTBACKUP
+// #ifndef UNIV_HOTBACKUP
 /************************************************************//**
 Prints record contents including the data relevant only in
 the index page context. */
@@ -1704,7 +1711,7 @@ page_rec_print(
 	rec_validate(rec, offsets);
 }
 
-# ifdef UNIV_BTR_PRINT
+// # ifdef UNIV_BTR_PRINT
 /***************************************************************//**
 This is used to print the contents of the directory for
 debugging purposes. */
@@ -1767,7 +1774,7 @@ page_print_list(
 
 	ut_a((ibool)!!page_is_comp(page) == dict_table_is_comp(index->table));
 
-	fprint(stderr,
+	fprintf(stderr,
 		"--------------------------------\n"
 		"PAGE RECORD LIST\n"
 		"Page address %p\n", page);
@@ -1823,13 +1830,22 @@ page_header_print(
 /*==============*/
 	const page_t*	page)
 {
+	ulint	read_page_no;
+	ulint	read_space_id;
+	read_page_no = mach_read_from_4(page + FIL_PAGE_OFFSET);
+	read_space_id = mach_read_from_4(
+		page + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
+
 	fprintf(stderr,
 		"--------------------------------\n"
 		"PAGE HEADER INFO\n"
+		"Page id: (%lu, %lu)\n"
 		"Page address %p, n records %lu (%s)\n"
 		"n dir slots %lu, heap top %lu\n"
 		"Page n heap %lu, free %lu, garbage %lu\n"
-		"Page last insert %lu, direction %lu, n direction %lu\n",
+		"Page last insert %lu, direction %lu, n direction %lu\n"
+		"\n",
+		read_space_id, read_page_no,
 		page, (ulong) page_header_get_field(page, PAGE_N_RECS),
 		page_is_comp(page) ? "compact format" : "original format",
 		(ulong) page_header_get_field(page, PAGE_N_DIR_SLOTS),
@@ -1861,8 +1877,8 @@ page_print(
 	page_dir_print(page, dn);
 	page_print_list(block, index, rn);
 }
-# endif /* UNIV_BTR_PRINT */
-#endif /* !UNIV_HOTBACKUP */
+// # endif /* UNIV_BTR_PRINT */
+// #endif /* !UNIV_HOTBACKUP */
 
 /***************************************************************//**
 The following is used to validate a record on a page. This function

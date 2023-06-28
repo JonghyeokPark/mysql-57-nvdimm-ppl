@@ -41,8 +41,12 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0srv.h"
 #include <ostream>
 
+
 // Forward declaration
 struct fil_addr_t;
+/*UNIV_NVDIMM_IPL*/
+struct IPL_INFO;
+void page_is_iplized(buf_page_t * bpage);
 
 /** @name Modes for buf_page_get_gen */
 /* @{ */
@@ -302,6 +306,13 @@ public:
 	{
 		return(a.space() == m_space && a.page_no() == m_page_no);
 	}
+	/** Check if a given page_id_t object is equal to the current one.
+	@param[in]	a	page_id_t object to compare
+	@return true if equal */
+	inline bool operator==(const page_id_t& a) const
+	{
+		return(a.space() == m_space && a.page_no() == m_page_no);
+	}
 
 private:
 
@@ -330,6 +341,7 @@ private:
                 std::ostream&           out,
                 const page_id_t&        page_id);
 };
+
 
 /** Print the given page_id_t object.
 @param[in,out]	out	the output stream
@@ -1688,6 +1700,13 @@ public:
 					or buf_block_t::mutex. */
 # endif /* UNIV_DEBUG */
 #endif /* !UNIV_HOTBACKUP */
+
+/*UNIV_NVDIMM_IPL*/
+	IPL_INFO *	page_ipl_info;
+	bool 		is_iplized;
+	bool 		is_split_page;
+	bool 		is_dirtified;
+
 };
 
 /** The buffer control block structure */
@@ -2477,5 +2496,4 @@ struct	CheckUnzipLRUAndLRUList {
 #include "buf0buf.ic"
 #endif
 #endif /* !UNIV_INNOCHECKSUM */
-
 #endif

@@ -299,6 +299,20 @@ writes! NOTE: buf_pool->mutex and buf_page_get_mutex(bpage) must be
 held upon entering this function, and they will be released by this
 function.
 @return TRUE if page was flushed */
+
+ibool
+buf_flush_ipl_clean_checkpointed_page(
+	buf_pool_t*	buf_pool,	/*!< in: buffer pool instance */
+	buf_page_t*	bpage,		/*!< in: buffer control block */
+	buf_flush_t	flush_type,	/*!< in: type of flush */
+	bool		sync);
+void
+buf_flush_ipl_clean_checkpointed_block_low(
+/*======================*/
+	buf_page_t*	bpage,		/*!< in: buffer block to write */
+	buf_flush_t	flush_type,	/*!< in: type of flush */
+	bool		sync);		/*!< in: true if sync IO request */
+
 ibool
 buf_flush_page(
 /*===========*/

@@ -958,7 +958,6 @@ page_cur_insert_rec_write_log(
 	const byte* ins_ptr;
 	const byte* log_end;
 	ulint	i;
-
 	/* Avoid REDO logging to save on costly IO because
 	temporary tables are not recovered during crash recovery. */
 	if (dict_table_is_temporary(index->table)) {
@@ -1445,7 +1444,6 @@ use_heap:
 		page_rec_set_next(insert_rec, next_rec);
 		page_rec_set_next(current_rec, insert_rec);
 	}
-
 	page_header_set_field(page, NULL, PAGE_N_RECS,
 			      1 + page_get_n_recs(page));
 
@@ -1477,7 +1475,6 @@ use_heap:
 		} else if ((last_insert == current_rec)
 			   && (page_header_get_field(page, PAGE_DIRECTION)
 			       != PAGE_LEFT)) {
-
 			page_header_set_field(page, NULL, PAGE_DIRECTION,
 					      PAGE_RIGHT);
 			page_header_set_field(page, NULL, PAGE_N_DIRECTION,
@@ -1487,7 +1484,6 @@ use_heap:
 		} else if ((page_rec_get_next(insert_rec) == last_insert)
 			   && (page_header_get_field(page, PAGE_DIRECTION)
 			       != PAGE_RIGHT)) {
-
 			page_header_set_field(page, NULL, PAGE_DIRECTION,
 					      PAGE_LEFT);
 			page_header_set_field(page, NULL, PAGE_N_DIRECTION,
@@ -1499,7 +1495,6 @@ use_heap:
 			page_header_set_field(page, NULL, PAGE_N_DIRECTION, 0);
 		}
 	}
-
 	page_header_set_ptr(page, NULL, PAGE_LAST_INSERT, insert_rec);
 
 	/* 7. It remains to update the owner record. */
@@ -1654,7 +1649,6 @@ page_cur_direct_insert_rec_low(
 		page_rec_set_next(insert_rec, next_rec);
 		page_rec_set_next(current_rec, insert_rec);
 	}
-
 	page_header_set_field(page, NULL, PAGE_N_RECS,
 			      1 + page_get_n_recs(page));
 
@@ -1683,7 +1677,6 @@ page_cur_direct_insert_rec_low(
 	} else if ((last_insert == current_rec)
 		   && (page_header_get_field(page, PAGE_DIRECTION)
 		       != PAGE_LEFT)) {
-
 		page_header_set_field(page, NULL, PAGE_DIRECTION,
 							PAGE_RIGHT);
 		page_header_set_field(page, NULL, PAGE_N_DIRECTION,
@@ -1693,7 +1686,6 @@ page_cur_direct_insert_rec_low(
 	} else if ((page_rec_get_next(insert_rec) == last_insert)
 		   && (page_header_get_field(page, PAGE_DIRECTION)
 		       != PAGE_RIGHT)) {
-
 		page_header_set_field(page, NULL, PAGE_DIRECTION,
 							PAGE_LEFT);
 		page_header_set_field(page, NULL, PAGE_N_DIRECTION,
@@ -1704,7 +1696,6 @@ page_cur_direct_insert_rec_low(
 							PAGE_NO_DIRECTION);
 		page_header_set_field(page, NULL, PAGE_N_DIRECTION, 0);
 	}
-
 	page_header_set_ptr(page, NULL, PAGE_LAST_INSERT, insert_rec);
 
 	/* 7. It remains to update the owner record. */
@@ -2111,7 +2102,6 @@ use_heap:
 		page_rec_set_next(insert_rec, next_rec);
 		page_rec_set_next(cursor->rec, insert_rec);
 	}
-
 	page_header_set_field(page, page_zip, PAGE_N_RECS,
 			      1 + page_get_n_recs(page));
 
@@ -2142,7 +2132,6 @@ use_heap:
 		} else if ((last_insert == cursor->rec)
 			   && (page_header_get_field(page, PAGE_DIRECTION)
 			       != PAGE_LEFT)) {
-
 			page_header_set_field(page, page_zip, PAGE_DIRECTION,
 					      PAGE_RIGHT);
 			page_header_set_field(page, page_zip, PAGE_N_DIRECTION,
@@ -2152,7 +2141,6 @@ use_heap:
 		} else if ((page_rec_get_next(insert_rec) == last_insert)
 			   && (page_header_get_field(page, PAGE_DIRECTION)
 			       != PAGE_RIGHT)) {
-
 			page_header_set_field(page, page_zip, PAGE_DIRECTION,
 					      PAGE_LEFT);
 			page_header_set_field(page, page_zip, PAGE_N_DIRECTION,
@@ -2165,7 +2153,6 @@ use_heap:
 					      PAGE_N_DIRECTION, 0);
 		}
 	}
-
 	page_header_set_ptr(page, page_zip, PAGE_LAST_INSERT, insert_rec);
 
 	/* 7. It remains to update the owner record. */
@@ -2274,7 +2261,6 @@ page_parse_copy_rec_list_to_created_page(
 
 	page = buf_block_get_frame(block);
 	page_zip = buf_block_get_page_zip(block);
-
 	page_header_set_ptr(page, page_zip, PAGE_LAST_INSERT, NULL);
 
 	if (!dict_index_is_spatial(index)) {
@@ -2460,9 +2446,7 @@ page_copy_rec_list_end_to_created_page(
 	page_header_set_ptr(new_page, NULL, PAGE_HEAP_TOP, heap_top);
 	page_dir_set_n_heap(new_page, NULL, PAGE_HEAP_NO_USER_LOW + n_recs);
 	page_header_set_field(new_page, NULL, PAGE_N_RECS, n_recs);
-
 	page_header_set_ptr(new_page, NULL, PAGE_LAST_INSERT, NULL);
-
 	page_header_set_field(new_page, NULL, PAGE_DIRECTION,
 			      PAGE_NO_DIRECTION);
 	page_header_set_field(new_page, NULL, PAGE_N_DIRECTION, 0);
@@ -2486,7 +2470,6 @@ page_cur_delete_rec_write_log(
 
 	ut_ad(!!page_rec_is_comp(rec) == dict_table_is_comp(index->table));
 	ut_ad(mtr->is_named_space(index->space));
-
 	log_ptr = mlog_open_and_write_index(mtr, rec, index,
 					    page_rec_is_comp(rec)
 					    ? MLOG_COMP_REC_DELETE
@@ -2633,7 +2616,6 @@ page_cur_delete_rec(
 
 	/* 1. Reset the last insert info in the page header and increment
 	the modify clock for the frame */
-
 	page_header_set_ptr(page, page_zip, PAGE_LAST_INSERT, NULL);
 
 	/* The page gets invalid for optimistic searches: increment the

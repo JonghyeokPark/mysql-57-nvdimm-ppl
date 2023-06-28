@@ -1414,7 +1414,9 @@ void
 log_buffer_flush_to_disk(
 	bool sync)
 {
-	ut_ad(!srv_read_only_mode);
+	ut_ad(!srv_read_only_mode); // catch_log
+	#ifdef UNIV_NVDIMM_IPL
+	#endif
 	log_write_up_to(log_get_lsn(), sync);
 }
 

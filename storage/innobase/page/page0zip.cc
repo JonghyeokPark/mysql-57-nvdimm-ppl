@@ -4449,6 +4449,7 @@ page_zip_dir_delete(
 	ut_a(slot_rec);
 
 	/* This could not be done before page_zip_dir_find(). */
+	fprintf(stderr, "page_zip_dir_delete 1\n");
 	page_header_set_field(page, page_zip, PAGE_N_RECS,
 			      (ulint)(page_get_n_recs(page) - 1));
 

@@ -5368,19 +5368,16 @@ fil_node_prepare_for_io(
 
 	return(true);
 }
-
-/********************************************************************//**
-Updates the data structures when an i/o operation finishes. Updates the
-pending i/o's field in the node appropriately. */
+//ipl log 전용 함수
 static
 void
-fil_node_complete_io(
+fil_node_complete_io_for_ipl_log(
 /*=================*/
 	fil_node_t*	node,	/*!< in: file node */
 	fil_system_t*	system,	/*!< in: tablespace memory cache */
 	const IORequest&type)	/*!< in: IO_TYPE_*, marks the node as
 				modified if TYPE_IS_WRITE() */
-{
+{ // Point!!!! write, read 과정 봐보기.
 	ut_ad(mutex_own(&system->mutex));
 	ut_a(node->n_pending > 0);
 
@@ -5396,7 +5393,41 @@ fil_node_complete_io(
 		++system->modification_counter;
 
 		node->modification_counter = system->modification_counter;
+	}
 
+	if (node->n_pending == 0 && fil_space_belongs_in_lru(node->space)) {
+
+		/* The node must be put back to the LRU list */
+		UT_LIST_ADD_FIRST(system->LRU, node);
+	}
+}
+/********************************************************************//**
+Updates the data structures when an i/o operation finishes. Updates the
+pending i/o's field in the node appropriately. */
+static
+void
+fil_node_complete_io(
+/*=================*/
+	fil_node_t*	node,	/*!< in: file node */
+	fil_system_t*	system,	/*!< in: tablespace memory cache */
+	const IORequest&type)	/*!< in: IO_TYPE_*, marks the node as
+				modified if TYPE_IS_WRITE() */
+{ // Point!!!! write, read 과정 봐보기.
+	ut_ad(mutex_own(&system->mutex));
+	ut_a(node->n_pending > 0);
+
+	--node->n_pending;
+
+	ut_ad(type.validate());
+
+	if (type.is_write()) {
+
+		ut_ad(!srv_read_only_mode
+		      || fsp_is_system_temporary(node->space->id));
+
+		++system->modification_counter;
+
+		node->modification_counter = system->modification_counter;
 		if (fil_buffering_disabled(node->space)) {
 
 			/* We don't need to keep track of unflushed
@@ -5786,13 +5817,47 @@ fil_io(
 			req_type, node->name, node->handle, buf, offset, len);
 	}
 #else /* UNIV_HOTBACKUP */
-	/* Queue the aio request */
-	err = os_aio(
-		req_type,
-		mode, node->name, node->handle, buf, offset, len,
-		fsp_is_system_temporary(page_id.space())
-		? false : srv_read_only_mode,
-		node, message);
+#ifdef UNIV_NVDIMM_IPL
+	if(message != NULL){
+		buf_page_t * bpage = (buf_page_t *) message;
+		if (bpage->is_iplized && req_type.is_write() && !req_type.is_log() && !bpage->is_split_page) {
+			// block flush code from page_io_complete;
+			err = DB_SUCCESS;
+			mutex_enter(&fil_system->mutex);
+
+			fil_node_complete_io_for_ipl_log(node, fil_system, req_type);
+
+			mutex_exit(&fil_system->mutex);
+
+			return err;
+			
+			// block flush code from page_io_complete;
+		} else {
+			err = os_aio(
+				req_type,
+				mode, node->name, node->handle, buf, offset, len,
+				fsp_is_system_temporary(page_id.space())
+				? false : srv_read_only_mode,
+				node, message);
+		}
+	}
+	else{
+		err = os_aio(
+			req_type,
+			mode, node->name, node->handle, buf, offset, len,
+			fsp_is_system_temporary(page_id.space())
+			? false : srv_read_only_mode,
+			node, message);
+	}
+#endif
+	// err = os_aio(
+	// 	req_type,
+	// 	mode, node->name, node->handle, buf, offset, len,
+	// 	fsp_is_system_temporary(page_id.space())
+	// 	? false : srv_read_only_mode,
+	// 	node, message);
+	// /* Queue the aio request */
+	
 
 #endif /* UNIV_HOTBACKUP */
 
