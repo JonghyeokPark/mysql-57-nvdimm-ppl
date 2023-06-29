@@ -34,8 +34,8 @@ unsigned char * get_static_ipl_address(page_id_t page_id){
 	offset += 4;
 	mach_write_to_4(static_ipl_address + offset, page_id.page_no());
 	offset += 4;
-	mach_write_to_8(static_ipl_address + offset, 0UL);
-	offset += 8;
+	mach_write_to_4(static_ipl_address + offset, 0UL);
+	offset += 4;
 	return static_ipl_address;
 }
 
@@ -43,8 +43,8 @@ bool alloc_dynamic_ipl_region(ipl_info * page_ipl_info){
 	unsigned char * dynamic_address = alloc_dynamic_address_from_indirection_queue();
 	if(dynamic_address == NULL)	return false; 
 	unsigned char * pointer_to_store_dynamic_address = page_ipl_info->static_region_pointer + DYNAMIC_ADDRESS_OFFSET;
-	mach_write_to_8(pointer_to_store_dynamic_address, (uint64_t)dynamic_address);
-	flush_cache(pointer_to_store_dynamic_address, 8);
+	mach_write_to_4(pointer_to_store_dynamic_address, get_ipl_index_from_addr(nvdimm_info->dynamic_start_pointer, dynamic_address, nvdimm_info->dynamic_ipl_per_page_size));
+	flush_cache(pointer_to_store_dynamic_address, 4);
 	page_ipl_info->dynamic_region_pointer = dynamic_address;
 	// fprintf(stderr, "Dynamic region allocated %p\n", dynamic_address);
 	return true;
@@ -268,7 +268,7 @@ void nvdimm_ipl_log_apply(buf_block_t* block) {
 
 	apply_log_info apply_info;
 	apply_info.static_start_pointer = page_ipl_info->static_region_pointer;
-	apply_info.dynamic_start_pointer = page_ipl_info->dynamic_region_pointer;
+	apply_info.dynamic_start_pointer = get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, mach_read_from_4(page_ipl_info->static_region_pointer + DYNAMIC_ADDRESS_OFFSET), nvdimm_info->dynamic_ipl_per_page_size);
 	apply_info.log_len = page_ipl_info->page_ipl_region_size - IPL_LOG_HEADER_SIZE;
 	apply_info.space_id = page_id.space();
 	apply_info.page_no = page_id.page_no();

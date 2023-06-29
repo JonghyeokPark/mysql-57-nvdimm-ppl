@@ -75,8 +75,8 @@ static inline void memcpy_persist
 
 extern unsigned char* nvdimm_ptr;
 extern int nvdimm_fd;
-extern std::queue<unsigned char *> static_ipl_queue;
-extern std::queue<unsigned char *> dynamic_ipl_queue;
+extern std::queue<uint> static_ipl_queue;
+extern std::queue<uint> dynamic_ipl_queue;
 
 /*IPL allocation*/
 void make_static_indirection_queue(unsigned char * static_start_pointer, uint64_t static_ipl_size, uint static_ipl_max_page_count);
@@ -85,6 +85,8 @@ bool free_static_address_to_indirection_queue(unsigned char * addr);
 void make_dynamic_indirection_queue(unsigned char * dynamic_start_pointer, uint64_t dynamic_ipl_size, uint dynamic_ipl_max_page_count);
 unsigned char * alloc_dynamic_address_from_indirection_queue();
 bool free_dynamic_address_to_indirection_queue(unsigned char * addr);
+unsigned char * get_addr_from_ipl_index(unsigned char * start_ptr, uint index, uint64_t ipl_per_page_size);
+uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr, uint64_t ipl_per_page_size);
 
 /* IPL mapping */
 bool make_static_and_dynamic_ipl_region();
@@ -96,7 +98,7 @@ void nvdimm_free(const uint64_t pool_size);
 
 #define PAGE_NO_OFFSET 4UL
 #define DYNAMIC_ADDRESS_OFFSET 8UL
-#define IPL_LOG_HEADER_SIZE 16UL
+#define IPL_LOG_HEADER_SIZE 12UL
 typedef ib_mutex_t my_mutex;
 
 
@@ -146,14 +148,9 @@ namespace std {
             size_t operator()(const page_id_t& key) const {
                 // space와 page_no를 해싱하여 해시 값을 반환합니다.
                 // 해싱 로직을 구현합니다.
-
-                // std::hash를 사용하여 space와 page_no를 해싱합니다.
-                // 필요에 따라 space와 page_no의 해시 함수를 개별적으로 정의할 수도 있습니다.
                 size_t spaceHash = std::tr1::hash<ib_uint32_t>()(key.space());
                 size_t pageHash = std::tr1::hash<ib_uint32_t>()(key.page_no());
 
-                // spaceHash와 pageHash를 조합하여 최종 해시 값을 반환합니다.
-                // ex) spaceHash ^ pageHash
                 return spaceHash ^ pageHash;
             }
         };
