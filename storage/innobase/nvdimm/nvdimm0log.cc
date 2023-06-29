@@ -85,8 +85,8 @@ ulint write_to_static_region(ipl_info * page_ipl_info, ulint len, unsigned char 
 
 	mlog_id_t log_type = mlog_id_t(mach_read_from_1(write_pointer));
 	write_pointer += 1;
-	ulint body_len = mach_read_from_1(write_pointer);
-	write_pointer += 1;
+	ulint body_len = mach_read_from_2(write_pointer);
+	write_pointer += 2;
 	// fprintf(stderr, "Save complete, Read log! write_pointer: %p type: %d, len: %u\n",write_pointer, log_type, body_len);
 
 	return 0;
@@ -116,7 +116,7 @@ ulint write_to_dynamic_region(ipl_info * page_ipl_info, ulint len, unsigned char
 	page_ipl_info->page_ipl_region_size += len;
 
 	mlog_id_t log_type = mlog_id_t(mach_read_from_1(write_pointer));
-	ulint body_len = mach_read_from_1(write_pointer + 1);
+	ulint body_len = mach_read_from_2(write_pointer + 1);
 	// fprintf(stderr, "Save complete in Dynamic page, Read log! write_pointer: %p type: %d, len: %u\n",write_pointer, log_type, body_len);
 	return 0;
 }
@@ -129,12 +129,12 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 	unsigned char* write_ipl_log_buffer = (byte *)calloc(len + 3, sizeof(char));
 	ulint offset = 0;
 	unsigned char store_type = type;
-	unsigned char store_len = len;
+	unsigned short store_len = len;
 
 	mach_write_to_1(write_ipl_log_buffer + offset, store_type);
 	offset += 1;
-	mach_write_to_1(write_ipl_log_buffer + offset, store_len);
-	offset += 1;
+	mach_write_to_2(write_ipl_log_buffer + offset, store_len);
+	offset += 2;
 	memcpy(write_ipl_log_buffer + offset, log, len);
 
 	// fprintf(stderr, "Write log! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), store_type, store_len);
@@ -239,8 +239,8 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 		// log_hdr를 가져와서 저장
 		mlog_id_t log_type = mlog_id_t(mach_read_from_1(start_ptr));
 		start_ptr += 1;
-		ulint body_len = mach_read_from_1(start_ptr);
-		start_ptr += 1;
+		ulint body_len = mach_read_from_2(start_ptr);
+		start_ptr += 2;
 		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",apply_info->space_id, apply_info->page_no, log_type, body_len);
 
 		//log apply 진행 후, recovery 시작 위치 이동.

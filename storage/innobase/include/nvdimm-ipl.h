@@ -100,7 +100,7 @@ void nvdimm_free(const uint64_t pool_size);
 #define DYNAMIC_ADDRESS_OFFSET 8UL
 #define IPL_LOG_HEADER_SIZE 12UL
 
-#define APPLY_LOG_HDR_SIZE 2UL
+#define APPLY_LOG_HDR_SIZE 3UL
 typedef ib_mutex_t my_mutex;
 
 
