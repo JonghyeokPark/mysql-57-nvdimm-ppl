@@ -34,8 +34,8 @@ unsigned char * get_static_ipl_address(page_id_t page_id){
 	offset += 4;
 	mach_write_to_4(static_ipl_address + offset, page_id.page_no());
 	offset += 4;
-	mach_write_to_8(static_ipl_address + offset, 0UL);
-	offset += 8;
+	mach_write_to_4(static_ipl_address + offset, 0UL);
+	offset += 4;
 	return static_ipl_address;
 }
 
@@ -43,8 +43,8 @@ bool alloc_dynamic_ipl_region(ipl_info * page_ipl_info){
 	unsigned char * dynamic_address = alloc_dynamic_address_from_indirection_queue();
 	if(dynamic_address == NULL)	return false; 
 	unsigned char * pointer_to_store_dynamic_address = page_ipl_info->static_region_pointer + DYNAMIC_ADDRESS_OFFSET;
-	mach_write_to_8(pointer_to_store_dynamic_address, (uint64_t)dynamic_address);
-	flush_cache(pointer_to_store_dynamic_address, 8);
+	mach_write_to_4(pointer_to_store_dynamic_address, get_ipl_index_from_addr(nvdimm_info->dynamic_start_pointer, dynamic_address, nvdimm_info->dynamic_ipl_per_page_size));
+	flush_cache(pointer_to_store_dynamic_address, 4);
 	page_ipl_info->dynamic_region_pointer = dynamic_address;
 	// fprintf(stderr, "Dynamic region allocated %p\n", dynamic_address);
 	return true;
@@ -85,8 +85,8 @@ ulint write_to_static_region(ipl_info * page_ipl_info, ulint len, unsigned char 
 
 	mlog_id_t log_type = mlog_id_t(mach_read_from_1(write_pointer));
 	write_pointer += 1;
-	ulint body_len = mach_read_from_2(write_pointer);
-	write_pointer += 2;
+	ulint body_len = mach_read_from_1(write_pointer);
+	write_pointer += 1;
 	// fprintf(stderr, "Save complete, Read log! write_pointer: %p type: %d, len: %u\n",write_pointer, log_type, body_len);
 
 	return 0;
@@ -116,7 +116,7 @@ ulint write_to_dynamic_region(ipl_info * page_ipl_info, ulint len, unsigned char
 	page_ipl_info->page_ipl_region_size += len;
 
 	mlog_id_t log_type = mlog_id_t(mach_read_from_1(write_pointer));
-	ulint body_len = mach_read_from_2(write_pointer + 1);
+	ulint body_len = mach_read_from_1(write_pointer + 1);
 	// fprintf(stderr, "Save complete in Dynamic page, Read log! write_pointer: %p type: %d, len: %u\n",write_pointer, log_type, body_len);
 	return 0;
 }
@@ -129,16 +129,16 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 	unsigned char* write_ipl_log_buffer = (byte *)calloc(len + 3, sizeof(char));
 	ulint offset = 0;
 	unsigned char store_type = type;
-	unsigned short store_len = len;
+	unsigned char store_len = len;
 
 	mach_write_to_1(write_ipl_log_buffer + offset, store_type);
 	offset += 1;
-	mach_write_to_2(write_ipl_log_buffer + offset, store_len);
-	offset += 2;
+	mach_write_to_1(write_ipl_log_buffer + offset, store_len);
+	offset += 1;
 	memcpy(write_ipl_log_buffer + offset, log, len);
 
 	// fprintf(stderr, "Write log! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), store_type, store_len);
-	ulint have_to_write_len = len + 3;
+	ulint have_to_write_len = len + APPLY_LOG_HDR_SIZE;
 	ulint remain_len = write_to_static_region(page_ipl_info, have_to_write_len, write_ipl_log_buffer);
 	
 	//한 페이지당 사용할 static 영역이 다 찬 경우.
@@ -239,8 +239,8 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 		// log_hdr를 가져와서 저장
 		mlog_id_t log_type = mlog_id_t(mach_read_from_1(start_ptr));
 		start_ptr += 1;
-		ulint body_len = mach_read_from_2(start_ptr);
-		start_ptr += 2;
+		ulint body_len = mach_read_from_1(start_ptr);
+		start_ptr += 1;
 		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",apply_info->space_id, apply_info->page_no, log_type, body_len);
 
 		//log apply 진행 후, recovery 시작 위치 이동.
@@ -268,7 +268,7 @@ void nvdimm_ipl_log_apply(buf_block_t* block) {
 
 	apply_log_info apply_info;
 	apply_info.static_start_pointer = page_ipl_info->static_region_pointer;
-	apply_info.dynamic_start_pointer = page_ipl_info->dynamic_region_pointer;
+	apply_info.dynamic_start_pointer = get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, mach_read_from_4(page_ipl_info->static_region_pointer + DYNAMIC_ADDRESS_OFFSET), nvdimm_info->dynamic_ipl_per_page_size);
 	apply_info.log_len = page_ipl_info->page_ipl_region_size - IPL_LOG_HEADER_SIZE;
 	apply_info.space_id = page_id.space();
 	apply_info.page_no = page_id.page_no();
