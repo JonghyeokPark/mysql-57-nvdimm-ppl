@@ -100,7 +100,7 @@ void nvdimm_free(const uint64_t pool_size);
 #define DYNAMIC_ADDRESS_OFFSET 8UL
 #define IPL_LOG_HEADER_SIZE 12UL
 
-#define APPLY_LOG_HDR_SIZE 2UL
+#define APPLY_LOG_HDR_SIZE 3UL
 typedef ib_mutex_t my_mutex;
 
 
@@ -180,12 +180,13 @@ void nvdimm_ipl_log_apply(buf_block_t* block);
 //page ipl info metadata 관련 함수들
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage);
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id);
-bool nvdimm_ipl_remove_split_merge_map(buf_page_t * bpage, page_id_t page_id);
+bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 void print_page_info(buf_page_t * bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
 bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush);
+void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
 
 
 
