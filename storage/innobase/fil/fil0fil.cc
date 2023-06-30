@@ -5820,28 +5820,23 @@ fil_io(
 #ifdef UNIV_NVDIMM_IPL
 	if(message != NULL){
 		buf_page_t * bpage = (buf_page_t *) message;
-		if (bpage->is_iplized && req_type.is_write() && !req_type.is_log() && !bpage->is_split_page) {
-			// block flush code from page_io_complete;
-			err = DB_SUCCESS;
-			mutex_enter(&fil_system->mutex);
+		if (req_type.is_write() && !req_type.is_log()) {
+			if(check_not_flush_page(bpage, buf_page_get_flush_type(bpage))){
+				err = DB_SUCCESS;
+				mutex_enter(&fil_system->mutex);
 
-			fil_node_complete_io_for_ipl_log(node, fil_system, req_type);
+				fil_node_complete_io_for_ipl_log(node, fil_system, req_type);
 
-			mutex_exit(&fil_system->mutex);
+				mutex_exit(&fil_system->mutex);
 
-			return err;
-			
-			// block flush code from page_io_complete;
-		} else {
-			err = os_aio(
-				req_type,
-				mode, node->name, node->handle, buf, offset, len,
-				fsp_is_system_temporary(page_id.space())
-				? false : srv_read_only_mode,
-				node, message);
+				return err;
+			}
 		}
+		goto flush_normal_case;
+		
 	}
 	else{
+flush_normal_case:
 		err = os_aio(
 			req_type,
 			mode, node->name, node->handle, buf, offset, len,

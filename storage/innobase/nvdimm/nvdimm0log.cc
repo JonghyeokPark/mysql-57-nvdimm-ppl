@@ -301,7 +301,7 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 	buf_page->is_split_page = true;
 }
 
-bool nvdimm_ipl_remove_split_merge_map(buf_page_t * bpage, page_id_t page_id){
+bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p, page_ipl_info : %p\n", page_id.space(), page_id.page_no(), bpage->page_ipl_info->static_region_pointer, bpage->page_ipl_info->dynamic_region_pointer, bpage->page_ipl_info);
 	mutex_enter(&nvdimm_info->ipl_map_mutex);
 	ipl_info * page_ipl_info = bpage->page_ipl_info;
@@ -362,10 +362,8 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 	else{
 		ipl_info * page_ipl_info = bpage->page_ipl_info;
 		if(bpage->is_split_page){
-			if(nvdimm_ipl_remove_split_merge_map(bpage, bpage->id)){
-				// fprintf(stderr, "[FLUSH]split ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
-				return false;
-			}
+			// fprintf(stderr, "[FLUSH]split ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+			return false;
 		}
 		if(page_ipl_info->dynamic_region_pointer == NULL){
 			// fprintf(stderr, "[Not Flush]Only Static ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
@@ -377,11 +375,8 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 				return true;
 			}
 			else{
-				if(nvdimm_ipl_remove_split_merge_map(bpage, bpage->id)){
-					// fprintf(stderr, "[FLUSH]Dynamic ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
-					return false;
-				}
-				
+				// fprintf(stderr, "[FLUSH]Dynamic ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+				return false;
 			}
 
 		}
@@ -389,6 +384,41 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 	}
 	// fprintf(stderr, "[FLUSH]What happen? (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	return false;
+}
+
+void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
+	if(bpage->is_iplized == false){
+		// fprintf(stderr, "[FLUSH] Normal page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+		return;
+	}
+	else{
+		ipl_info * page_ipl_info = bpage->page_ipl_info;
+		if(bpage->is_split_page){
+			if(normalize_ipl_page(bpage, bpage->id)){
+				// fprintf(stderr, "[FLUSH]split ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+				return;
+			}
+		}
+		if(page_ipl_info->dynamic_region_pointer == NULL){
+			// fprintf(stderr, "[Not Flush]Only Static ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
+			return;
+		}
+		else{
+			if(flush_type == BUF_FLUSH_LIST){
+				// fprintf(stderr, "[Not Flush]Checkpoint ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
+				return;
+			}
+			else{
+				if(normalize_ipl_page(bpage, bpage->id)){
+					// fprintf(stderr, "[FLUSH]Dynamic ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+					return;
+				}
+				
+			}
+
+		}
+
+	}
 }
 
 bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush){

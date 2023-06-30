@@ -659,7 +659,6 @@ buf_flush_remove(
 
 	/* Important that we adjust the hazard pointer before removing
 	the bpage from flush list. */
-	// fprintf(stderr, "buf_flush_remove: page : (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	buf_pool->flush_hp.adjust(bpage);
 
 	switch (buf_page_get_state(bpage)) {
@@ -4092,16 +4091,10 @@ buf_flush_ipl_clean_checkpointed_block_low(
 
 		IORequest	request(type);
 
-		//여기서 split page flag를 활성화 시켜서 write를 수행한다.
-		//nvdimm_ipl_remove_split_merge_map 필요
-
-		if(nvdimm_ipl_remove_split_merge_map(bpage, bpage->id)){
-			// fprintf(stderr, "[FLUSH]Clean checkpointer dynamic page: (%u, %u) frmae: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
-			
-			fil_io(request,
+		fil_io(request,
 			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 			frame, bpage);
-		}
+		fprintf(stderr, "[FLUSH]Clean checkpointer dynamic page: (%u, %u) frmae: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 		if (sync) { // single page flush인 경우
 			ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
 			fil_flush(bpage->id.space()); //catch_flush

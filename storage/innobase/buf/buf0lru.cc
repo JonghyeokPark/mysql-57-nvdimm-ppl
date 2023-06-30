@@ -2098,8 +2098,7 @@ func_exit:
 		mutex_exit(block_mutex);
 	}
 
-	buf_LRU_block_free_hashed_page((buf_block_t*) bpage); // 왜 잘못된게 넘어갈까?
-	// fprintf(stderr, "buf_LRU_block_free_hashed_page block frame: %p\n", ((buf_block_t*) bpage)->frame);
+	buf_LRU_block_free_hashed_page((buf_block_t*) bpage);
 	return(true);
 }
 

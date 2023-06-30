@@ -5007,7 +5007,7 @@ buf_page_init_low(
 	bpage->oldest_modification = 0;
 	HASH_INVALIDATE(bpage, hash);
 
-/*UNIV_NVDIMM_IPL*/
+//nvdimm
 	set_for_ipl_page(bpage);
 
 	ut_d(bpage->file_page_was_freed = FALSE);
@@ -5891,6 +5891,8 @@ corrupt:
 		routine in the flush system */
 
 		buf_flush_write_complete(bpage);
+		//여기서 normalize page 실행
+		check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
 
 		if (uncompressed) {
 			rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
