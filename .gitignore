@@ -2502,3 +2502,4 @@ cscope.*
 boost/
 
 my.cnf
+my-nvdimm.cnf

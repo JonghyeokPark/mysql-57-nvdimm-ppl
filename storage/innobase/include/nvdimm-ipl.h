@@ -203,4 +203,8 @@ recv_parse_or_apply_log_rec_body(
 #endif
 
 
+
+/* recovery */
+void parse_ipl_log();
+
 #endif // end-of-header
