@@ -66,7 +66,7 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
       return NULL;
     }
 
-    if (truncate(path, pool_size) == -1) {
+    if (truncate(path, (pool_size*2)) == -1) {
 			NVDIMM_ERROR_PRINT("NVDIMM mmaped file truncate failed!\n");
       return NULL;
     }
@@ -87,14 +87,14 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
       return NULL;
     }
 
-    nvdimm_ptr = (unsigned char *) mmap(NULL, pool_size, PROT_READ|PROT_WRITE, MAP_SHARED, nvdimm_fd, 0);	
+    nvdimm_ptr = (unsigned char *) mmap(NULL, (pool_size*2), PROT_READ|PROT_WRITE, MAP_SHARED, nvdimm_fd, 0);	
 		if (nvdimm_ptr == MAP_FAILED) {
 			NVDIMM_ERROR_PRINT("NVDIMM mmap is failed!\n");
       return NULL;
 		}
 		
 		// now, we copy the IPL region for the idempotent recovery 
-		memcpy(nvdimm_ptr + (2*1024*1024*1024), nvdimm_ptr, (2*1024*1024*1024)); 
+		memcpy(nvdimm_ptr + (2*1024*1024*1024UL), nvdimm_ptr, (2*1024*1024*1024UL)); 
 
 	}
 
