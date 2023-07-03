@@ -71,12 +71,31 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
       return NULL;
     }
 
-    nvdimm_ptr = (unsigned char *) mmap(NULL, pool_size, PROT_READ|PROT_WRITE, MAP_SHARED, nvdimm_fd, 0);
-		memset(nvdimm_ptr, 0x00, pool_size);
+		// TODO(jhpark): we need more space for the recovery; optimize it!
+		// we double the NVDIMM region for iedmpotent recovery for NV-IPL
+    nvdimm_ptr = (unsigned char *) mmap(NULL, (pool_size*2), PROT_READ|PROT_WRITE, MAP_SHARED, nvdimm_fd, 0);
+		memset(nvdimm_ptr, 0x00, (pool_size*2));
 		NVDIMM_INFO_PRINT("NVDIMM mmaped success!\n");
 
   } else {
-  	// TODO(jhpark): recovery process!    
+  	// TODO(jhpark): recovery process! 
+		NVDIMM_INFO_PRINT("IPL Recovery process start!\n");
+		nvdimm_fd = open(path, O_RDWR, 0777);
+
+    if (nvdimm_fd < 0) {
+			NVDIMM_ERROR_PRINT("NVDIMM mmaped file open failed!\n");
+      return NULL;
+    }
+
+    nvdimm_ptr = (unsigned char *) mmap(NULL, pool_size, PROT_READ|PROT_WRITE, MAP_SHARED, nvdimm_fd, 0);	
+		if (nvdimm_ptr == MAP_FAILED) {
+			NVDIMM_ERROR_PRINT("NVDIMM mmap is failed!\n");
+      return NULL;
+		}
+		
+		// now, we copy the IPL region for the idempotent recovery 
+		memcpy(nvdimm_ptr + (2*1024*1024*1024), nvdimm_ptr, (2*1024*1024*1024)); 
+
 	}
 
 	// Force to set NVIMMM
@@ -85,10 +104,12 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
       We force to set the environment variable PMEM_IS_PMEM_FORCE \n \
       We call mync() instead of mfense()\n");
 
+
   //make static and dynamic ipl region
   if(make_static_and_dynamic_ipl_region()){
     NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
   }
+
   /*Make NVDIMM structure*/
   
   return nvdimm_ptr;
