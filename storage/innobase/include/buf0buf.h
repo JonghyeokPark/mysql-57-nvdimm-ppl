@@ -44,9 +44,6 @@ Created 11/5/1995 Heikki Tuuri
 
 // Forward declaration
 struct fil_addr_t;
-/*UNIV_NVDIMM_IPL*/
-struct IPL_INFO;
-void page_is_iplized(buf_page_t * bpage);
 
 /** @name Modes for buf_page_get_gen */
 /* @{ */
@@ -1702,11 +1699,9 @@ public:
 #endif /* !UNIV_HOTBACKUP */
 
 /*UNIV_NVDIMM_IPL*/
-	IPL_INFO *	page_ipl_info;
-	bool 		is_iplized;
-	bool 		is_split_page;
-	bool 		is_dirtified;
-
+	unsigned char * static_ipl_pointer;
+	unsigned char * ipl_write_pointer;
+	unsigned char flags; // first bit: iplized_flag, second bit: normalize_flag, third bit: dirtifed_flag
 };
 
 /** The buffer control block structure */

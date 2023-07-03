@@ -99,19 +99,15 @@ void nvdimm_free(const uint64_t pool_size);
 #define PAGE_NO_OFFSET 4UL
 #define DYNAMIC_ADDRESS_OFFSET 8UL
 #define IPL_LOG_HEADER_SIZE 12UL
-
 #define APPLY_LOG_HDR_SIZE 3UL
-typedef ib_mutex_t my_mutex;
 
-
-struct IPL_INFO
-{
-  unsigned char* static_region_pointer;
-  unsigned char* dynamic_region_pointer;
-  ulint page_ipl_region_size;
+enum ipl_flag {
+  IPLIZED = 1,
+  NORMALIZE = 2,
+  DIRTIFIED = 4
 };
 
-typedef IPL_INFO ipl_info;
+typedef ib_mutex_t my_mutex;
 
 typedef struct NVDIMM_SYSTEM
 {
@@ -136,7 +132,6 @@ typedef struct APPLY_LOG_INFO
 {
   byte * static_start_pointer;
   byte * dynamic_start_pointer;
-  ulint log_len;
   ulint space_id;
   ulint page_no;
   buf_block_t * block;
@@ -159,22 +154,21 @@ namespace std {
     }
 }
 
-extern std::tr1::unordered_map<page_id_t,ipl_info *> ipl_map; // (page_id , offset in NVDIMM IPL regions)
+extern std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map; // (page_id , ipl_static_address)
 extern nvdimm_system * nvdimm_info;
 
 /* IPL operations */
-unsigned char * get_static_ipl_address(page_id_t page_id);
-bool alloc_dynamic_ipl_region(ipl_info * page_ipl_info);
-ipl_info * alloc_static_ipl_info_and_region(page_id_t page_id);
-ulint write_to_static_region(ipl_info * page_ipl_info, ulint len, unsigned char * write_ipl_log_buffer);
-ulint write_to_dynamic_region(ipl_info * page_ipl_info, ulint len, unsigned char * write_ipl_log_buffer);
+void alloc_static_ipl_to_bpage(buf_page_t * bpage);
+bool alloc_dynamic_ipl_region(buf_page_t * bpage);
+ulint write_to_static_region(buf_page_t * bpage, ulint len, unsigned char * write_ipl_log_buffer);
+ulint write_to_dynamic_region(buf_page_t * bpage, ulint len, unsigned char * write_ipl_log_buffer);
 bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type, unsigned char * log);
 bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage);
 
 //page ipl log apply 관련 함수들
 bool copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr);
 void ipl_log_apply(byte * start_ptr, apply_log_info * apply_info, mtr_t * temp_mtr);
-void nvdimm_ipl_log_apply(buf_block_t* block);
+void set_apply_info_and_log_apply(buf_block_t* block);
 
 
 //page ipl info metadata 관련 함수들
@@ -183,11 +177,14 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id);
 bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
-void print_page_info(buf_page_t * bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
 bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush);
 void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
-
+ulint get_ipl_length_from_write_pointer(buf_page_t * bpage);
+unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
+void set_flag(buf_page_t * bpage, ipl_flag flag);
+void unset_flag(buf_page_t * bpage, ipl_flag flag);
+bool get_flag(buf_page_t * bpage, ipl_flag flag);
 
 
 #ifdef UNIV_NVDIMM_IPL
@@ -202,14 +199,5 @@ recv_parse_or_apply_log_rec_body(
 	mtr_t* mtr);
 #endif
 
-/*
-unsigned char* nvdimm_ipl_log_apply(
-	mlog_id_t type,
-	unsigned char* ptr,
-	unsigned char* end_ptr,
-	unsigned long space,
-	unsigned long page_no,
-	buf_block_t* block);
-*/
 
 #endif // end-of-header

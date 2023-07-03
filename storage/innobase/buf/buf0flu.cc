@@ -585,7 +585,7 @@ buf_flush_ready_for_replace(
 
 	if (buf_page_in_file(bpage)) {
 		//ipl화 되어서 flush 스킵해서 clean한 page인지 확인.
-		if(!bpage->is_dirtified && bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
+		if(!get_flag(bpage, DIRTIFIED) && bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
 			// fprintf(stderr, "buf_flush_ready_for_replace: clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
 			return true;
 		}
@@ -797,7 +797,7 @@ buf_flush_write_complete(
 	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
 
 	ut_ad(bpage);
-	if(bpage->is_dirtified){
+	if(get_flag(bpage, DIRTIFIED)){
 		if (bpage->flush_observer != NULL) {
 			bpage->flush_observer->notify_remove(buf_pool, bpage);
 
@@ -1111,12 +1111,11 @@ buf_flush_write_block_low(
 //block_flush
 #ifdef UNIV_NVDIMM_IPL
 	if (check_not_flush_page(bpage, flush_type)){
-			
+		insert_page_ipl_info_in_hash_table(bpage);
 		if(fil_io(request,
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage) == DB_SUCCESS)
 		{
-			insert_page_ipl_info_in_hash_table(bpage);
 			buf_page_io_complete(bpage, sync);
 			buf_LRU_stat_inc_io();
 			return;
@@ -1688,7 +1687,7 @@ buf_flush_LRU_list_batch(
 		if(check_clean_checkpoint_page(bpage, false)){
 			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
 			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
-			bpage->is_dirtified = true;
+			set_flag(bpage, DIRTIFIED);
 			mutex_exit(block_mutex);
 			buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_LRU, false);
 			count++;
@@ -2246,7 +2245,7 @@ buf_flush_single_page_from_LRU(
 			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
 			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
 			//여기서 mutex를 풀어줄지 실행해보기 생각하기.
-			bpage->is_dirtified = true;
+			set_flag(bpage, DIRTIFIED);
 			freed = buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
 			goto clean_flush_end;
 		}
@@ -4094,7 +4093,7 @@ buf_flush_ipl_clean_checkpointed_block_low(
 		fil_io(request,
 			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 			frame, bpage);
-		fprintf(stderr, "[FLUSH]Clean checkpointer dynamic page: (%u, %u) frmae: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
+		// fprintf(stderr, "[FLUSH]Clean checkpointer dynamic page: (%u, %u) frmae: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 		if (sync) { // single page flush인 경우
 			ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
 			fil_flush(bpage->id.space()); //catch_flush

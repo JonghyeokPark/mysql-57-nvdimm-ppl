@@ -354,7 +354,6 @@ btr_cur_latch_leaves(
 			     == page_is_comp(page));
 			// fprintf(stderr, "btr_page_get_prev: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_prev(get_block->frame, mtr));
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
-			// fprintf(stderr, "getblock: (%lu, %lu)\n",page_get_space_id(get_block->frame), page_get_page_no(get_block->frame));
 			ut_a(btr_page_get_prev(get_block->frame, mtr)
 			     == page_get_page_no(page));
 			

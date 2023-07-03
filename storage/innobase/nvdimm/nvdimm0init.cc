@@ -11,7 +11,7 @@
 #include <errno.h>
 #include <stddef.h>
 
-std::tr1::unordered_map<page_id_t, ipl_info * > ipl_map;
+std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map;
 
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
