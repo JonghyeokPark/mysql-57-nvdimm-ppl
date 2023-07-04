@@ -3619,11 +3619,6 @@ buf_block_try_discard_uncompressed(
 	buf_pool_mutex_enter(buf_pool);
 
 	bpage = buf_page_hash_get(buf_pool, page_id);
-// #ifdef UNIV_NVDIMM_IPL
-// 	bool is_iplized = bpage->is_iplized;
-// 	page_id_t page_id_copy = bpage->id;
-// 	IPL_INFO * ipl_info_copy = bpage->page_ipl_info;
-// #endif
 	
 	if (bpage) {
 		buf_LRU_free_page(bpage, false);
@@ -5867,17 +5862,17 @@ corrupt:
 		ut_ad(buf_pool->n_pend_reads > 0);
 		buf_pool->n_pend_reads--;
 		buf_pool->stat.n_pages_read++;
+		if (get_flag(bpage, IPLIZED)){
+			//page를 완전히 가져오고 실행해보기
+			// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",bpage->id.space(), bpage->id.page_no(), bpage);
+			mtr_t temp_mtr;
+			mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+			mtr_start(&temp_mtr);
+			set_apply_info_and_log_apply((buf_block_t*) bpage);
+			mtr_commit(&temp_mtr);
+		}
 
 		if (uncompressed) {
-			if (bpage->is_iplized){
-				//page를 완전히 가져오고 실행해보기
-				// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",bpage->id.space(), bpage->id.page_no(), bpage);
-				mtr_t temp_mtr;
-				mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-				mtr_start(&temp_mtr);
-				nvdimm_ipl_log_apply((buf_block_t*) bpage);
-				mtr_commit(&temp_mtr);
-			}
 			rw_lock_x_unlock_gen(&((buf_block_t*) bpage)->lock,
 					     BUF_IO_READ);
 		}
