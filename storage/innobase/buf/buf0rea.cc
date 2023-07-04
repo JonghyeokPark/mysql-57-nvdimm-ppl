@@ -162,11 +162,6 @@ buf_read_page_low(
 	if (bpage == NULL) {
 		return(0);
 	}
-	
-
-	if(get_flag(bpage, IPLIZED)){
-		sync = true;
-	}
 
 	DBUG_PRINT("ib_buf", ("read page %u:%u size=%u unzip=%u,%s",
 			      (unsigned) page_id.space(),

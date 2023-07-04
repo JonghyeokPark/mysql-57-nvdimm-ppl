@@ -107,13 +107,16 @@ enum ipl_flag {
   DIRTIFIED = 4
 };
 
+
+
 typedef ib_mutex_t my_mutex;
 
 typedef struct NVDIMM_SYSTEM
 {
-  my_mutex ipl_map_mutex;
+  // my_mutex ipl_map_mutex;
   my_mutex static_region_mutex;
   my_mutex dynamic_region_mutex;
+  rw_lock_t lookup_table_lock;
 
   unsigned char* static_start_pointer;
   uint64_t static_ipl_size;
@@ -182,9 +185,9 @@ bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush);
 void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
 ulint get_ipl_length_from_write_pointer(buf_page_t * bpage);
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
-void set_flag(buf_page_t * bpage, ipl_flag flag);
-void unset_flag(buf_page_t * bpage, ipl_flag flag);
-bool get_flag(buf_page_t * bpage, ipl_flag flag);
+void set_flag(unsigned char * flags, ipl_flag flag);
+void unset_flag(unsigned char * flags, ipl_flag flag);
+bool get_flag(unsigned char * flags, ipl_flag flag);
 
 
 #ifdef UNIV_NVDIMM_IPL
