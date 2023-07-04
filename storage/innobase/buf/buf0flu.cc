@@ -585,7 +585,7 @@ buf_flush_ready_for_replace(
 
 	if (buf_page_in_file(bpage)) {
 		//ipl화 되어서 flush 스킵해서 clean한 page인지 확인.
-		if(!get_flag(bpage, DIRTIFIED) && bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
+		if(!get_flag(&(bpage->flags), DIRTIFIED) && bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
 			// fprintf(stderr, "buf_flush_ready_for_replace: clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
 			return true;
 		}
@@ -797,7 +797,7 @@ buf_flush_write_complete(
 	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
 
 	ut_ad(bpage);
-	if(get_flag(bpage, DIRTIFIED)){
+	if(get_flag(&(bpage->flags), DIRTIFIED)){
 		if (bpage->flush_observer != NULL) {
 			bpage->flush_observer->notify_remove(buf_pool, bpage);
 
@@ -1687,7 +1687,7 @@ buf_flush_LRU_list_batch(
 		if(check_clean_checkpoint_page(bpage, false)){
 			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
 			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
-			set_flag(bpage, DIRTIFIED);
+			set_flag(&(bpage->flags), DIRTIFIED);
 			mutex_exit(block_mutex);
 			buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_LRU, false);
 			count++;
@@ -2245,7 +2245,7 @@ buf_flush_single_page_from_LRU(
 			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
 			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
 			//여기서 mutex를 풀어줄지 실행해보기 생각하기.
-			set_flag(bpage, DIRTIFIED);
+			set_flag(&(bpage->flags), DIRTIFIED);
 			freed = buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
 			goto clean_flush_end;
 		}

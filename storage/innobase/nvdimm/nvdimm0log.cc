@@ -31,14 +31,17 @@ void alloc_static_ipl_to_bpage(buf_page_t * bpage){
 	if(static_ipl_pointer == NULL) return;
 	ulint offset = 0;
 	mach_write_to_4(static_ipl_pointer + offset, bpage->id.space());
+	flush_cache(static_ipl_pointer + offset, 4);
 	offset += 4;
 	mach_write_to_4(static_ipl_pointer + offset, bpage->id.page_no());
+	flush_cache(static_ipl_pointer + offset, 4);
 	offset += 4;
 	mach_write_to_4(static_ipl_pointer + offset, 0);
+	flush_cache(static_ipl_pointer + offset, 4);
 	offset += 4;
 	bpage->static_ipl_pointer = static_ipl_pointer;
 	bpage->ipl_write_pointer = static_ipl_pointer + IPL_LOG_HEADER_SIZE;
-	set_flag(bpage, IPLIZED);
+	set_flag(&(bpage->flags), IPLIZED);
 	// fprintf(stderr, "alloc static ipl (%u, %u) static_ipl: %p now_write_pointer: %p\n", bpage->id.space(), bpage->id.page_no(),bpage->static_ipl_pointer ,bpage->ipl_write_pointer);
 }
 
@@ -136,7 +139,7 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
 			if(!alloc_dynamic_ipl_region(bpage)){
 				//Dynamic 영역을 할당 받을 수 없는 경우, page를 flush하고 새로 할당받기
-				set_flag(bpage, NORMALIZE);
+				set_flag(&(bpage->flags), NORMALIZE);
 				free(write_ipl_log_buffer);
 				return false;
 			}
@@ -148,7 +151,7 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 		if(remain_len > 0){
 			//나중에 수정하기####
 			// fprintf(stderr, "dynamic regions also full!! page_id:(%u, %u)\n", page_id.space(), page_id.page_no());
-			set_flag(bpage, NORMALIZE);
+			set_flag(&(bpage->flags), NORMALIZE);
 			free(write_ipl_log_buffer);
 			return false;
 		}
@@ -165,10 +168,10 @@ bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 	// fprintf(stderr, "Add log start! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), type, len);
-	if (!get_flag(bpage, IPLIZED)) {
+	if (!get_flag(&(bpage->flags), IPLIZED)) {
 		alloc_static_ipl_to_bpage(bpage);
 		if(bpage->static_ipl_pointer == NULL){
-			set_flag(bpage, NORMALIZE);
+			set_flag(&(bpage->flags), NORMALIZE);
 			mtr_commit(&temp_mtr);
 			return false;
 		}
@@ -197,7 +200,6 @@ bool copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 	if(apply_info->dynamic_start_pointer == NULL){
 		apply_log_buffer = (byte *)calloc(nvdimm_info->static_ipl_per_page_size, sizeof(char));
 		memcpy(apply_log_buffer, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE, nvdimm_info->static_ipl_per_page_size);
-		flush_cache(apply_log_buffer, nvdimm_info->static_ipl_per_page_size);
 	}
 	else{ //dynamic 영역이 존재하는 경우도 카피.
 		ulint offset = 0;
@@ -205,11 +207,8 @@ bool copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 		apply_log_buffer = (byte *)calloc(apply_buffer_size, sizeof(char));
 		
 		memcpy(apply_log_buffer + offset, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
-		flush_cache(apply_log_buffer + offset, nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
 		offset += nvdimm_info->static_ipl_per_page_size	- IPL_LOG_HEADER_SIZE;
-		// fprintf(stderr, "dynamic_region_size: %u\n", dynamic_region_size);
 		memcpy(apply_log_buffer + offset, apply_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_per_page_size);
-		flush_cache(apply_log_buffer + offset, nvdimm_info->dynamic_ipl_per_page_size);
 
 	}
 	//Log apply 시작.
@@ -258,9 +257,6 @@ void set_apply_info_and_log_apply(buf_block_t* block) {
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 
 	// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying start!";
-	// ib::info() << "have_to_flush : " <<apply_page->is_split_page << "is_iplized : " << apply_page->is_iplized ;
-
-	// step1. read current IPL log using page_id
 
 	apply_log_info apply_info;
 	apply_info.static_start_pointer = apply_page->static_ipl_pointer;
@@ -280,31 +276,31 @@ void set_apply_info_and_log_apply(buf_block_t* block) {
 
 
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
-	mutex_enter(&nvdimm_info->ipl_map_mutex);
+	// mutex_enter(&nvdimm_info->ipl_map_mutex);
 	page_id_t page_id = bpage->id;
-	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it = ipl_map.find(bpage->id);
-	if(it == ipl_map.end()){
-		ipl_map.insert(std::make_pair(bpage->id, bpage->static_ipl_pointer));
-		// fprintf(stderr, "Save ipl info page(%u, %u), static: %p, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->static_ipl_pointer, get_dynamic_ipl_pointer(bpage));
-	}
-	mutex_exit(&nvdimm_info->ipl_map_mutex);
+	std::pair <page_id_t, unsigned char *> insert_data = std::make_pair(bpage->id, bpage->static_ipl_pointer);
+	rw_lock_x_lock(&nvdimm_info->lookup_table_lock);
+	ipl_map.insert(insert_data);
+	rw_lock_x_unlock(&nvdimm_info->lookup_table_lock);
+	// mutex_exit(&nvdimm_info->ipl_map_mutex);
 }
 
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 	// fprintf(stderr, "ipl_add Split page(%u, %u)\n", page_id.space(), page_id.page_no());
 	//buf_page_hash_get_s_locked로 시도해보기.
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	buf_page_t * buf_page = buf_page_get_also_watch(buf_pool, page_id);
-	set_flag(buf_page, NORMALIZE);
+	buf_page_t * bpage = buf_page_get_also_watch(buf_pool, page_id);
+	set_flag(&(bpage->flags), NORMALIZE);
 }
 
 bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p\n", page_id.space(), page_id.page_no(), bpage->static_ipl_pointer, get_dynamic_ipl_pointer(bpage));
-	mutex_enter(&nvdimm_info->ipl_map_mutex);
-	unset_flag(bpage, IPLIZED);
-	unset_flag(bpage, NORMALIZE);
+	// mutex_enter(&nvdimm_info->ipl_map_mutex);
+	rw_lock_x_lock(&nvdimm_info->lookup_table_lock);
 	ipl_map.erase(page_id);
-	mutex_exit(&nvdimm_info->ipl_map_mutex);
+	rw_lock_x_unlock(&nvdimm_info->lookup_table_lock);
+	unset_flag(&(bpage->flags), IPLIZED);
+	unset_flag(&(bpage->flags), NORMALIZE);
 	free_dynamic_address_to_indirection_queue(get_dynamic_ipl_pointer(bpage));
 	free_static_address_to_indirection_queue(bpage->static_ipl_pointer);
 	return true;
@@ -312,35 +308,34 @@ bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	buf_page_t * buf_page = buf_page_get_also_watch(buf_pool, page_id);
-	return get_flag(buf_page, NORMALIZE);
+	buf_page_t * bpage = buf_page_get_also_watch(buf_pool, page_id);
+	return get_flag(&(bpage->flags), NORMALIZE);
 }
 
 
 void set_for_ipl_page(buf_page_t* bpage){
-	// fprintf(stderr, "Read page! page_id(%u, %u)\n", bpage->id.space(), bpage->id.page_no());
-	mutex_enter(&nvdimm_info->ipl_map_mutex);
-	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it = ipl_map.find(bpage->id);
 	bpage->static_ipl_pointer = NULL;
 	bpage->flags = 0;
+	bpage->ipl_write_pointer = NULL;
+	rw_lock_s_lock(&nvdimm_info->lookup_table_lock);
+	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it = ipl_map.find(bpage->id);
+	rw_lock_s_unlock(&nvdimm_info->lookup_table_lock);
 	if(it != ipl_map.end()){
 		// fprintf(stderr, "Read ipl page! page_id(%u, %u)\n", bpage->id.space(), bpage->id.page_no());
-		set_flag(bpage, IPLIZED);
+		set_flag(&(bpage->flags), IPLIZED);
 		bpage->static_ipl_pointer = it->second;
 	}
-	bpage->ipl_write_pointer = NULL;
-	mutex_exit(&nvdimm_info->ipl_map_mutex);
 }
 
 
 //Dynamic 영역을 가지고 있는 checkpoint page인지 확인하기.
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
-	if(get_flag(bpage, IPLIZED) == false){
+	if(get_flag(&(bpage->flags), IPLIZED) == false){
 		// fprintf(stderr, "[FLUSH] Normal page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		return false;
 	}
 	else{
-		if(get_flag(bpage, NORMALIZE)){
+		if(get_flag(&(bpage->flags), NORMALIZE)){
 			// fprintf(stderr, "[FLUSH]split ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 			return false;
 		}
@@ -365,11 +360,11 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 }
 
 void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
-	if(get_flag(bpage, IPLIZED) == false){
+	if(get_flag(&(bpage->flags), IPLIZED) == false){
 		return;
 	}
 	else{
-		if(get_flag(bpage, NORMALIZE)){
+		if(get_flag(&(bpage->flags), NORMALIZE)){
 			if(normalize_ipl_page(bpage, bpage->id)){
 				return;
 			}
@@ -395,7 +390,7 @@ void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 
 bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush){
 	if(bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
-		if(get_flag(bpage, IPLIZED) && !get_flag(bpage, NORMALIZE)){
+		if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
 			if(is_single_page_flush)	return true; // single_page flush인 경우
 			if(get_dynamic_ipl_pointer(bpage) != NULL){
 				return true;
@@ -425,13 +420,12 @@ unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage){
 	return get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, ipl_index, nvdimm_info->dynamic_ipl_per_page_size);
 }
 
-void set_flag(buf_page_t * bpage, ipl_flag flag){
-	bpage->flags |= flag;
+void set_flag(unsigned char * flags, ipl_flag flag_type){
+	(*flags) |= flag_type;
 }
-void unset_flag(buf_page_t * bpage, ipl_flag flag){
-	bpage->flags &= ~flag;
+void unset_flag(unsigned char * flags, ipl_flag flag_type){
+	(*flags) &= ~flag_type;
 }
-
-bool get_flag(buf_page_t * bpage, ipl_flag flag){
-	return bpage->flags & flag;
+bool get_flag(unsigned char * flags, ipl_flag flag_type){
+	return (*flags) & flag_type;
 }
