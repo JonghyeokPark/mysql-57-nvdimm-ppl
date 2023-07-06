@@ -899,7 +899,7 @@ add_log_to_ipl(
 	len = rec_end - body;
 
 	if(!is_system_or_undo_tablespace(space) && !nvdimm_ipl_is_split_or_merge_page(page_id)
-		&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
+		&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page) ){
 		nvdimm_ipl_add(body, len, type, buf_page);
 	}
 

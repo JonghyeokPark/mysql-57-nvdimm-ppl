@@ -1852,6 +1852,12 @@ buf_pool_init_instance(
 	/* Initialize the iterator for single page scan search */
 	new(&buf_pool->single_scan_itr) LRUItr(buf_pool, &buf_pool->mutex);
 
+	//nvdimm make ipl_look_up_table
+	buf_pool->ipl_look_up_table = new std::tr1::unordered_map<page_id_t, unsigned char*>;
+	buf_pool->ipl_look_up_table->clear();
+	rw_lock_create(ipl_map_mutex_key, &buf_pool->lookup_table_lock, SYNC_IPL_MAP_MUTEX);
+	//nvdimm make ipl_look_up_table
+
 	buf_pool_mutex_exit(buf_pool);
 
 	return(DB_SUCCESS);
@@ -1922,6 +1928,11 @@ buf_pool_free_instance(
 	ha_clear(buf_pool->page_hash);
 	hash_table_free(buf_pool->page_hash);
 	hash_table_free(buf_pool->zip_hash);
+	
+	//nvdimm free ipl_look_up_table and lock
+	ut_free(buf_pool->ipl_look_up_table);
+	rw_lock_free(&buf_pool->lookup_table_lock);
+	//nvdimm free ipl_look_up_table and lock
 
 	buf_pool->allocator.~ut_allocator();
 }
@@ -1964,7 +1975,6 @@ buf_pool_init(
 			return(DB_ERROR);
 		}
 	}
-
 	buf_chunk_map_ref = buf_chunk_map_reg;
 
 	buf_pool_set_sizes();

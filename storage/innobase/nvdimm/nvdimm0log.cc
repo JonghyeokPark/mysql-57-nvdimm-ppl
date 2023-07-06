@@ -279,9 +279,10 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 	// mutex_enter(&nvdimm_info->ipl_map_mutex);
 	page_id_t page_id = bpage->id;
 	std::pair <page_id_t, unsigned char *> insert_data = std::make_pair(bpage->id, bpage->static_ipl_pointer);
-	rw_lock_x_lock(&nvdimm_info->lookup_table_lock);
-	ipl_map.insert(insert_data);
-	rw_lock_x_unlock(&nvdimm_info->lookup_table_lock);
+	buf_pool_t * buf_pool = buf_pool_get(page_id);
+	rw_lock_x_lock(&buf_pool->lookup_table_lock);
+	buf_pool->ipl_look_up_table->insert(insert_data);
+	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
 	// mutex_exit(&nvdimm_info->ipl_map_mutex);
 }
 
@@ -296,9 +297,10 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p\n", page_id.space(), page_id.page_no(), bpage->static_ipl_pointer, get_dynamic_ipl_pointer(bpage));
 	// mutex_enter(&nvdimm_info->ipl_map_mutex);
-	rw_lock_x_lock(&nvdimm_info->lookup_table_lock);
-	ipl_map.erase(page_id);
-	rw_lock_x_unlock(&nvdimm_info->lookup_table_lock);
+	buf_pool_t * buf_pool = buf_pool_get(page_id);
+	rw_lock_x_lock(&buf_pool->lookup_table_lock);
+	buf_pool->ipl_look_up_table->erase(page_id);
+	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
 	unset_flag(&(bpage->flags), IPLIZED);
 	unset_flag(&(bpage->flags), NORMALIZE);
 	free_dynamic_address_to_indirection_queue(get_dynamic_ipl_pointer(bpage));
@@ -317,14 +319,17 @@ void set_for_ipl_page(buf_page_t* bpage){
 	bpage->static_ipl_pointer = NULL;
 	bpage->flags = 0;
 	bpage->ipl_write_pointer = NULL;
-	rw_lock_s_lock(&nvdimm_info->lookup_table_lock);
-	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it = ipl_map.find(bpage->id);
-	rw_lock_s_unlock(&nvdimm_info->lookup_table_lock);
-	if(it != ipl_map.end()){
+	page_id_t page_id = bpage->id;
+	buf_pool_t * buf_pool = buf_pool_get(page_id);
+	rw_lock_s_lock(&buf_pool->lookup_table_lock);
+	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it = buf_pool->ipl_look_up_table->find(page_id);
+	rw_lock_s_unlock(&buf_pool->lookup_table_lock);
+	if(it != buf_pool->ipl_look_up_table->end()){
 		// fprintf(stderr, "Read ipl page! page_id(%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		set_flag(&(bpage->flags), IPLIZED);
 		bpage->static_ipl_pointer = it->second;
 	}
+	
 }
 
 

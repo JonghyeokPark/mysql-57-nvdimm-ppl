@@ -15,7 +15,6 @@
 #include <unistd.h>
 #include <cassert>
 #include <iostream>
-#include <tr1/unordered_map>
 #include "buf0buf.h"
 #include <queue>
 
@@ -113,10 +112,8 @@ typedef ib_mutex_t my_mutex;
 
 typedef struct NVDIMM_SYSTEM
 {
-  // my_mutex ipl_map_mutex;
   my_mutex static_region_mutex;
   my_mutex dynamic_region_mutex;
-  rw_lock_t lookup_table_lock;
 
   unsigned char* static_start_pointer;
   uint64_t static_ipl_size;
@@ -141,23 +138,8 @@ typedef struct APPLY_LOG_INFO
 
 }apply_log_info;
 
-namespace std {
-    namespace tr1 {
-        template <>
-        struct hash<page_id_t> {
-            size_t operator()(const page_id_t& key) const {
-                // space와 page_no를 해싱하여 해시 값을 반환합니다.
-                // 해싱 로직을 구현합니다.
-                size_t spaceHash = std::tr1::hash<ib_uint32_t>()(key.space());
-                size_t pageHash = std::tr1::hash<ib_uint32_t>()(key.page_no());
 
-                return spaceHash ^ pageHash;
-            }
-        };
-    }
-}
-
-extern std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map; // (page_id , ipl_static_address)
+// extern std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map; // (page_id , ipl_static_address)
 extern nvdimm_system * nvdimm_info;
 
 /* IPL operations */

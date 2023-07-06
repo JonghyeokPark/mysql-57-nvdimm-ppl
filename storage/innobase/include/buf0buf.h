@@ -40,6 +40,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "log0log.h"
 #include "srv0srv.h"
 #include <ostream>
+#include <tr1/unordered_map>
 
 
 // Forward declaration
@@ -2075,11 +2076,34 @@ struct buf_buddy_stat_t {
 
 NOTE! The definition appears here only for other modules of this
 directory (buf) to see it. Do not use from outside! */
+//nvdimm
+namespace std {
+    namespace tr1 {
+        template <>
+        struct hash<page_id_t> {
+            size_t operator()(const page_id_t& key) const {
+                // space와 page_no를 해싱하여 해시 값을 반환합니다.
+                // 해싱 로직을 구현합니다.
+                size_t spaceHash = std::tr1::hash<ib_uint32_t>()(key.space());
+                size_t pageHash = std::tr1::hash<ib_uint32_t>()(key.page_no());
+
+                return spaceHash ^ pageHash;
+            }
+        };
+    }
+}
+//nvdimm
 
 struct buf_pool_t{
 
 	/** @name General fields */
 	/* @{ */
+
+	//nvdimm
+	std::tr1::unordered_map<page_id_t, unsigned char *> * ipl_look_up_table;
+	rw_lock_t lookup_table_lock;
+	//nvdimm
+
 	BufPoolMutex	mutex;		/*!< Buffer pool mutex of this
 					instance */
 	BufPoolZipMutex	zip_mutex;	/*!< Zip mutex of this buffer

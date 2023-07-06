@@ -16,7 +16,6 @@ std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map;
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
 nvdimm_system * nvdimm_info = NULL;
-mysql_pfs_key_t	look_up_rw_lock;
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -48,8 +47,6 @@ bool make_static_and_dynamic_ipl_region(){ //여기서 static 크기 바꿔주�
 
   mutex_create(LATCH_ID_STATIC_REGION, &nvdimm_info->static_region_mutex);
   mutex_create(LATCH_ID_DYNAMIC_REGION, &nvdimm_info->dynamic_region_mutex);
-  rw_lock_create(look_up_rw_lock, &nvdimm_info->lookup_table_lock, SYNC_IPL_MAP_MUTEX);
-  // mutex_create(LATCH_ID_IPL_MAP_MUTEX, &nvdimm_info->ipl_map_mutex);
   return true;
 }
 
