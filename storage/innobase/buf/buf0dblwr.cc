@@ -39,6 +39,8 @@ Created 2011/12/19
 
 #ifdef UNIV_NVDIMM_IPL
 #include "nvdimm-ipl.h"
+extern pfs_os_file_t nvdimm_dwb_file;
+extern unsigned char* nvdimm_ptr;
 #endif
 
 #ifndef UNIV_HOTBACKUP
@@ -157,6 +159,37 @@ buf_dblwr_init(
 
 	buf_dblwr->in_use = static_cast<bool*>(
 		ut_zalloc_nokey(buf_size * sizeof(bool)));
+#ifdef UNIV_NVDIMM_IPL
+	dberr_t err;
+	byte * buf;
+	buf_dblwr->write_buf_unaligned = static_cast<byte*>(
+		nvdimm_ptr + nvdimm_info->static_ipl_size + nvdimm_info->dynamic_ipl_size);
+	buf_dblwr->write_buf = static_cast<byte*>(
+		ut_align(buf_dblwr->write_buf_unaligned,
+			 UNIV_PAGE_SIZE));
+	ib::info() << "NVDIMM DWB is created";
+
+	buf = buf_dblwr->write_buf;
+	IORequest read_request(IORequest::READ);
+	read_request.disable_compression();
+	
+	err = os_file_read(
+		read_request,
+		nvdimm_dwb_file, buf, buf_dblwr->block1 * UNIV_PAGE_SIZE,
+		TRX_SYS_DOUBLEWRITE_BLOCK_SIZE * UNIV_PAGE_SIZE);
+	if(err != DB_SUCCESS){
+		ib::error() << "Failed to read the first double write buffer extent";
+		return;
+	}
+	err = os_file_read(
+		read_request,
+		nvdimm_dwb_file, buf + TRX_SYS_DOUBLEWRITE_BLOCK_SIZE * UNIV_PAGE_SIZE, buf_dblwr->block2 * UNIV_PAGE_SIZE,
+		TRX_SYS_DOUBLEWRITE_BLOCK_SIZE * UNIV_PAGE_SIZE);
+	if(err != DB_SUCCESS){
+		ib::error() << "Failed to read the second double write buffer extent";
+		return;
+	}
+#else
 
 	buf_dblwr->write_buf_unaligned = static_cast<byte*>(
 		ut_malloc_nokey((1 + buf_size) * UNIV_PAGE_SIZE));
@@ -164,6 +197,7 @@ buf_dblwr_init(
 	buf_dblwr->write_buf = static_cast<byte*>(
 		ut_align(buf_dblwr->write_buf_unaligned,
 			 UNIV_PAGE_SIZE));
+#endif
 
 	buf_dblwr->buf_block_arr = static_cast<buf_page_t**>(
 		ut_zalloc_nokey(buf_size * sizeof(void*)));
@@ -404,6 +438,9 @@ buf_dblwr_init_or_load_pages(
 	if (mach_read_from_4(doublewrite + TRX_SYS_DOUBLEWRITE_MAGIC)
 	    == TRX_SYS_DOUBLEWRITE_MAGIC_N) {
 		/* The doublewrite buffer has been created */
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_dwb_file = file; // 만약 DWB가 이미 존재한다면, 그 파일을 그대로 쓰기
+#endif
 
 		buf_dblwr_init(doublewrite);
 
@@ -429,6 +466,9 @@ buf_dblwr_init_or_load_pages(
 
 		ib::info() << "Resetting space id's in the doublewrite buffer";
 	}
+#ifdef UNIV_NVDIMM_IPL
+	goto skip_load_dwb; // 이미 NVDIMM은 Non-volatile DRAM이에 DISK에서 읽어와서 올릴필요가 없음
+#endif
 
 	/* Read the pages from the doublewrite buffer to memory */
 	err = os_file_read(
@@ -464,7 +504,9 @@ buf_dblwr_init_or_load_pages(
 
 		return(err);
 	}
-
+#ifdef UNIV_NVDIMM_IPL
+skip_load_dwb:
+#endif
 	/* Check if any of these pages is half-written in data files, in the
 	intended position */
 
@@ -707,7 +749,10 @@ buf_dblwr_free(void)
 
 	os_event_destroy(buf_dblwr->b_event);
 	os_event_destroy(buf_dblwr->s_event);
-	ut_free(buf_dblwr->write_buf_unaligned);
+
+#ifndef UNIV_NVDIMM_IPL
+	ut_free(buf_dblwr->write_buf_unaligned); // nvdimm은 dealloc할 필요가 없음
+#endif
 	buf_dblwr->write_buf_unaligned = NULL;
 
 	ut_free(buf_dblwr->buf_block_arr);
@@ -731,7 +776,8 @@ buf_dblwr_update(
 {
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL
-	    || fsp_is_system_temporary(bpage->id.space())) {
+	    || fsp_is_system_temporary(bpage->id.space())
+		|| check_not_flush_page((buf_page_t *)bpage, flush_type)) {
 		return;
 	}
 
@@ -752,7 +798,11 @@ buf_dblwr_update(
 			mutex_exit(&buf_dblwr->mutex);
 			/* This will finish the batch. Sync data files
 			to the disk. */
-			fil_flush_file_spaces(FIL_TYPE_TABLESPACE);
+#ifdef UNIV_NVDIMM_IPL
+			//NVDIMM에 있는 공간이므로 flush해줄필요 없음
+#else
+	fil_flush_file_spaces(FIL_TYPE_TABLESPACE); 
+#endif
 			mutex_enter(&buf_dblwr->mutex);
 
 			/* We can now reuse the doublewrite memory buffer: */
@@ -1023,6 +1073,11 @@ try_again:
 		buffer has sane LSN values. */
 		buf_dblwr_check_page_lsn(write_buf + len2);
 	}
+#ifdef UNIV_NVDIMM_IPL
+	//NVDIMM에 있는 공간이므로 io 및 flush를 해줄필요 없음
+	//Flush 스킵하기
+	goto flush;
+#endif
 
 	/* Write out the first block of the doublewrite buffer */
 	len = ut_min(TRX_SYS_DOUBLEWRITE_BLOCK_SIZE,
@@ -1054,7 +1109,11 @@ flush:
 	srv_stats.dblwr_writes.inc();
 
 	/* Now flush the doublewrite buffer data to disk */
-	fil_flush(TRX_SYS_SPACE); //catch_flush
+#ifdef UNIV_NVDIMM_IPL
+	//NVDIMM에 있는 공간이므로 flush해줄필요 없음
+#else
+	fil_flush(TRX_SYS_SPACE); 
+#endif
 
 	/* We know that the writes have been flushed to disk now
 	and in recovery we will find them in the doublewrite buffer
@@ -1126,6 +1185,29 @@ try_again:
 	byte*	p = buf_dblwr->write_buf
 		+ univ_page_size.physical() * buf_dblwr->first_free;
 
+#ifdef UNIV_NVDIMM_IPL
+	// 이 부분은 Disk에 flush해야할 page를 DWB에 copy하는 부분이다.
+	// 기존 코드는 Dram에 memcpy하는 것이기 때문에 flush_cache가 필요하지 않다
+	// 하지만 NV-IPL은 DWB가 NVDIMM에 있기 때문에 flush_cache를 통해 consistency를 보장해야한다.
+	if (bpage->size.is_compressed()) {
+		UNIV_MEM_ASSERT_RW(bpage->zip.data, bpage->size.physical());
+		/* Copy the compressed page and clear the rest. */
+
+		memcpy(p, bpage->zip.data, bpage->size.physical());
+
+		memset(p + bpage->size.physical(), 0x0,
+		       univ_page_size.physical() - bpage->size.physical());
+		flush_cache(p, univ_page_size.physical() - bpage->size.physical());
+	} else {
+		ut_a(buf_page_get_state(bpage) == BUF_BLOCK_FILE_PAGE);
+
+		UNIV_MEM_ASSERT_RW(((buf_block_t*) bpage)->frame,
+				   bpage->size.logical());
+
+		memcpy(p, ((buf_block_t*) bpage)->frame, bpage->size.logical());
+		flush_cache(p,  bpage->size.logical());
+	}
+#else
 	if (bpage->size.is_compressed()) {
 		UNIV_MEM_ASSERT_RW(bpage->zip.data, bpage->size.physical());
 		/* Copy the compressed page and clear the rest. */
@@ -1142,6 +1224,7 @@ try_again:
 
 		memcpy(p, ((buf_block_t*) bpage)->frame, bpage->size.logical());
 	}
+#endif
 
 	buf_dblwr->buf_block_arr[buf_dblwr->first_free] = bpage;
 
@@ -1259,7 +1342,28 @@ retry:
 	to the in-memory buffer of doublewrite before proceeding to
 	write it. This is so because we want to pad the remaining
 	bytes in the doublewrite page with zeros. */
+#ifdef UNIV_NVDIMM_IPL
+	if (bpage->size.is_compressed()) {
+		memcpy(buf_dblwr->write_buf + univ_page_size.physical() * i,
+		       bpage->zip.data, bpage->size.physical());
 
+		memset(buf_dblwr->write_buf + univ_page_size.physical() * i
+		       + bpage->size.physical(), 0x0,
+		       univ_page_size.physical() - bpage->size.physical());
+		flush_cache(buf_dblwr->write_buf,  bpage->size.physical());
+	} else {
+		// nvdimm은 fil_io를 할 필요가 없음
+		// 그리고, 압축되지 않았기 때문에, 물리 page 그대로 nvdimm dwb에 그대로 복사해서 넣어주기
+		memcpy(buf_dblwr->write_buf + univ_page_size.physical() * offset,
+           (void*) ((buf_block_t*) bpage)->frame,
+           bpage->size.physical());
+		flush_cache(buf_dblwr->write_buf + univ_page_size.physical() * offset, bpage->size.physical());
+	}
+
+	/* Now flush the doublewrite buffer data to disk */
+	//NVDIMM 이기에 flush할 필요 없음
+	// fil_flush(TRX_SYS_SPACE);
+#else
 	if (bpage->size.is_compressed()) {
 		memcpy(buf_dblwr->write_buf + univ_page_size.physical() * i,
 		       bpage->zip.data, bpage->size.physical());
@@ -1286,10 +1390,11 @@ retry:
 
 	/* Now flush the doublewrite buffer data to disk */
 	fil_flush(TRX_SYS_SPACE);//catch_flush
-
+#endif
 	/* We know that the write has been flushed to disk now
 	and during recovery we will find it in the doublewrite buffer
 	blocks. Next do the write to the intended position. */
 	buf_dblwr_write_block_to_datafile(bpage, sync);
+
 }
 #endif /* !UNIV_HOTBACKUP */

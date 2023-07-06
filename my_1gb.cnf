@@ -70,7 +70,7 @@ innodb_log_buffer_size=128M
 innodb_flush_neighbors=0
 
 #doublewrite and flush method
-innodb_doublewrite=OFF
+innodb_doublewrite=ON
 innodb_flush_method=O_DIRECT
 
 #AIO control
