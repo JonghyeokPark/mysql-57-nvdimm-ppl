@@ -205,6 +205,7 @@ recv_parse_or_apply_log_rec_body(
 
 
 /* recovery */
-void parse_ipl_log();
+void recv_ipl_parse_log();
+extern std::tr1::unordered_map<page_id_t, ipl_info * > ipl_recv_map;
 
 #endif // end-of-header
