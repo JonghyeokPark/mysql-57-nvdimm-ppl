@@ -39,6 +39,17 @@ void alloc_static_ipl_to_bpage(buf_page_t * bpage){
 	mach_write_to_4(static_ipl_pointer + offset, 0);
 	flush_cache(static_ipl_pointer + offset, 4);
 	offset += 4;
+  // (jhpark): for recvoery test
+  // length;
+	mach_write_to_4(static_ipl_pointer + offset, 0);
+	flush_cache(static_ipl_pointer + offset, 4);
+  // flushed?
+	mach_write_to_2(static_ipl_pointer + offset, 0);
+	flush_cache(static_ipl_pointer + offset, 4);
+
+	offset += 4;
+
+
 	bpage->static_ipl_pointer = static_ipl_pointer;
 	bpage->ipl_write_pointer = static_ipl_pointer + IPL_LOG_HEADER_SIZE;
 	set_flag(&(bpage->flags), IPLIZED);

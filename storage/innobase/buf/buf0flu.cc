@@ -587,6 +587,18 @@ buf_flush_ready_for_replace(
 		//ipl화 되어서 flush 스킵해서 clean한 page인지 확인.
 		if(!get_flag(&(bpage->flags), DIRTIFIED) && bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
 			// fprintf(stderr, "buf_flush_ready_for_replace: clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
+
+			// TODO(jhpark): for recvoery test; flush skip
+			// step1. get current ipl pointer;
+			// step2. set flush flag;
+			if (bpage->static_ipl_pointer) {
+				recv_ipl_set_flush_bit(bpage->static_ipl_pointer);
+				fprintf(stderr, "ipl page ste flush bit: %ld\n"
+						, recv_ipl_get_flush_bit(bpage->static_ipl_pointer));
+			}
+			
+			// --
+
 			return true;
 		}
 		return false;

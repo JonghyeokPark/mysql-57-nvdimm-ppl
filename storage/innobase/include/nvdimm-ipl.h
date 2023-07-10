@@ -95,11 +95,10 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 void nvdimm_free(const uint64_t pool_size);
 
 
-
-
 #define PAGE_NO_OFFSET 4UL
 #define DYNAMIC_ADDRESS_OFFSET 8UL
-#define IPL_LOG_HEADER_SIZE 12UL
+// TODO(jhpark): for recovery test; original: 12UL
+#define IPL_LOG_HEADER_SIZE 18UL
 #define APPLY_LOG_HDR_SIZE 3UL
 
 enum ipl_flag {
@@ -107,7 +106,6 @@ enum ipl_flag {
   NORMALIZE = 2,
   DIRTIFIED = 4
 };
-
 
 
 typedef ib_mutex_t my_mutex;
@@ -217,6 +215,8 @@ typedef enum {
 void recv_ipl_parse_log();
 void recv_ipl_map_print();
 void recv_ipl_apply(buf_block_t* block);
+void recv_ipl_set_flush_bit(unsigned char* ipl_ptr);
+ulint recv_ipl_get_flush_bit(unsigned char* ipl_ptr);
 
 RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
 extern std::tr1::unordered_map<page_id_t, std::vector<uint64_t> > ipl_recv_map;

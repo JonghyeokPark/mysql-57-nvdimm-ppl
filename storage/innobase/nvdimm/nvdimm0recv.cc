@@ -104,6 +104,11 @@ void recv_ipl_apply(buf_block_t* block) {
 	if (recv_iter != ipl_recv_map.end()) {
 		std::vector<uint64_t>::iterator vit = recv_iter->second.begin();
 		apply_info.static_start_pointer = nvdimm_recv_ptr + *vit;
+		// check apply or not
+		if (recv_ipl_get_flush_bit(nvdimm_recv_ptr + *vit) != 1) {
+			return;
+		}
+
 		++vit;	
 		if (vit == recv_iter->second.end()) {
 			apply_info.dynamic_start_pointer = 0;	
@@ -127,6 +132,13 @@ void recv_ipl_apply(buf_block_t* block) {
 		ib::info() << "IPL apply success! " << block->page.id.space() 
 							<< ":" << block->page.id.page_no();
 	}
+}
 
+void recv_ipl_set_flush_bit(unsigned char* ipl_ptr) {
+	mach_write_to_2(ipl_ptr + (IPL_LOG_HEADER_SIZE-4), 1);
+}
+
+ulint recv_ipl_get_flush_bit(unsigned char* ipl_ptr) {
+	return mach_read_from_2(ipl_ptr + (IPL_LOG_HEADER_SIZE-4));
 }
 
