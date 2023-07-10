@@ -14,6 +14,9 @@
 std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map;
 
 unsigned char* nvdimm_ptr = NULL;
+unsigned char* nvdimm_recv_ptr = NULL;
+bool nvdimm_recv_running = false;
+
 int nvdimm_fd = -1;
 nvdimm_system * nvdimm_info = NULL;
 mysql_pfs_key_t	look_up_rw_lock;
@@ -107,7 +110,9 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
   	}
 
 		// TODO(jhpark): optimize
+		nvdimm_recv_running = true;
 		recv_ipl_parse_log();
+		recv_ipl_map_print();
 	}
 
 	// Force to set NVIMMM

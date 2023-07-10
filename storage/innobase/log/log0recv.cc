@@ -2421,6 +2421,15 @@ recv_recover_page_func(
 	modification_to_page = FALSE;
 	start_lsn = end_lsn = 0;
 
+#ifdef UNIV_NVDIMM_IPL
+	// (jhpark): this is *real* per-page based redo phase
+	// For non-IPLized pages, conduct the normal redo process
+	// For IPLized pages, before the apply redo log records, it must be applied using IPL log
+
+	// debug
+	recv_check_iplized(block->page.id);	
+#endif
+
 	recv = UT_LIST_GET_FIRST(recv_addr->rec_list);
 
 	while (recv) {

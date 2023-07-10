@@ -18,6 +18,7 @@
 #include <tr1/unordered_map>
 #include "buf0buf.h"
 #include <queue>
+#include <vector>
 
 // TDOO(jhpark): make this variable configurable
 
@@ -205,7 +206,19 @@ recv_parse_or_apply_log_rec_body(
 
 
 /* recovery */
+extern unsigned char* nvdimm_recv_ptr;
+extern bool nvdimm_recv_running;
+typedef enum {
+	NORMAL = 0,
+	STATIC = 1,
+	DYNAMIC = 2
+} RECV_IPL_PAGE_TYPE;
+
 void recv_ipl_parse_log();
-extern std::tr1::unordered_map<page_id_t, ipl_info * > ipl_recv_map;
+void recv_ipl_map_print();
+void recv_ipl_apply(buf_block_t* block);
+
+RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
+extern std::tr1::unordered_map<page_id_t, std::vector<uint64_t> > ipl_recv_map;
 
 #endif // end-of-header

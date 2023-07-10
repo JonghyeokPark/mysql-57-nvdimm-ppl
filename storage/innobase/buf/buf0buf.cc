@@ -5862,7 +5862,13 @@ corrupt:
 		ut_ad(buf_pool->n_pend_reads > 0);
 		buf_pool->n_pend_reads--;
 		buf_pool->stat.n_pages_read++;
-		if (get_flag(&(bpage->flags), IPLIZED)){
+	
+		// (jhpark): recovery
+		if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+			recv_ipl_apply((buf_block_t*)bpage);				
+		}
+	
+		if (!nvdimm_recv_running && get_flag(&(bpage->flags), IPLIZED)){
 			//page를 완전히 가져오고 실행해보기
 			// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",bpage->id.space(), bpage->id.page_no(), bpage);
 			mtr_t temp_mtr;
