@@ -135,10 +135,10 @@ void recv_ipl_apply(buf_block_t* block) {
 }
 
 void recv_ipl_set_flush_bit(unsigned char* ipl_ptr) {
-	mach_write_to_2(ipl_ptr + (IPL_LOG_HEADER_SIZE-4), 1);
+	mach_write_to_2(ipl_ptr + (IPL_LOG_HEADER_SIZE-2), 1);
 }
 
 ulint recv_ipl_get_flush_bit(unsigned char* ipl_ptr) {
-	return mach_read_from_2(ipl_ptr + (IPL_LOG_HEADER_SIZE-4));
+	return mach_read_from_2(ipl_ptr + (IPL_LOG_HEADER_SIZE-2));
 }
 

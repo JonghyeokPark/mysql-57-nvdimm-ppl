@@ -588,17 +588,6 @@ buf_flush_ready_for_replace(
 		if(!get_flag(&(bpage->flags), DIRTIFIED) && bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
 			// fprintf(stderr, "buf_flush_ready_for_replace: clean page (%u, %u) oldest : %zu, newest : %zu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->newest_modification);
 
-			// TODO(jhpark): for recvoery test; flush skip
-			// step1. get current ipl pointer;
-			// step2. set flush flag;
-			if (bpage->static_ipl_pointer) {
-				recv_ipl_set_flush_bit(bpage->static_ipl_pointer);
-				fprintf(stderr, "ipl page ste flush bit: %ld\n"
-						, recv_ipl_get_flush_bit(bpage->static_ipl_pointer));
-			}
-			
-			// --
-
 			return true;
 		}
 		return false;
@@ -1128,6 +1117,16 @@ buf_flush_write_block_low(
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage) == DB_SUCCESS)
 		{
+			// TODO(jhpark): for recvoery test; flush skip
+			// step1. get current ipl pointer;
+			// step2. set flush flag;
+			if (bpage->static_ipl_pointer) {
+				recv_ipl_set_flush_bit(bpage->static_ipl_pointer);
+				fprintf(stderr, "ipl page set flush bit: %ld\n"
+						, recv_ipl_get_flush_bit(bpage->static_ipl_pointer));
+			}
+			// -- 
+
 			buf_page_io_complete(bpage, sync);
 			buf_LRU_stat_inc_io();
 			return;
