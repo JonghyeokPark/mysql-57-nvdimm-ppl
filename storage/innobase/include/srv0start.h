@@ -157,6 +157,15 @@ extern	ibool	srv_start_raw_disk_in_use;
 /** UNDO tablespaces starts with space id. */
 extern	ulint	srv_undo_space_id_start;
 
+/* lbh */
+/** Check whether given space id is LLT tablespace id
+@param[in]	space_id	space id to check
+@return true if it is undo tablespace else false. */
+bool
+fil_is_llt_tablespace(
+	ulint	space_id);
+
+
 /** Shutdown state */
 enum srv_shutdown_t {
 	SRV_SHUTDOWN_NONE = 0,	/*!< Database running normally */
@@ -172,6 +181,8 @@ enum srv_shutdown_t {
 				all file spaces and close all files */
 	SRV_SHUTDOWN_EXIT_THREADS/*!< Exit all threads */
 };
+
+
 
 /** At a shutdown this value climbs from SRV_SHUTDOWN_NONE to
 SRV_SHUTDOWN_CLEANUP and then to SRV_SHUTDOWN_LAST_PHASE, and so on */

@@ -49,6 +49,9 @@ Created 2/6/1997 Heikki Tuuri
 #include "lock0lock.h"
 #include "row0mysql.h"
 
+/* lbh */
+#include "nvdimm-ipl.h"
+
 /** Check whether all non-virtual columns in a virtual index match that of in
 the cluster index
 @param[in]	index		the secondary index
@@ -1363,4 +1366,39 @@ committed_version_trx:
 	if (heap) {
 		mem_heap_free(heap);
 	}
+}
+
+/* lbh */
+dberr_t
+row_vers_build_prev_vers_with_nvdimm(
+/*===============================*/
+	const rec_t*	rec,	/*!< in: record in a clustered index; the
+				caller must have a latch on the page; this
+				latch locks the top of the stack of versions
+				of this records */
+	mtr_t*		mtr,	/*!< in: mtr holding the latch on rec */
+	dict_index_t*	index,	/*!< in: the clustered index */
+	ulint**		offsets,/*!< in/out: offsets returned by
+				rec_get_offsets(rec, index) */
+	ReadView*	view,	/*!< in: the consistent read view */
+	mem_heap_t**	offset_heap,/*!< in/out: memory heap from which
+				the offsets are allocated */
+	mem_heap_t*	in_heap,/*!< in: memory heap from which the memory for
+				*old_vers is allocated; memory for possible
+				intermediate versions is allocated and freed
+				locally within the function */
+	rec_t**		old_vers,/*!< out, own: old version, or NULL
+				if the history is missing or the record
+				does not exist in the view, that is,
+				it was freshly inserted afterwards */
+	const dtuple_t**vrow)	/*!< out: virtual row */
+{
+	const rec_t*	version;
+	rec_t*		prev_version;
+	trx_id_t	trx_id;
+	mem_heap_t*	heap		= NULL;
+	byte*		buf;
+	dberr_t		err;
+
+
 }

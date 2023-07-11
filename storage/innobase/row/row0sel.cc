@@ -63,6 +63,10 @@ Created 12/19/1997 Heikki Tuuri
 #include "handler.h"
 #include "ha_innodb.h"
 
+/* lbh */
+#include "srv0srv.h"
+/* end */
+
 /* Maximum number of rows to prefetch; MySQL interface has another parameter */
 #define SEL_MAX_N_PREFETCH	16
 
@@ -3452,7 +3456,8 @@ row_sel_build_prev_vers_for_mysql(
 					afterwards */
 	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
 					column data */
-	mtr_t*		mtr)		/*!< in: mtr */
+	mtr_t*		mtr, /*!< in: mtr */
+	buf_page_t* bpage) /* IPL page */
 {
 	dberr_t	err;
 
@@ -3462,11 +3467,46 @@ row_sel_build_prev_vers_for_mysql(
 		prebuilt->old_vers_heap = mem_heap_create(200);
 	}
 
+	/* lbh */
+
+	bool use_nvdimm_for_vers_build = false;
+
+	/* Choose among redo-based vs. undo-based 
+	1. Check whether page is IPLized 
+	2. Compare oldest acitve TRX_ID of the readview with TRX_ID of cur_rec
+	3. Compare oldest TRX_ID in NVDIMM that is equal or bigger than oldest acitve TRX_ID of the readview
+	&& (rec_trx_id - read_view->low_limit_id > read_view->low_limit_id - redo_oldest_trx_id)
+	*/
+
+	buf_block_t*    block = buf_page_get_block(bpage); 
+
+	if((dict_index_get_space(clust_index) ==llt_space_id) && get_flag(bpage, IPLIZED) && !get_flag(bpage, NORMALIZE)){
+		use_nvdimm_for_vers_build = true;
+	}
+
+	if(use_nvdimm_for_vers_build){
+		
+		//redo-based version construction
+		fprintf(stderr, "version build with redo bpage : %lu\n", bpage);
+
+		err = nvdimm_build_prev_vers_with_redo(
+			rec, mtr, clust_index, offsets, read_view, offset_heap,
+			prebuilt->old_vers_heap, old_vers, vrow, bpage);
+
+	}else{
+
+	// undo-based version construction
+
 	err = row_vers_build_for_consistent_read(
 		rec, mtr, clust_index, offsets, read_view, offset_heap,
 		prebuilt->old_vers_heap, old_vers, vrow);
+
+	}
+
 	return(err);
 }
+
+
 
 /*********************************************************************//**
 Retrieves the clustered index record corresponding to a record in a
@@ -3671,10 +3711,14 @@ row_sel_get_clust_rec_for_mysql(
 
 			/* The following call returns 'offsets' associated with
 			'old_vers' */
+			/* lbh */
+			buf_block_t* block = btr_pcur_get_block(prebuilt->clust_pcur);
+			buf_page_t* bpage = &block->page;
+
 			err = row_sel_build_prev_vers_for_mysql(
 				trx->read_view, clust_index, prebuilt,
 				clust_rec, offsets, offset_heap, &old_vers,
-				vrow, mtr);
+				vrow, mtr, bpage);
 
 			if (err != DB_SUCCESS || old_vers == NULL) {
 
@@ -5627,6 +5671,13 @@ no_gap_lock:
 				    rec, index, offsets,
 				    trx_get_read_view(trx))) {
 
+				/* lbh for mvcc */
+
+				buf_block_t* block = btr_pcur_get_block(pcur);
+				buf_page_t* bpage = &block->page;
+
+				/* end */
+
 				rec_t*	old_vers;
 				/* The following call returns 'offsets'
 				associated with 'old_vers' */
@@ -5634,7 +5685,7 @@ no_gap_lock:
 					trx->read_view, clust_index,
 					prebuilt, rec, &offsets, &heap,
 					&old_vers, need_vrow ? &vrow : NULL,
-					&mtr);
+					&mtr, bpage);
 
 				if (err != DB_SUCCESS) {
 

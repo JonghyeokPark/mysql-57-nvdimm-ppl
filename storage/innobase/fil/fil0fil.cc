@@ -55,6 +55,10 @@ Created 10/25/1995 Heikki Tuuri
 #include "btr0sea.h"
 #include "log0log.h"
 
+/* lbh */
+#include "srv0srv.h"
+/* end */
+
 /** Tries to close a file in the LRU list. The caller must hold the fil_sys
 mutex.
 @return true if success, false if should retry later; since i/o's
@@ -904,6 +908,13 @@ add_size:
 
 		/* Put the node to the LRU list */
 		UT_LIST_ADD_FIRST(fil_system->LRU, node);
+	}
+
+	/* lbh for TPC-C benchmark */
+
+	if (strstr(node->name, "stock.ibd") != NULL) {
+		fprintf(stderr, "setting %s to %lu\n", node->name, space->id);
+		llt_space_id = space->id;
 	}
 
 	return(true);

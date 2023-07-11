@@ -26,6 +26,11 @@
 //싹다 클래스로 캡슐레이션을 해버려야 되나...
 // 나중에 시간되면 해보기.
 
+/* lbh */
+//#include "read0read.h"
+/* end */
+
+
 void alloc_static_ipl_to_bpage(buf_page_t * bpage){
 	unsigned char * static_ipl_pointer = alloc_static_address_from_indirection_queue();
 	if(static_ipl_pointer == NULL) return;
@@ -216,8 +221,7 @@ bool copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 	ipl_log_apply(apply_log_buffer, apply_info, temp_mtr);
 	
 	free(apply_log_buffer);
-	return true;
-	
+	return true;	
 	
 }
 
@@ -234,7 +238,7 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 		if(log_type == 0 && body_len == 0){
 			now_len = start_ptr - apply_log_buffer - 3;
 			goto apply_end;
-		}
+		
 		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",apply_info->space_id, apply_info->page_no, log_type, body_len);
 
 		//log apply 진행 후, recovery 시작 위치 이동.
@@ -242,11 +246,13 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 		start_ptr += body_len;
 	}
 	now_len = start_ptr - apply_log_buffer;
+
 apply_end:
 	now_len += IPL_LOG_HEADER_SIZE;
 	apply_info->block->page.ipl_write_pointer = apply_info->block->page.static_ipl_pointer + now_len;
 	temp_mtr->discard_modifications();
 	mtr_commit(temp_mtr);
+	}
 }
 
 void set_apply_info_and_log_apply(buf_block_t* block) {
@@ -434,4 +440,165 @@ void unset_flag(buf_page_t * bpage, ipl_flag flag){
 
 bool get_flag(buf_page_t * bpage, ipl_flag flag){
 	return bpage->flags & flag;
+}
+
+/* lbh */
+dberr_t
+nvdimm_build_prev_vers_with_redo(
+	const rec_t*	rec,		/*!< in: record in a clustered index */
+	mtr_t*		mtr,
+	dict_index_t*	clust_index,	/*!< in: clustered index */
+	ulint**		offsets,	/*!< in/out: offsets returned by
+					rec_get_offsets(rec, clust_index) */
+	ReadView*	read_view,	/*!< in: read view */
+	mem_heap_t**	offset_heap,	/*!< in/out: memory heap from which
+					the offsets are allocated */
+	mem_heap_t*	in_heap,/*!< in: memory heap from which the memory for
+				*old_vers is allocated; memory for possible
+				intermediate versions is allocated and freed
+				locally within the function */
+	rec_t**		old_vers,	/*!< out: old version, or NULL if the
+					record does not exist in the view:
+					i.e., it was freshly inserted
+					afterwards */
+	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
+					column data */
+	buf_page_t* bpage ){
+	
+	/* 0. Get the IPL info of the page that transaction is about to read */
+
+	page_id_t page_id = bpage->id;
+	buf_block_t* block = buf_page_get_block(bpage);
+
+	mtr_t temp_mtr;
+	mtr_start(&temp_mtr);
+	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+
+	apply_log_info apply_info;
+	apply_info.static_start_pointer = bpage->static_ipl_pointer;
+	apply_info.dynamic_start_pointer = get_dynamic_ipl_pointer(bpage);
+	apply_info.space_id = page_id.space();
+	apply_info.page_no = page_id.page_no();
+	apply_info.block = block;
+
+	/* 1. Copy IPL region to memory */
+
+	byte * apply_log_buffer;
+	
+	if(apply_info.dynamic_start_pointer == NULL){
+		apply_log_buffer = (byte *)calloc(nvdimm_info->static_ipl_per_page_size, sizeof(char));
+		memcpy(apply_log_buffer, apply_info.static_start_pointer + IPL_LOG_HEADER_SIZE, nvdimm_info->static_ipl_per_page_size);
+		flush_cache(apply_log_buffer, nvdimm_info->static_ipl_per_page_size);
+
+	}else{ //Copy dynamic region
+		ulint offset = 0;
+		ulint apply_buffer_size = nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
+		apply_log_buffer = (byte *)calloc(apply_buffer_size, sizeof(char));
+
+		memcpy(apply_log_buffer + offset, apply_info.static_start_pointer + IPL_LOG_HEADER_SIZE ,nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
+		flush_cache(apply_log_buffer + offset, nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
+		offset += nvdimm_info->static_ipl_per_page_size	- IPL_LOG_HEADER_SIZE;
+		// fprintf(stderr, "dynamic_region_size: %u\n", dynamic_region_size);
+		memcpy(apply_log_buffer + offset, apply_info.dynamic_start_pointer, nvdimm_info->dynamic_ipl_per_page_size);
+		flush_cache(apply_log_buffer + offset, nvdimm_info->dynamic_ipl_per_page_size);
+	}
+
+	/* 2. Read the old data page from the disk for page-level version build */
+
+	buf_page_t* old_bpage;
+	bool			found;
+	ulint id = dict_index_get_space(clust_index);
+	const page_size_t	page_size(fil_space_get_page_size(id, &found));
+
+	dberr_t * err;
+
+	old_bpage = buf_page_init_for_read(err, BUF_READ_ANY_PAGE, page_id, page_size, false); // TBD: check false/true again
+	
+	void*	dst;
+
+	if (page_size.is_compressed()) {
+		dst = bpage->zip.data;
+	} else {
+		ut_a(buf_page_get_state(bpage) == BUF_BLOCK_FILE_PAGE);
+
+		dst = ((buf_block_t*) bpage)->frame;
+	}
+
+	thd_wait_begin(NULL, THD_WAIT_DISKIO);
+
+
+	*err = fil_io(
+		IORequestRead, true, page_id, page_size, 0, page_size.physical(),
+		dst, old_bpage);
+
+	thd_wait_end(NULL);
+	
+	buf_block_t*	old_block = buf_page_get_block(old_bpage);
+	page_t*		old_page = buf_block_get_frame(old_block);
+	buf_block_t*	temp_block;
+	page_t*		temp_page;
+
+	trx_id_t	old_page_max_trx_id = page_get_max_trx_id(old_page);
+
+	/* 3. Traverse all the log records inside IPL region to find until which redo log we should apply based on trx_id
+	 Apply the redo log and find compare the max_trx_id of the old bpage with the readview trx_id */
+
+	byte * start_ptr = apply_log_buffer;
+	//byte * end_ptr = apply_info.dynamic_start_pointer == NULL ? apply_log_buffer + nvdimm_info->static_ipl_per_page_size : apply_log_buffer + nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
+	ulint cur_len = 0;
+
+	while(read_view->changes_visible(old_page_max_trx_id, clust_index->table->name)){
+
+		/* Copy the old page to temporary space */
+		buf_frame_copy(temp_page, old_page);
+
+		/* Get max_trx_id of the old page */
+		old_page_max_trx_id = page_get_max_trx_id(old_page);
+
+		mlog_id_t log_type = mlog_id_t(mach_read_from_1(start_ptr));
+		start_ptr +=1;
+		ulint body_len = mach_read_from_2(start_ptr);
+		start_ptr += 2;
+		if(log_type == 0 && body_len == 0){
+			cur_len = start_ptr - apply_log_buffer - 3;
+			goto apply_end;
+
+		// Apply redo logs to the page
+		recv_parse_or_apply_log_rec_body(log_type, start_ptr, start_ptr + body_len, apply_info.space_id, apply_info.page_no, old_block, &temp_mtr);
+		start_ptr += body_len;
+	}
+	cur_len = start_ptr - apply_log_buffer;
+
+apply_end:
+	cur_len += IPL_LOG_HEADER_SIZE;
+	temp_mtr.discard_modifications();
+	mtr_commit(&temp_mtr);
+
+	}
+
+	/* 4. After getting the right version of the IPL page, store the right record to the old_vers record */
+	// have to set offsets, old_vers, heap, vrow, mtr
+
+	// Do I have to traverse all the page to find the right record????
+
+	// possible solution: row_id (rec_id) record offset
+
+	*vrow = NULL;
+
+	byte* buf = static_cast<byte*>(
+				mem_heap_alloc(
+					in_heap, rec_offs_size(*offsets)));
+
+	*old_vers = rec_copy(buf, *old_vers, *offsets);
+	rec_offs_make_valid(*old_vers, clust_index, *offsets);
+
+	bool comp = page_rec_is_comp(*old_vers);
+	bool rec_del = rec_get_deleted_flag(*old_vers, comp);
+
+	if(rec_del){
+		*old_vers = NULL;
+	}
+
+	return DB_SUCCESS;
+
 }

@@ -393,6 +393,9 @@ my_bool		srv_stats_auto_recalc = TRUE;
 
 ibool	srv_use_doublewrite_buf	= TRUE;
 
+/* lbh */
+ulint        llt_space_id    = 0;
+
 /** doublewrite buffer is 1MB is size i.e.: it can hold 128 16K pages.
 The following parameter is the size of the buffer that is used for
 batch flushing i.e.: LRU flushing and flush_list flushing. The rest

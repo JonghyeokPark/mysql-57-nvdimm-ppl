@@ -18,6 +18,8 @@
 #include <tr1/unordered_map>
 #include "buf0buf.h"
 #include <queue>
+/* lbh */
+#include "read0types.h"
 
 // TDOO(jhpark): make this variable configurable
 
@@ -187,6 +189,30 @@ void unset_flag(buf_page_t * bpage, ipl_flag flag);
 bool get_flag(buf_page_t * bpage, ipl_flag flag);
 
 
+/* lbh */
+dberr_t
+nvdimm_build_prev_vers_with_redo(
+	const rec_t*	rec,		/*!< in: record in a clustered index */
+	mtr_t*		mtr,
+	dict_index_t*	clust_index,	/*!< in: clustered index */
+	ulint**		offsets,	/*!< in/out: offsets returned by
+					rec_get_offsets(rec, clust_index) */
+	ReadView*	read_view,	/*!< in: read view */
+	mem_heap_t**	offset_heap,	/*!< in/out: memory heap from which
+					the offsets are allocated */
+	mem_heap_t*	in_heap,/*!< in: memory heap from which the memory for
+				*old_vers is allocated; memory for possible
+				intermediate versions is allocated and freed
+				locally within the function */
+	rec_t**		old_vers,	/*!< out: old version, or NULL if the
+					record does not exist in the view:
+					i.e., it was freshly inserted
+					afterwards */
+	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
+					column data */
+	buf_page_t* bpage );
+	
+
 #ifdef UNIV_NVDIMM_IPL
 unsigned char* 
 recv_parse_or_apply_log_rec_body(
@@ -199,5 +225,6 @@ recv_parse_or_apply_log_rec_body(
 	mtr_t* mtr);
 #endif
 
+  
 
 #endif // end-of-header
