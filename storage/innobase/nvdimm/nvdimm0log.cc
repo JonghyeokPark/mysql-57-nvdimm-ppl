@@ -301,10 +301,11 @@ bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	rw_lock_x_lock(&buf_pool->lookup_table_lock);
 	buf_pool->ipl_look_up_table->erase(page_id);
 	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
-	unset_flag(&(bpage->flags), IPLIZED);
-	unset_flag(&(bpage->flags), NORMALIZE);
 	free_dynamic_address_to_indirection_queue(get_dynamic_ipl_pointer(bpage));
 	free_static_address_to_indirection_queue(bpage->static_ipl_pointer);
+	bpage->static_ipl_pointer = NULL;
+	bpage->ipl_write_pointer = NULL;
+	bpage->flags = NULL;
 	return true;
 }
 
