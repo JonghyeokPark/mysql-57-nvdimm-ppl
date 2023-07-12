@@ -113,7 +113,20 @@ void recv_ipl_apply(buf_block_t* block) {
 		if (vit == recv_iter->second.end()) {
 			apply_info.dynamic_start_pointer = 0;	
 		} else {
-			apply_info.dynamic_start_pointer = nvdimm_recv_ptr + *vit;		
+			uint ipl_index = mach_read_from_4(apply_info.static_start_pointer 
+																				+ DYNAMIC_ADDRESS_OFFSET);
+			if (ipl_index != *vit) {
+				fprintf(stderr, "error!!!\n");
+			}
+
+			unsigned char* dynamic_start_pointer = 
+								nvdimm_recv_ptr + nvdimm_info->static_ipl_per_page_size
+								* nvdimm_info->static_ipl_max_page_count;
+
+			apply_info.dynamic_start_pointer = 
+								get_addr_from_ipl_index(dynamic_start_pointer
+								, ipl_index, nvdimm_info->dynamic_ipl_per_page_size);
+				
 		}
 
 		apply_info.block = block;
