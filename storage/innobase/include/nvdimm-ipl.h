@@ -80,10 +80,10 @@ extern std::queue<uint> dynamic_ipl_queue;
 /*IPL allocation*/
 void make_static_indirection_queue(unsigned char * static_start_pointer, uint64_t static_ipl_size, uint static_ipl_max_page_count);
 unsigned char * alloc_static_address_from_indirection_queue();
-bool free_static_address_to_indirection_queue(unsigned char * addr);
+void free_static_address_to_indirection_queue(unsigned char * addr);
 void make_dynamic_indirection_queue(unsigned char * dynamic_start_pointer, uint64_t dynamic_ipl_size, uint dynamic_ipl_max_page_count);
 unsigned char * alloc_dynamic_address_from_indirection_queue();
-bool free_dynamic_address_to_indirection_queue(unsigned char * addr);
+void free_dynamic_address_to_indirection_queue(unsigned char * addr);
 unsigned char * get_addr_from_ipl_index(unsigned char * start_ptr, uint index, uint64_t ipl_per_page_size);
 uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr, uint64_t ipl_per_page_size);
 

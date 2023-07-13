@@ -281,7 +281,6 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 	// fprintf(stderr, "ipl_add Split page(%u, %u)\n", page_id.space(), page_id.page_no());
-	//buf_page_hash_get_s_locked로 시도해보기.
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
 	buf_page_t * bpage = buf_page_get_also_watch(buf_pool, page_id);
 	set_flag(&(bpage->flags), NORMALIZE);
@@ -299,7 +298,6 @@ bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	bpage->static_ipl_pointer = NULL;
 	bpage->ipl_write_pointer = NULL;
 	bpage->flags = 0;
-	return true;
 }
 
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
@@ -364,9 +362,8 @@ void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
-			if(normalize_ipl_page(bpage, bpage->id)){
-				return;
-			}
+			normalize_ipl_page(bpage, bpage->id);
+			return;
 		}
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
 			return;
@@ -376,9 +373,8 @@ void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 				return;
 			}
 			else{
-				if(normalize_ipl_page(bpage, bpage->id)){
-					return;
-				}
+				normalize_ipl_page(bpage, bpage->id);
+				return;
 				
 			}
 

@@ -33,10 +33,10 @@ unsigned char * alloc_static_address_from_indirection_queue(){
   return ret_address;
 }
 
-bool free_static_address_to_indirection_queue(unsigned char * addr){
+void free_static_address_to_indirection_queue(unsigned char * addr){
   if(addr == NULL){
-      fprintf(stderr, "free_static_address_to_indirection_queue Error: addr is NULL\n");
-      return true;
+      // fprintf(stderr, "free_static_address_to_indirection_queue Error: addr is NULL\n");
+      return;
   }
   mutex_enter(&nvdimm_info->static_region_mutex);
   memset(addr, 0x00, nvdimm_info->static_ipl_per_page_size);
@@ -44,7 +44,6 @@ bool free_static_address_to_indirection_queue(unsigned char * addr){
   static_ipl_queue.push(get_ipl_index_from_addr(nvdimm_info->static_start_pointer, addr, nvdimm_info->static_ipl_per_page_size));
   // fprintf(stderr, "free static address : %p\n", addr);
   mutex_exit(&nvdimm_info->static_region_mutex);
-  return true;
 }
 
 
@@ -74,10 +73,10 @@ unsigned char * alloc_dynamic_address_from_indirection_queue(){
   return ret_address;
 }
 
-bool free_dynamic_address_to_indirection_queue(unsigned char * addr){
+void free_dynamic_address_to_indirection_queue(unsigned char * addr){
   if(addr == NULL){
       // fprintf(stderr, "free_dynamic_address_to_indirection_queue Error : addr is NULL\n");
-      return true;
+      return;
   }
   mutex_enter(&nvdimm_info->dynamic_region_mutex);
   memset(addr, 0x00, nvdimm_info->dynamic_ipl_per_page_size);
@@ -85,7 +84,6 @@ bool free_dynamic_address_to_indirection_queue(unsigned char * addr){
   // fprintf(stderr, "free dyanmic_address : %p\n", addr);
   dynamic_ipl_queue.push(get_ipl_index_from_addr(nvdimm_info->dynamic_start_pointer, addr, nvdimm_info->dynamic_ipl_per_page_size));
   mutex_exit(&nvdimm_info->dynamic_region_mutex);
-  return true;
 }
 
 //ipl index를 통해 해당 ipl의 주소를 찾아준다.
