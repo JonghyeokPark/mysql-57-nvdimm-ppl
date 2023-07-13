@@ -28,17 +28,20 @@
 
 void alloc_static_ipl_to_bpage(buf_page_t * bpage){
 	unsigned char * static_ipl_pointer = alloc_static_address_from_indirection_queue();
+	unsigned char temp_buf[12] = {NULL, };
 	if(static_ipl_pointer == NULL) return;
 	ulint offset = 0;
-	mach_write_to_4(static_ipl_pointer + offset, bpage->id.space());
-	flush_cache(static_ipl_pointer + offset, 4);
+	mach_write_to_4(((unsigned char *)temp_buf) + offset, bpage->id.space());
 	offset += 4;
-	mach_write_to_4(static_ipl_pointer + offset, bpage->id.page_no());
-	flush_cache(static_ipl_pointer + offset, 4);
+	mach_write_to_4(((unsigned char *)temp_buf) + offset, bpage->id.page_no());
 	offset += 4;
-	mach_write_to_4(static_ipl_pointer + offset, 0);
-	flush_cache(static_ipl_pointer + offset, 4);
+	mach_write_to_4(((unsigned char *)temp_buf) + offset, 0);
 	offset += 4;
+
+	//nvdimm에 작성
+	memcpy(static_ipl_pointer, temp_buf, 12);
+	flush_cache(static_ipl_pointer, 12);
+
 	bpage->static_ipl_pointer = static_ipl_pointer;
 	bpage->ipl_write_pointer = static_ipl_pointer + IPL_LOG_HEADER_SIZE;
 	set_flag(&(bpage->flags), IPLIZED);
@@ -79,10 +82,10 @@ ulint write_to_static_region(buf_page_t * bpage, ulint len, unsigned char * writ
 	bpage->ipl_write_pointer += len;
 
 	//제대로 적혔는지 확인하기 위해서
-	mlog_id_t log_type = mlog_id_t(mach_read_from_1(write_pointer));
-	write_pointer += 1;
-	ulint body_len = mach_read_from_2(write_pointer);
-	write_pointer += 2;
+	// mlog_id_t log_type = mlog_id_t(mach_read_from_1(write_pointer));
+	// write_pointer += 1;
+	// ulint body_len = mach_read_from_2(write_pointer);
+	// write_pointer += 2;
 	// fprintf(stderr, "Save complete in static, Read log! write_pointer: %p type: %d, len: %u\n",write_pointer, log_type, body_len);
 
 	return 0;
@@ -120,7 +123,8 @@ ulint write_to_dynamic_region(buf_page_t * bpage, ulint len, unsigned char * wri
 bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type, unsigned char * log){
 	//하나의 로그 header + body 만들기.
 	page_id_t page_id = bpage->id;
-	unsigned char* write_ipl_log_buffer = (byte *)calloc(len + 3, sizeof(char));
+	unsigned char write_ipl_log_buffer [len + 3] = {NULL, };
+
 	ulint offset = 0;
 	unsigned char store_type = type;
 	unsigned short store_len = len;
@@ -140,7 +144,6 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 			if(!alloc_dynamic_ipl_region(bpage)){
 				//Dynamic 영역을 할당 받을 수 없는 경우, page를 flush하고 새로 할당받기
 				set_flag(&(bpage->flags), NORMALIZE);
-				free(write_ipl_log_buffer);
 				return false;
 			}
 		}
@@ -152,12 +155,10 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 			//나중에 수정하기####
 			// fprintf(stderr, "dynamic regions also full!! page_id:(%u, %u)\n", page_id.space(), page_id.page_no());
 			set_flag(&(bpage->flags), NORMALIZE);
-			free(write_ipl_log_buffer);
 			return false;
 		}
 		
 	}
-	free(write_ipl_log_buffer);
 	return true;
 }
 
@@ -192,7 +193,7 @@ bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 
 
 
-bool copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
+void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 	//NVDIMM 내 redo log를 메모리로 카피
 	// fprintf(stderr, "apply_info! page_id:(%u, %u) static: %p dynamic: %p log_len: %zu\n", apply_info->space_id, apply_info->page_no, apply_info->static_start_pointer, apply_info->dynamic_start_pointer, apply_info->log_len);
 
@@ -215,15 +216,13 @@ bool copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 	ipl_log_apply(apply_log_buffer, apply_info, temp_mtr);
 	
 	free(apply_log_buffer);
-	return true;
-	
-	
 }
 
 void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t * temp_mtr){
 	byte * start_ptr = apply_log_buffer;
 	byte * end_ptr = apply_info->dynamic_start_pointer == NULL ? apply_log_buffer + nvdimm_info->static_ipl_per_page_size : apply_log_buffer + nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
 	ulint now_len = 0;
+	page_id_t page_id = apply_info->block->page.id;
 	while (start_ptr < end_ptr) {
 		// log_hdr를 가져와서 저장
 		mlog_id_t log_type = mlog_id_t(mach_read_from_1(start_ptr));
@@ -237,7 +236,7 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",apply_info->space_id, apply_info->page_no, log_type, body_len);
 
 		//log apply 진행 후, recovery 시작 위치 이동.
-		recv_parse_or_apply_log_rec_body(log_type, start_ptr, start_ptr + body_len, apply_info->space_id, apply_info->page_no, apply_info->block, temp_mtr);
+		recv_parse_or_apply_log_rec_body(log_type, start_ptr, start_ptr + body_len, page_id.space(), page_id.page_no(), apply_info->block, temp_mtr);
 		start_ptr += body_len;
 	}
 	now_len = start_ptr - apply_log_buffer;
@@ -261,17 +260,11 @@ void set_apply_info_and_log_apply(buf_block_t* block) {
 	apply_log_info apply_info;
 	apply_info.static_start_pointer = apply_page->static_ipl_pointer;
 	apply_info.dynamic_start_pointer = get_dynamic_ipl_pointer(apply_page);
-	apply_info.space_id = page_id.space();
-	apply_info.page_no = page_id.page_no();
 	apply_info.block = block;
 
 	// fprintf(stderr, "static pointer : %p, dynamic pointer : %p\n", apply_info.static_start_pointer, apply_info.dynamic_start_pointer);
-
-	if(copy_log_to_mem_to_apply(&apply_info, &temp_mtr)){
-		// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying finish!";
-	}
-
-	return;
+	copy_log_to_mem_to_apply(&apply_info, &temp_mtr);
+	// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying finish!";
 }
 
 
@@ -305,7 +298,7 @@ bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	free_static_address_to_indirection_queue(bpage->static_ipl_pointer);
 	bpage->static_ipl_pointer = NULL;
 	bpage->ipl_write_pointer = NULL;
-	bpage->flags = NULL;
+	bpage->flags = 0;
 	return true;
 }
 

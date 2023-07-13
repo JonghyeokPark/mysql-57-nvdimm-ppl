@@ -132,8 +132,6 @@ typedef struct APPLY_LOG_INFO
 {
   byte * static_start_pointer;
   byte * dynamic_start_pointer;
-  ulint space_id;
-  ulint page_no;
   buf_block_t * block;
 
 }apply_log_info;
@@ -151,7 +149,7 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage);
 
 //page ipl log apply 관련 함수들
-bool copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr);
+void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr);
 void ipl_log_apply(byte * start_ptr, apply_log_info * apply_info, mtr_t * temp_mtr);
 void set_apply_info_and_log_apply(buf_block_t* block);
 
