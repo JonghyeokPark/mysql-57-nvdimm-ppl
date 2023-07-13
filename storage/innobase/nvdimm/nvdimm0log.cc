@@ -303,6 +303,9 @@ bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	unset_flag(&(bpage->flags), NORMALIZE);
 	free_dynamic_address_to_indirection_queue(get_dynamic_ipl_pointer(bpage));
 	free_static_address_to_indirection_queue(bpage->static_ipl_pointer);
+	bpage->static_ipl_pointer = NULL;
+	bpage->ipl_write_pointer = NULL;
+	bpage->flags = 0;
 	return true;
 }
 

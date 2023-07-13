@@ -1684,15 +1684,15 @@ buf_flush_LRU_list_batch(
 		BPageMutex*	block_mutex = buf_page_get_mutex(bpage);
 		mutex_enter(block_mutex);
 		//nvdimm
-		if(check_clean_checkpoint_page(bpage, false)){
-			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
-			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
-			set_flag(&(bpage->flags), DIRTIFIED);
-			mutex_exit(block_mutex);
-			buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_LRU, false);
-			count++;
-			goto finish_write;
-		}
+		// if(check_clean_checkpoint_page(bpage, false)){
+		// 	// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
+		// 	// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
+		// 	set_flag(&(bpage->flags), DIRTIFIED);
+		// 	mutex_exit(block_mutex);
+		// 	buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_LRU, false);
+		// 	count++;
+		// 	goto finish_write;
+		// }
 		//msj
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
@@ -2241,14 +2241,14 @@ buf_flush_single_page_from_LRU(
 
 		mutex_enter(block_mutex);
 		//nvdimm
-		if(check_clean_checkpoint_page(bpage, true)){
-			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
-			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
-			//여기서 mutex를 풀어줄지 실행해보기 생각하기.
-			set_flag(&(bpage->flags), DIRTIFIED);
-			freed = buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
-			goto clean_flush_end;
-		}
+		// if(check_clean_checkpoint_page(bpage, true)){
+		// 	// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
+		// 	// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
+		// 	//여기서 mutex를 풀어줄지 실행해보기 생각하기.
+		// 	set_flag(&(bpage->flags), DIRTIFIED);
+		// 	freed = buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
+		// 	goto clean_flush_end;
+		// }
 
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
