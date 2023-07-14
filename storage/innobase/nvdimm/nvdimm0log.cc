@@ -196,31 +196,28 @@ bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 	//NVDIMM 내 redo log를 메모리로 카피
 	// fprintf(stderr, "apply_info! page_id:(%u, %u) static: %p dynamic: %p log_len: %zu\n", apply_info->space_id, apply_info->page_no, apply_info->static_start_pointer, apply_info->dynamic_start_pointer, apply_info->log_len);
-
-	byte * apply_log_buffer;
-	if(apply_info->dynamic_start_pointer == NULL){
-		apply_log_buffer = (byte *)calloc(nvdimm_info->static_ipl_per_page_size, sizeof(char));
-		memcpy(apply_log_buffer, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE, nvdimm_info->static_ipl_per_page_size);
-	}
-	else{ //dynamic 영역이 존재하는 경우도 카피.
+	if(!apply_info->dynamic_start_pointer == NULL){
+		//dynamic 영역이 존재하는 경우도 카피.
 		ulint offset = 0;
 		ulint apply_buffer_size = nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
-		apply_log_buffer = (byte *)calloc(apply_buffer_size, sizeof(char));
+		unsigned char temp_mtr_buffer [apply_buffer_size] = {NULL, };
 		
-		memcpy(apply_log_buffer + offset, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
+		memcpy(temp_mtr_buffer + offset, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
 		offset += nvdimm_info->static_ipl_per_page_size	- IPL_LOG_HEADER_SIZE;
-		memcpy(apply_log_buffer + offset, apply_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_per_page_size);
-
+		memcpy(temp_mtr_buffer + offset, apply_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_per_page_size);
+		ipl_log_apply(temp_mtr_buffer, apply_info, temp_mtr);
+		return;
 	}
-	//Log apply 시작.
-	ipl_log_apply(apply_log_buffer, apply_info, temp_mtr);
+	else{
+		ipl_log_apply(apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE, apply_info, temp_mtr);
+	}
 	
-	free(apply_log_buffer);
 }
 
 void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t * temp_mtr){
 	byte * start_ptr = apply_log_buffer;
-	byte * end_ptr = apply_info->dynamic_start_pointer == NULL ? apply_log_buffer + nvdimm_info->static_ipl_per_page_size : apply_log_buffer + nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
+	byte * end_ptr = apply_info->dynamic_start_pointer == NULL ? apply_log_buffer + (nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE) : 
+	apply_log_buffer + ((nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE) + nvdimm_info->dynamic_ipl_per_page_size);
 	ulint now_len = 0;
 	page_id_t page_id = apply_info->block->page.id;
 	while (start_ptr < end_ptr) {
