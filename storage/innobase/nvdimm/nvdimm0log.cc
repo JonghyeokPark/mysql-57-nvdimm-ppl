@@ -311,11 +311,6 @@ bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 
 	rw_lock_x_lock(&nvdimm_info->lookup_table_lock);
 	ipl_map.erase(page_id);
-	// (jhpark): add
-	bpage->static_ipl_pointer = NULL;
-	bpage->ipl_write_pointer = NULL;
-	bpage->flags = NULL;
-
 	rw_lock_x_unlock(&nvdimm_info->lookup_table_lock);
 	unset_flag(&(bpage->flags), IPLIZED);
 	unset_flag(&(bpage->flags), NORMALIZE);
