@@ -80,16 +80,16 @@ RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id) {
 		++vit;
 		if (vit == recv_iter->second.end()) {
 			// this page is IPLized page return address
-			ib::info() << "Static IPL page " << page_id.space() << page_id.page_no() << " need to apply"; 
+			ib::info() << "Static IPL page " << page_id.space() << ":" << page_id.page_no() << " need to apply"; 
 			return STATIC;
 		}
 			// this page is IPLized page return address
-			ib::info() << "Dynamic IPL page " << page_id.space() << page_id.page_no() << " need to apply"; 
+			ib::info() << "Dynamic IPL page " << page_id.space()  << ":" << page_id.page_no() << " need to apply"; 
 	
 		return DYNAMIC;
 	}
 
-	ib::info() << "Normal page " << page_id.space() << page_id.page_no() << " need to apply"; 
+	ib::info() << "Normal page " << page_id.space() << ":" << page_id.page_no() << " need to apply"; 
 
 	return NORMAL;
 }
@@ -106,9 +106,10 @@ void recv_ipl_apply(buf_block_t* block) {
 		apply_info.static_start_pointer = nvdimm_recv_ptr + *vit;
 		// check apply or not
 		if (recv_ipl_get_flush_bit(nvdimm_recv_ptr + *vit) != 1) {
+			ib::info() << block->page.id.space() << ":" << block->page.id.page_no() 
+								<< " is not flushed, ignore it!";
 			return;
 		}
-
 		++vit;	
 		if (vit == recv_iter->second.end()) {
 			apply_info.dynamic_start_pointer = 0;	
@@ -132,18 +133,28 @@ void recv_ipl_apply(buf_block_t* block) {
 		apply_info.block = block;
 		apply_info.space_id = block->page.id.space();
 		apply_info.page_no = block->page.id.page_no();
-	}
 	
-	// step2. copy the IPL info into memory
-	mtr_t temp_mtr;
-	mtr_start(&temp_mtr);
-	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-	if (!copy_log_to_mem_to_apply(&apply_info, &temp_mtr)) {
-		ib::info() << "IPL apply error " << block->page.id.space() 
+	
+		// step2. copy the IPL info into memory
+		mtr_t temp_mtr;
+		mtr_start(&temp_mtr);
+		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+		if (!copy_log_to_mem_to_apply(&apply_info, &temp_mtr)) {
+			ib::info() << "IPL apply error " << block->page.id.space() 
 							<< ":" << block->page.id.page_no();
-	} else {
-		ib::info() << "IPL apply success! " << block->page.id.space() 
+		} else {
+			ib::info() << "IPL apply success! " << block->page.id.space() 
 							<< ":" << block->page.id.page_no();
+		}
+
+		// step3. remove IPL log from recv_ipl_map
+		ipl_recv_map.erase(block->page.id);
+		ib::info() << block->page.id.space() << ":" << block->page.id.page_no() 
+							<< " is erased";
+		recv_iter = ipl_recv_map.find(block->page.id);
+		if (recv_iter == ipl_recv_map.end()) {
+			ib::info() << "confirm!";
+		}
 	}
 }
 

@@ -307,8 +307,15 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p\n", page_id.space(), page_id.page_no(), bpage->static_ipl_pointer, get_dynamic_ipl_pointer(bpage));
 	// mutex_enter(&nvdimm_info->ipl_map_mutex);
+
+
 	rw_lock_x_lock(&nvdimm_info->lookup_table_lock);
 	ipl_map.erase(page_id);
+	// (jhpark): add
+	bpage->static_ipl_pointer = NULL;
+	bpage->ipl_write_pointer = NULL;
+	bpage->flags = NULL;
+
 	rw_lock_x_unlock(&nvdimm_info->lookup_table_lock);
 	unset_flag(&(bpage->flags), IPLIZED);
 	unset_flag(&(bpage->flags), NORMALIZE);
