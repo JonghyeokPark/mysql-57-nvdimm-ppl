@@ -3091,6 +3091,7 @@ btr_cur_optimistic_insert(
 	page = buf_block_get_frame(block);
 	index = cursor->index;
 
+
 	/* Block are not latched for insert if table is intrinsic
 	and index is auto-generated clustered index. */
 	ut_ad(mtr_is_block_fix(mtr, block, MTR_MEMO_PAGE_X_FIX, index->table));
@@ -3318,6 +3319,12 @@ fail_err:
 	}
 
 	*big_rec = big_rec_vec;
+
+
+	/* lbh */
+	if( leaf&& (dict_index_get_space(cursor->index) ==llt_space_id))
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(*rec, index), mtr);
+	/* end */
 
 	return(DB_SUCCESS);
 }
@@ -4191,6 +4198,12 @@ func_exit:
 		operation. */
 		btr_cur_prefetch_siblings(block);
 	}
+
+	/* lbh */
+	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(page))
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(rec, index), mtr);
+	/* end */
+
 
 	return(err);
 }
@@ -5195,6 +5208,14 @@ btr_cur_optimistic_delete_func(
 	if (UNIV_LIKELY_NULL(heap)) {
 		mem_heap_free(heap);
 	}
+
+
+	/* lbh */
+	page_t*		page	= buf_block_get_frame(block);
+	if(page_is_leaf(page) && (dict_index_get_space(cursor->index) ==llt_space_id)){
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(rec, cursor->index), mtr);
+	}		
+	/* end */
 
 	return(no_compress_needed);
 }

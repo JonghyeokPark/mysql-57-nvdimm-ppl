@@ -21,6 +21,7 @@
 /* lbh */
 #include "read0types.h"
 
+
 // TDOO(jhpark): make this variable configurable
 
 #define NVDIMM_MMAP_FILE_NAME         			"nvdimm_mmap_file"
@@ -211,7 +212,8 @@ nvdimm_build_prev_vers_with_redo(
 	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
 					column data */
 	buf_page_t* bpage );
-	
+
+/* end */
 
 #ifdef UNIV_NVDIMM_IPL
 unsigned char* 

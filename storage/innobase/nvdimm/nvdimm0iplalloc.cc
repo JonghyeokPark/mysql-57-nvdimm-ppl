@@ -28,7 +28,7 @@ unsigned char * alloc_static_address_from_indirection_queue(){
   }
   unsigned char * ret_address = get_addr_from_ipl_index(nvdimm_info->static_start_pointer, static_ipl_queue.front(), nvdimm_info->static_ipl_per_page_size);
   static_ipl_queue.pop();
-  fprintf(stderr, "static_ipl usage : %d\n", nvdimm_info->static_ipl_max_page_count - static_ipl_queue.size());
+  //fprintf(stderr, "static_ipl usage : %d\n", nvdimm_info->static_ipl_max_page_count - static_ipl_queue.size());
   mutex_exit(&nvdimm_info->static_region_mutex);
   return ret_address;
 }
@@ -69,7 +69,7 @@ unsigned char * alloc_dynamic_address_from_indirection_queue(){
   }
   unsigned char * ret_address = get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, dynamic_ipl_queue.front(), nvdimm_info->dynamic_ipl_per_page_size);
   dynamic_ipl_queue.pop();
-  fprintf(stderr, "dynamic_ipl usage: %d\n", nvdimm_info->dynamic_ipl_max_page_count - dynamic_ipl_queue.size());
+  //fprintf(stderr, "dynamic_ipl usage: %d\n", nvdimm_info->dynamic_ipl_max_page_count - dynamic_ipl_queue.size());
   mutex_exit(&nvdimm_info->dynamic_region_mutex);
   return ret_address;
 }

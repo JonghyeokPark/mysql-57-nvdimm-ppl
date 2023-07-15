@@ -2271,15 +2271,15 @@ operator<<(std::ostream& o, const rec_offsets_print& r)
 	return(o);
 }
 
-# ifdef UNIV_DEBUG
+//# ifdef UNIV_DEBUG
 /************************************************************//**
 Reads the DB_TRX_ID of a clustered index record.
 @return the value of DB_TRX_ID */
 trx_id_t
 rec_get_trx_id(
 /*===========*/
-	const rec_t*		rec,	/*!< in: record */
-	const dict_index_t*	index)	/*!< in: clustered index */
+	rec_t*		rec,	/*!< in: record */
+	dict_index_t*	index)	/*!< in: clustered index */
 {
 	const page_t*	page
 		= page_align(rec);
@@ -2311,7 +2311,7 @@ rec_get_trx_id(
 
 	return(trx_read_trx_id(trx_id));
 }
-# endif /* UNIV_DEBUG */
+//# endif /* UNIV_DEBUG */
 #endif /* !UNIV_HOTBACKUP */
 
 /** Mark the nth field as externally stored.

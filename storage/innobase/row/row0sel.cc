@@ -967,7 +967,7 @@ row_sel_get_clust_rec(
 			lock_type = LOCK_ORDINARY;
 		}
 
-		err = lock_clust_rec_read_check_and_lock(
+		err = lock_clust_rec_read_check_and_lock( 
 			0, btr_pcur_get_block(&plan->clust_pcur),
 			clust_rec, index, offsets,
 			static_cast<lock_mode>(node->row_lock_mode),
@@ -3478,24 +3478,28 @@ row_sel_build_prev_vers_for_mysql(
 	&& (rec_trx_id - read_view->low_limit_id > read_view->low_limit_id - redo_oldest_trx_id)
 	*/
 
-	buf_block_t*    block = buf_page_get_block(bpage); 
+	buf_block_t* block = buf_page_get_block(bpage);
 
-	if((dict_index_get_space(clust_index) ==llt_space_id) && get_flag(bpage, IPLIZED) && !get_flag(bpage, NORMALIZE)){
+	if((dict_index_get_space(clust_index) ==llt_space_id) && get_flag(bpage, IPLIZED) && !get_flag(bpage, NORMALIZE) 
+		&& bpage->oldest_modification!=0 && page_get_max_trx_id(block->frame)!=0){
 		use_nvdimm_for_vers_build = true;
 	}
 
 	if(use_nvdimm_for_vers_build){
 		
 		//redo-based version construction
-		fprintf(stderr, "version build with redo bpage : %lu\n", bpage);
+		fprintf(stderr, "version build with redo bpage : %lu space_id: %lu page_no: %lu\n", bpage, bpage->id.space(), bpage->id.page_no());
 
 		err = nvdimm_build_prev_vers_with_redo(
 			rec, mtr, clust_index, offsets, read_view, offset_heap,
 			prebuilt->old_vers_heap, old_vers, vrow, bpage);
 
-	}else{
+	}
+	if(err!=DB_SUCCESS || !use_nvdimm_for_vers_build){
 
 	// undo-based version construction
+	fprintf(stderr, "version build with undo bpage : %lu space_id: %lu page_no: %lu\n", bpage, bpage->id.space(), bpage->id.page_no());
+
 
 	err = row_vers_build_for_consistent_read(
 		rec, mtr, clust_index, offsets, read_view, offset_heap,
@@ -3712,8 +3716,12 @@ row_sel_get_clust_rec_for_mysql(
 			/* The following call returns 'offsets' associated with
 			'old_vers' */
 			/* lbh */
+
+
 			buf_block_t* block = btr_pcur_get_block(prebuilt->clust_pcur);
 			buf_page_t* bpage = &block->page;
+			page_t* page = block->frame;
+			fprintf(stderr, "1completed get block: %lu and bpage: %lu page_no: %d page_max_trx_id: %lu\n", block, bpage, bpage->id.page_no(), page_get_max_trx_id(page));
 
 			err = row_sel_build_prev_vers_for_mysql(
 				trx->read_view, clust_index, prebuilt,
@@ -5672,9 +5680,11 @@ no_gap_lock:
 				    trx_get_read_view(trx))) {
 
 				/* lbh for mvcc */
-
+	
 				buf_block_t* block = btr_pcur_get_block(pcur);
+				page_t* page = block->frame;
 				buf_page_t* bpage = &block->page;
+				fprintf(stderr, "2completed get block: %lu and bpage: %lu page_no: %d page_max_trx_id: %lu\n", block, bpage, bpage->id.page_no(), page_get_max_trx_id(page));
 
 				/* end */
 

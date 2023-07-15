@@ -1111,6 +1111,10 @@ buf_block_set_file_page(
 	buf_block_t*		block,
 	const page_id_t&	page_id);
 
+/* lbh */
+buf_page_t* nvdimm_buf_block_page_init(buf_block_t* block);
+/* end */
+
 /*********************************************************************//**
 Gets the io_fix state of a block.
 @return io_fix state */

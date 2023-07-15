@@ -228,6 +228,36 @@ page_set_max_trx_id(
 	}
 }
 
+/*************************************************************//**
+Sets the max trx id field value in IPL page*/
+void
+ipl_page_set_max_trx_id(
+/*================*/
+	page_t*	page,	/*!< in/out: page */
+	page_zip_des_t*	page_zip,/*!< in/out: compressed page, or NULL */
+	trx_id_t	trx_id,	/*!< in: transaction id */
+	mtr_t*		mtr)	/*!< in/out: mini-transaction, or NULL */
+{
+
+	/* It is not necessary to write this change to the redo log, as
+	during a database recovery we assume that the max trx id of every
+	page is the maximum trx id assigned before the crash. */
+
+	if (page_zip) {
+		mach_write_to_8(page + (PAGE_HEADER + PAGE_MAX_TRX_ID), trx_id);
+		page_zip_write_header(page_zip,
+				      page + (PAGE_HEADER + PAGE_MAX_TRX_ID),
+				      8, mtr);
+	} else if (mtr) {
+		mlog_write_ull(page + (PAGE_HEADER + PAGE_MAX_TRX_ID),
+			       trx_id, mtr);
+	} else {
+		mach_write_to_8(page + (PAGE_HEADER + PAGE_MAX_TRX_ID), trx_id);
+	}
+
+	fprintf(stderr,"changed max_trx_id page: %lu rec_trx_id:%lu\n", page, trx_id );
+}
+
 /************************************************************//**
 Allocates a block of memory from the heap of an index page.
 @return pointer to start of allocated buffer, or NULL if allocation fails */
@@ -323,6 +353,7 @@ static const byte infimum_supremum_compact[] = {
 	0x00, 0x00/* end of record list */,
 	's', 'u', 'p', 'r', 'e', 'm', 'u', 'm'
 };
+
 
 /**********************************************************//**
 The index page creation function.
@@ -640,8 +671,16 @@ page_copy_rec_list_end(
 	mtr_log_t	log_mode = MTR_LOG_NONE;
 
 #ifdef UNIV_NVDIMM_IPL
+	/* lbh log_type error*/
 	nvdimm_ipl_add_split_merge_map(block->page.id);
 	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+	/* lbh 
+	page_update_max_trx_id(block, buf_block_get_page_zip(block),
+                   rec_get_trx_id(rec), mtr);
+	page_update_max_trx_id(old_block, buf_block_get_page_zip(old_block),
+                   rec_get_trx_id(rec), mtr);
+	 end */
+
 #endif
 
 	if (new_page_zip) {
@@ -992,6 +1031,61 @@ page_parse_delete_rec_list(
 	return(ptr);
 }
 
+/* lbh */
+/**********************************************************//**
+Parses a log record of a record list end or start deletion.
+@return end of log record or NULL */
+byte*
+ipl_page_parse_delete_rec_list(
+/*=======================*/
+	mlog_id_t	type,	/*!< in: MLOG_LIST_END_DELETE,
+				MLOG_LIST_START_DELETE,
+				MLOG_COMP_LIST_END_DELETE or
+				MLOG_COMP_LIST_START_DELETE */
+	byte*		ptr,	/*!< in: buffer */
+	byte*		end_ptr,/*!< in: buffer end */
+	page_t* page,	/*!< in/out: buffer block or NULL */
+	dict_index_t*	index,	/*!< in: record descriptor */
+	mtr_t*		mtr)	/*!< in: mtr or NULL */
+{
+	ulint	offset;
+
+	ut_ad(type == MLOG_LIST_END_DELETE
+	      || type == MLOG_LIST_START_DELETE
+	      || type == MLOG_COMP_LIST_END_DELETE
+	      || type == MLOG_COMP_LIST_START_DELETE);
+
+	/* Read the record offset as a 2-byte ulint */
+
+	if (end_ptr < ptr + 2) {
+
+		return(NULL);
+	}
+
+	offset = mach_read_from_2(ptr);
+	ptr += 2;
+
+	if (!page) {
+
+		return(ptr);
+	}
+
+	ut_ad(!!page_is_comp(page) == dict_table_is_comp(index->table));
+
+	buf_block_t* block = NULL;
+
+	if (type == MLOG_LIST_END_DELETE
+	    || type == MLOG_COMP_LIST_END_DELETE) {
+		page_delete_rec_list_end(page + offset, block, index,
+					 ULINT_UNDEFINED, ULINT_UNDEFINED,
+					 mtr);
+	} else {
+		page_delete_rec_list_start(page + offset, block, index, mtr);
+	}
+
+	return(ptr);
+}
+/* end */
 /*************************************************************//**
 Deletes records from a page from a given record onward, including that record.
 The infimum and supremum records are not deleted. */
@@ -1013,12 +1107,20 @@ page_delete_rec_list_end(
 	rec_t*		last_rec;
 	rec_t*		prev_rec;
 	ulint		n_owned;
-	page_zip_des_t*	page_zip	= buf_block_get_page_zip(block);
+	page_zip_des_t*	page_zip= buf_block_get_page_zip(block); // lbh modified
 	page_t*		page		= page_align(rec);
 	mem_heap_t*	heap		= NULL;
 	ulint		offsets_[REC_OFFS_NORMAL_SIZE];
 	ulint*		offsets		= offsets_;
 	rec_offs_init(offsets_);
+
+	/* lbh 
+	if(block==NULL){
+		page_zip = NULL;
+	}else{
+		page_zip	= buf_block_get_page_zip(block);
+	}	
+	 end */
 
 	ut_ad(size == ULINT_UNDEFINED || size < UNIV_PAGE_SIZE);
 	ut_ad(!page_zip || page_rec_is_comp(rec));
@@ -1067,6 +1169,12 @@ delete_all:
 	/* The page gets invalid for optimistic searches: increment the
 	frame modify clock */
 
+	/* lbh 
+	if(block!=NULL){
+		buf_block_modify_clock_inc(block);
+	}
+	 end */
+
 	buf_block_modify_clock_inc(block);
 
 	page_delete_rec_list_write_log(rec, index, page_is_comp(page)
@@ -1078,7 +1186,7 @@ delete_all:
 
 		ut_a(page_is_comp(page));
 		/* Individual deletes are not logged */
-
+ 
 		log_mode = mtr_set_log_mode(mtr, MTR_LOG_NONE);
 
 		do {
@@ -1246,9 +1354,20 @@ page_delete_rec_list_start(
 
 	page_delete_rec_list_write_log(rec, index, type, mtr);
 
-	page_cur_set_before_first(block, &cur1);
-	page_cur_move_to_next(&cur1);
+	/* lbh */ 
+	// for mvcc log type 16 44
 
+	if(block!=NULL){
+		page_cur_set_before_first(block, &cur1);
+		page_cur_move_to_next(&cur1);
+	}else{
+		page_cur_set_before_first(block, &cur1);
+		page_cur_move_to_next(&cur1);
+	}
+
+	/* end */
+
+	
 	/* Individual deletes are not logged */
 
 	mtr_log_t	log_mode = mtr_set_log_mode(mtr, MTR_LOG_NONE);
@@ -1840,12 +1959,14 @@ page_header_print(
 		"--------------------------------\n"
 		"PAGE HEADER INFO\n"
 		"Page id: (%lu, %lu)\n"
+		"Page MAX_TRX_ID: %lu\n" // added by lbh
 		"Page address %p, n records %lu (%s)\n"
 		"n dir slots %lu, heap top %lu\n"
 		"Page n heap %lu, free %lu, garbage %lu\n"
 		"Page last insert %lu, direction %lu, n direction %lu\n"
 		"\n",
-		read_space_id, read_page_no,
+		read_space_id, read_page_no, 
+		page_get_max_trx_id(page), // added by lbh
 		page, (ulong) page_header_get_field(page, PAGE_N_RECS),
 		page_is_comp(page) ? "compact format" : "original format",
 		(ulong) page_header_get_field(page, PAGE_N_DIR_SLOTS),

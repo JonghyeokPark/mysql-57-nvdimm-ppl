@@ -361,6 +361,23 @@ page_cur_parse_insert_rec(
 	buf_block_t*	block,	/*!< in: page or NULL */
 	dict_index_t*	index,	/*!< in: record descriptor */
 	mtr_t*		mtr);	/*!< in: mtr or NULL */
+
+/* lbh */
+/**********************************************************//**
+Parses a log record of a record insert on a page.
+@return end of log record or NULL */
+byte*
+ipl_page_cur_parse_insert_rec(
+/*======================*/
+	ibool		is_short,/*!< in: TRUE if short inserts */
+	const byte*	ptr,	/*!< in: buffer */
+	const byte*	end_ptr,/*!< in: buffer end */
+	page_t*	page,	/*!< in: page or NULL */
+	dict_index_t*	index,	/*!< in: record descriptor */
+	mtr_t*		mtr);	/*!< in: mtr or NULL */
+
+/* end */
+
 /**********************************************************//**
 Parses a log record of copying a record list end to a new created page.
 @return end of log record or NULL */

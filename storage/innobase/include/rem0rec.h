@@ -1069,17 +1069,17 @@ private:
 };
 # endif /* !DBUG_OFF */
 
-# ifdef UNIV_DEBUG
+//# ifdef UNIV_DEBUG
 /************************************************************//**
 Reads the DB_TRX_ID of a clustered index record.
 @return the value of DB_TRX_ID */
 trx_id_t
 rec_get_trx_id(
 /*===========*/
-	const rec_t*		rec,	/*!< in: record */
-	const dict_index_t*	index)	/*!< in: clustered index */
+	rec_t*		rec,	/*!< in: record */
+	dict_index_t*	index)	/*!< in: clustered index */
 	MY_ATTRIBUTE((warn_unused_result));
-# endif /* UNIV_DEBUG */
+//# endif /* UNIV_DEBUG */
 #endif /* UNIV_HOTBACKUP */
 
 /* Maximum lengths for the data in a physical record if the offsets

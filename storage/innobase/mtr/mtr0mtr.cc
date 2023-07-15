@@ -897,8 +897,10 @@ add_log_to_ipl(
 	ut_ad(type != MLOG_TRUNCATE);
 
 	len = rec_end - body;
+	/* lbh */
+	// add  && space !=1 && space!=2 && srv_is_undo_tablespace(space)
 
-	if(!is_system_or_undo_tablespace(space) && !nvdimm_ipl_is_split_or_merge_page(page_id)
+	if(!is_system_or_undo_tablespace(space) && !nvdimm_ipl_is_split_or_merge_page(page_id) && !srv_is_undo_tablespace(space) 
 		&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
 		nvdimm_ipl_add(body, len, type, buf_page);
 	}

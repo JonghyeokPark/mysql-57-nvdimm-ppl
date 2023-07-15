@@ -5008,6 +5008,20 @@ buf_page_init_low(
 	ut_d(bpage->file_page_was_freed = FALSE);
 }
 
+
+/* lbh */
+buf_page_t* nvdimm_buf_block_page_init(buf_block_t* block){
+	
+	buf_block_init_low(block);
+
+	buf_page_init_low(&block->page);
+	
+	buf_page_t* bpage = &block->page;
+
+	return bpage;
+}
+/* end */
+
 /** Inits a page to the buffer buf_pool.
 @param[in,out]	buf_pool	buffer pool
 @param[in]	page_id		page id

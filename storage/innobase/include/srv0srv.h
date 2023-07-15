@@ -400,7 +400,6 @@ extern ulong	srv_checksum_algorithm;
 extern ulint	llt_space_id;
 /* end */
 
-
 extern double	srv_max_buf_pool_modified_pct;
 extern ulong	srv_max_purge_lag;
 extern ulong	srv_max_purge_lag_delay;
