@@ -255,7 +255,7 @@ ipl_page_set_max_trx_id(
 		mach_write_to_8(page + (PAGE_HEADER + PAGE_MAX_TRX_ID), trx_id);
 	}
 
-	fprintf(stderr,"changed max_trx_id page: %lu rec_trx_id:%lu\n", page, trx_id );
+	//fprintf(stderr,"changed max_trx_id page: %lu rec_trx_id:%lu\n", page, trx_id );
 }
 
 /************************************************************//**
@@ -1114,13 +1114,13 @@ page_delete_rec_list_end(
 	ulint*		offsets		= offsets_;
 	rec_offs_init(offsets_);
 
-	/* lbh 
+	/* lbh */
 	if(block==NULL){
 		page_zip = NULL;
 	}else{
 		page_zip	= buf_block_get_page_zip(block);
 	}	
-	 end */
+	/* end */
 
 	ut_ad(size == ULINT_UNDEFINED || size < UNIV_PAGE_SIZE);
 	ut_ad(!page_zip || page_rec_is_comp(rec));
@@ -1169,11 +1169,11 @@ delete_all:
 	/* The page gets invalid for optimistic searches: increment the
 	frame modify clock */
 
-	/* lbh 
+	/* lbh */
 	if(block!=NULL){
 		buf_block_modify_clock_inc(block);
 	}
-	 end */
+	/* end */
 
 	buf_block_modify_clock_inc(block);
 

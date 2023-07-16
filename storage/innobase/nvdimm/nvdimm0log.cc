@@ -169,7 +169,7 @@ bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 	mtr_t temp_mtr;
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-	 fprintf(stderr, "Add log start! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), type, len);
+	 //fprintf(stderr, "Add log start! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), type, len);
 	if (!get_flag(bpage, IPLIZED)) {
 		alloc_static_ipl_to_bpage(bpage);
 		if(bpage->static_ipl_pointer == NULL){
@@ -241,7 +241,7 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 			now_len = start_ptr - apply_log_buffer - 3;
 			goto apply_end;
 		}
-		fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",apply_info->space_id, apply_info->page_no, log_type, body_len);
+		//fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",apply_info->space_id, apply_info->page_no, log_type, body_len);
 
 		//log apply 진행 후, recovery 시작 위치 이동.
 		recv_parse_or_apply_log_rec_body(log_type, start_ptr, start_ptr + body_len, page_id.space(), page_id.page_no(), apply_info->block, temp_mtr);
@@ -508,7 +508,7 @@ nvdimm_build_prev_vers_with_redo(
 
 	page_t* page = block->frame;
 	UNIV_MEM_ASSERT_RW(page, UNIV_PAGE_SIZE);
-	buf_pool_t*	buf_pool	= buf_pool_from_bpage(&block->page);
+	//buf_pool_t*	buf_pool	= buf_pool_from_bpage(&block->page);
 	ulint id = dict_index_get_space(clust_index);
 	bool			found;
 	const page_size_t	page_size(fil_space_get_page_size(id, &found));
@@ -584,6 +584,7 @@ nvdimm_build_prev_vers_with_redo(
 		start_ptr += body_len;
 
 		if(!read_view->changes_visible(old_page_max_trx_id, clust_index->table->name)){
+			fprintf(stderr, "current version not visible, give temp_page\n");
 			break;
 		}
 	}		
@@ -593,6 +594,11 @@ apply_end:
 	cur_len += IPL_LOG_HEADER_SIZE;
 	temp_mtr.discard_modifications();
 	mtr_commit(&temp_mtr);
+
+	if(start_ptr < end_ptr){  // all built version visible to the read trx -> provide old_page instead of temp_page
+		buf_frame_copy(temp_page, old_page);
+		temp_trx_id = old_page_max_trx_id;
+	}
 
 	fprintf(stderr, "finished apply: space_id: %d page_no: %lu IPL_apply_cnt: %d bpage: %lu\n", page_id.space(), page_id.page_no(), IPL_apply_cnt, bpage);
 
@@ -621,6 +627,12 @@ apply_end:
 	// mem_heap_free(temp_page_heap);
 
 	fprintf(stderr, "sucessfully created a version with IPL space_id: %d page_no: %lu bpage: %lu\n", bpage->id.space(), bpage->id.page_no(), bpage);
+
+	free(buf);
+	free(buf1);
+	free(buf2);
+	free(old_page);
+	free(temp_page);
 
 	return DB_SUCCESS;
 

@@ -3488,7 +3488,8 @@ row_sel_build_prev_vers_for_mysql(
 	if(use_nvdimm_for_vers_build){
 		
 		//redo-based version construction
-		fprintf(stderr, "version build with redo bpage : %lu space_id: %lu page_no: %lu\n", bpage, bpage->id.space(), bpage->id.page_no());
+		fprintf(stderr, "version build with redo bpage : %lu space_id: %lu page_no: %lu max_trx_id: %lu\n", 
+		bpage, bpage->id.space(), bpage->id.page_no(), page_get_max_trx_id(block->frame));
 
 		err = nvdimm_build_prev_vers_with_redo(
 			rec, mtr, clust_index, offsets, read_view, offset_heap,
@@ -3498,7 +3499,9 @@ row_sel_build_prev_vers_for_mysql(
 	if(err!=DB_SUCCESS || !use_nvdimm_for_vers_build){
 
 	// undo-based version construction
-	fprintf(stderr, "version build with undo bpage : %lu space_id: %lu page_no: %lu\n", bpage, bpage->id.space(), bpage->id.page_no());
+	fprintf(stderr, "version build with undo bpage : %lu space_id: %lu page_no: %lu leaf_page: %d iplized: %d normalized: %lu oldest_modification: %lu max_trx_id: %lu\n", 
+	bpage, bpage->id.space(), bpage->id.page_no(), page_is_leaf(block->frame), 
+	get_flag(bpage, IPLIZED), get_flag(bpage, NORMALIZE), bpage->oldest_modification, page_get_max_trx_id(block->frame));
 
 
 	err = row_vers_build_for_consistent_read(

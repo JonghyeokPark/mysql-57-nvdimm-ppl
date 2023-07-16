@@ -3926,6 +3926,10 @@ func_exit:
 		/* Update the free bits in the insert buffer. */
 		ibuf_update_free_bits_zip(block, mtr);
 	}
+	/* lbh */
+	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(block->frame))
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(rec, index), mtr);
+	/* end */
 
 	return(err);
 }
