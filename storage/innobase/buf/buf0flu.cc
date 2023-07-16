@@ -1120,7 +1120,7 @@ buf_flush_write_block_low(
 			// TODO(jhpark): for recvoery test; flush skip
 			// step1. get current ipl pointer;
 			// step2. set flush flag;
-			if (bpage->static_ipl_pointer) {
+			if ( !nvdimm_recv_running && bpage->static_ipl_pointer) {
 				recv_ipl_set_flush_bit(bpage->static_ipl_pointer);
 				fprintf(stderr, "ipl page set flush bit: %ld\n"
 						, recv_ipl_get_flush_bit(bpage->static_ipl_pointer));
