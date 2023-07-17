@@ -243,7 +243,12 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 	now_len = start_ptr - apply_log_buffer;
 apply_end:
 	now_len += IPL_LOG_HEADER_SIZE;
-	apply_info->block->page.ipl_write_pointer = apply_info->block->page.static_ipl_pointer + now_len;
+	if(apply_info->dynamic_start_pointer == NULL){
+		apply_info->block->page.ipl_write_pointer = apply_info->block->page.static_ipl_pointer + now_len;
+	}
+	else{
+		apply_info->block->page.ipl_write_pointer = apply_info->dynamic_start_pointer + (now_len - nvdimm_info->static_ipl_per_page_size);
+	}
 	temp_mtr->discard_modifications();
 	mtr_commit(temp_mtr);
 }
