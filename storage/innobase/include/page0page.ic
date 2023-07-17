@@ -192,6 +192,7 @@ page_header_set_field(
 		page_zip_write_header(page_zip,
 				      page + PAGE_HEADER + field, 2, NULL);
 	}
+	//fprintf(stderr, "page header set field page: %lu\n", page);
 }
 
 /*************************************************************//**

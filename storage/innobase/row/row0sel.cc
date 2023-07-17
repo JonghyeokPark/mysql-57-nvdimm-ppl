@@ -3477,6 +3477,7 @@ row_sel_build_prev_vers_for_mysql(
 	3. Compare oldest TRX_ID in NVDIMM that is equal or bigger than oldest acitve TRX_ID of the readview
 	&& (rec_trx_id - read_view->low_limit_id > read_view->low_limit_id - redo_oldest_trx_id)
 	*/
+	// add condition to compare last insert record trx_id?
 
 	buf_block_t* block = buf_page_get_block(bpage);
 

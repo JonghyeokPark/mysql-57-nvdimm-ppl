@@ -1150,6 +1150,9 @@ row_vers_build_for_consistent_read(
 
 	version = rec;
 
+	/* lbh  */
+	page_rec_print(rec, *offsets);
+
 	for (;;) {
 		mem_heap_t*	prev_heap = heap;
 
@@ -1209,6 +1212,7 @@ row_vers_build_for_consistent_read(
 		}
 
 		version = prev_version;
+	
 	}
 
 	mem_heap_free(heap);

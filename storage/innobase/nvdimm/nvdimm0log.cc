@@ -527,8 +527,11 @@ nvdimm_build_prev_vers_with_redo(
 	err = fil_io(IORequestRead, true, page_id, page_size, 0, page_size.physical(), 
 		       old_page, NULL);
 
-	page_header_print(old_page);
+
 	page_header_print(page);
+	page_dir_print(page, 3);
+	page_header_print(old_page);
+	page_dir_print(old_page, 3);
 
 
 	trx_id_t	old_page_max_trx_id = page_get_max_trx_id(old_page);
@@ -583,6 +586,10 @@ nvdimm_build_prev_vers_with_redo(
 		IPL_apply_cnt++;
 		start_ptr += body_len;
 
+		
+		page_header_print(old_page);
+		page_dir_print(old_page, 10);
+
 		if(!read_view->changes_visible(old_page_max_trx_id, clust_index->table->name)){
 			fprintf(stderr, "current version not visible, give temp_page\n");
 			break;
@@ -609,30 +616,69 @@ apply_end:
 
 	// possible solution: row_id (rec_id) record offset stays the same?
 
+	*offsets = rec_get_offsets(
+			rec, clust_index, *offsets, ULINT_UNDEFINED,
+			offset_heap);
+
+	page_rec_print(rec, *offsets);
+
+
+	if(*offsets==NULL){
+		return DB_FAIL;
+	}
+
+	// cannot access old_vers -> need to
+
+	const rec_t* temp_page_rec;
+	ulint rec_slot_index = page_dir_find_owner_slot(rec);
+	ulint heap_no = page_rec_get_heap_no(rec);
+
+	temp_page_rec = page_find_rec_with_heap_no(temp_page, heap_no);
+
+	fprintf(stderr,"temp_page_rec: %lu rec: %lu\n", temp_page_rec, rec);
+
+	ulint*		temp_offsets;
+	mem_heap_t*	temp_offset_heap		= NULL;
+
+	temp_offset_heap = mem_heap_create(1024);
+
+	temp_offsets = rec_get_offsets(
+			temp_page_rec, clust_index, temp_offsets, ULINT_UNDEFINED,
+			&temp_offset_heap);
+
+	if(temp_page_rec==NULL){
+		*old_vers = NULL;
+		return DB_SUCCESS;
+		//return DB_FAIL;
+	}else{
+		page_rec_print(temp_page_rec, *offsets);
+	}
+
 	byte* buf = static_cast<byte*>(
 				mem_heap_alloc(
-					in_heap, rec_offs_size(*offsets)));
+					in_heap, rec_offs_size(temp_offsets)));
+	
 
-	*old_vers = rec_copy(buf, *old_vers, *offsets);
+	*old_vers = rec_copy(buf, temp_page_rec, *offsets); // copy old vers to buf
 	rec_offs_make_valid(*old_vers, clust_index, *offsets);
 
 	bool comp = page_rec_is_comp(*old_vers);
 	bool rec_del = rec_get_deleted_flag(*old_vers, comp);
 
-	if(rec_del){
-		*old_vers = NULL;
-	}
+	// if(rec_del){
+	// 	*old_vers = NULL;
+	// }
 
 	// mem_heap_free(old_page_heap);
 	// mem_heap_free(temp_page_heap);
 
 	fprintf(stderr, "sucessfully created a version with IPL space_id: %d page_no: %lu bpage: %lu\n", bpage->id.space(), bpage->id.page_no(), bpage);
 
-	free(buf);
-	free(buf1);
-	free(buf2);
-	free(old_page);
-	free(temp_page);
+	//  free(buf);
+	//  free(buf1);
+	// free(buf2);
+	// free(old_page);
+	// free(temp_page);
 
 	return DB_SUCCESS;
 

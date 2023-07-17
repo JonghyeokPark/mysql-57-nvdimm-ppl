@@ -3323,7 +3323,7 @@ fail_err:
 
 	/* lbh */
 	if( leaf&& (dict_index_get_space(cursor->index) ==llt_space_id))
-		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(*rec, index), mtr);
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(*rec, index), mtr); //rec_get_trx_id(*rec, index)
 	/* end */
 
 	return(DB_SUCCESS);
@@ -3693,6 +3693,15 @@ btr_cur_parse_update_in_place(
 func_exit:
 	mem_heap_free(heap);
 
+	/* lbh */
+	if(page!=NULL){
+		if( page_is_leaf(page)&& (dict_index_get_space(index) ==llt_space_id)){
+			mtr_t* mtr;
+			ipl_page_set_max_trx_id(page, page_zip, trx_id, mtr); //rec_get_trx_id(*rec, index)
+		/* end */
+		}
+	}
+
 	return(ptr);
 }
 
@@ -3927,8 +3936,10 @@ func_exit:
 		ibuf_update_free_bits_zip(block, mtr);
 	}
 	/* lbh */
-	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(block->frame))
-		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(rec, index), mtr);
+	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(block->frame)){
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
+		//fprintf(stderr, "update max_trx_id for update in place\n");
+	}
 	/* end */
 
 	return(err);
@@ -4186,6 +4197,11 @@ any_extern:
 	ut_ad(err == DB_SUCCESS);
 
 func_exit:
+	/* lbh */
+	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(page))
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
+	/* end */
+
 	if (!(flags & BTR_KEEP_IBUF_BITMAP)
 	    && !dict_index_is_clust(index)
 	    && !dict_table_is_temporary(index->table)) {
@@ -4203,10 +4219,6 @@ func_exit:
 		btr_cur_prefetch_siblings(block);
 	}
 
-	/* lbh */
-	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(page))
-		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(rec, index), mtr);
-	/* end */
 
 
 	return(err);
@@ -4687,6 +4699,10 @@ return_after_reservations:
 //   }
 #endif
 
+	/* lbh */
+	if( page_is_leaf(page)&& (dict_index_get_space(cursor->index) ==llt_space_id))
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
+	/* end */
 
 	return(err);
 }
@@ -5472,6 +5488,7 @@ return_after_reservations:
 
 #ifdef UNIV_NVDIMM_IPL
 	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
+
 #endif
 
 
