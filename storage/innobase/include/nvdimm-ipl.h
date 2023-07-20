@@ -157,7 +157,7 @@ void set_apply_info_and_log_apply(buf_block_t* block);
 //page ipl info metadata 관련 함수들
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage);
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id);
-bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
+void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);

@@ -239,7 +239,13 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 	now_len = start_ptr - apply_log_buffer;
 apply_end:
 	now_len += IPL_LOG_HEADER_SIZE;
-	apply_info->block->page.ipl_write_pointer = apply_info->block->page.static_ipl_pointer + now_len;
+	if(apply_info->dynamic_start_pointer != NULL){
+		apply_info->block->page.ipl_write_pointer = apply_info->dynamic_start_pointer + (now_len - nvdimm_info->static_ipl_per_page_size);
+	}
+	else{
+		apply_info->block->page.ipl_write_pointer = apply_info->block->page.static_ipl_pointer + now_len;
+	}
+	
 	temp_mtr->discard_modifications();
 	mtr_commit(temp_mtr);
 }
@@ -283,7 +289,7 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 	set_flag(&(bpage->flags), NORMALIZE);
 }
 
-bool normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
+void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p\n", page_id.space(), page_id.page_no(), bpage->static_ipl_pointer, get_dynamic_ipl_pointer(bpage));
 	// mutex_enter(&nvdimm_info->ipl_map_mutex);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
@@ -383,7 +389,6 @@ void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush){
 	if(bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
 		if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
-			if(is_single_page_flush)	return true; // single_page flush인 경우
 			if(get_dynamic_ipl_pointer(bpage) != NULL){
 				return true;
 			}

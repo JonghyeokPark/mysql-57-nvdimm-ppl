@@ -1113,17 +1113,9 @@ buf_flush_write_block_low(
 #ifdef UNIV_NVDIMM_IPL
 	if (check_not_flush_page(bpage, flush_type)){
 		insert_page_ipl_info_in_hash_table(bpage);
-		if(fil_io(request,
-		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-		frame, bpage) == DB_SUCCESS)
-		{
-			buf_page_io_complete(bpage, sync);
-			buf_LRU_stat_inc_io();
-			return;
-		}
-		else{
-			fprintf(stderr, "Error!\n");
-		}
+		buf_page_io_complete(bpage, sync);
+		buf_LRU_stat_inc_io();
+		return;
 	}
 	else{
 		fil_io(request,
@@ -1685,15 +1677,16 @@ buf_flush_LRU_list_batch(
 		BPageMutex*	block_mutex = buf_page_get_mutex(bpage);
 		mutex_enter(block_mutex);
 		//nvdimm
-		// if(check_clean_checkpoint_page(bpage, false)){
-		// 	// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
-		// 	// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
-		// 	set_flag(&(bpage->flags), DIRTIFIED);
-		// 	mutex_exit(block_mutex);
-		// 	buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_LRU, false);
-		// 	count++;
-		// 	goto finish_write;
-		// }
+		if(check_clean_checkpoint_page(bpage, false)){
+			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
+			// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
+			set_flag(&(bpage->flags), NORMALIZE);
+			set_flag(&(bpage->flags), DIRTIFIED);
+			mutex_exit(block_mutex);
+			buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_LRU, false);
+			count++;
+			goto finish_write;
+		}
 		//msj
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
@@ -2242,14 +2235,11 @@ buf_flush_single_page_from_LRU(
 
 		mutex_enter(block_mutex);
 		//nvdimm
-		// if(check_clean_checkpoint_page(bpage, true)){
-		// 	// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u) frame: %p\n", 
-		// 	// bpage->id.space(), bpage->id.page_no(), ((buf_block_t *)bpage)->frame);
-		// 	//여기서 mutex를 풀어줄지 실행해보기 생각하기.
-		// 	set_flag(&(bpage->flags), DIRTIFIED);
-		// 	freed = buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
-		// 	goto clean_flush_end;
-		// }
+		if(check_clean_checkpoint_page(bpage, true)){
+			// fprintf(stderr, "[Check] Success filter clean checkpointed page (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+			// 여기서는 Clean page를 Flush하지 않고, 스킵하고 나중에 LRU_Batch FLUSH에서 처리
+			goto clean_flush_end;
+		}
 
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
@@ -4074,7 +4064,10 @@ buf_flush_ipl_clean_checkpointed_block_low(
 			fsp_is_checksum_disabled(bpage->id.space()));
 		break;
 	}
-
+	if(check_not_flush_page(bpage, flush_type)){
+		fprintf(stderr, "Error!\n");
+	}
+	// fprintf(stderr, "[FLUSH]Clean checkpointed dynamic page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
 	adds an overhead during flushing. */
@@ -4094,7 +4087,7 @@ buf_flush_ipl_clean_checkpointed_block_low(
 		fil_io(request,
 			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 			frame, bpage);
-		// fprintf(stderr, "[FLUSH]Clean checkpointer dynamic page: (%u, %u) frmae: %p\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
+		
 		
 	}
 	else if (flush_type == BUF_FLUSH_SINGLE_PAGE) {
@@ -4114,8 +4107,11 @@ buf_flush_ipl_clean_checkpointed_block_low(
 
 	/* Increment the counter of I/O operations used
 	for selecting LRU policy. */
+	if(flush_type == BUF_FLUSH_LRU){
+		buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
+		buf_pool_mutex_enter(buf_pool);
+		ut_ad(buf_pool_mutex_own(buf_pool));
+	}
 	buf_LRU_stat_inc_io();
-	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
-	buf_pool_mutex_enter(buf_pool);
-	ut_ad(buf_pool_mutex_own(buf_pool));
+	
 }
