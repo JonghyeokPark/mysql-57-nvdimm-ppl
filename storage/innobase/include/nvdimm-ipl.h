@@ -74,21 +74,21 @@ static inline void memcpy_persist
 
 extern unsigned char* nvdimm_ptr;
 extern int nvdimm_fd;
-extern std::queue<uint> static_ipl_queue;
-extern std::queue<uint> dynamic_ipl_queue;
 
 /*IPL allocation*/
-void make_static_indirection_queue(unsigned char * static_start_pointer, uint64_t static_ipl_size, uint static_ipl_max_page_count);
-unsigned char * alloc_static_address_from_indirection_queue();
-void free_static_address_to_indirection_queue(unsigned char * addr);
-void make_dynamic_indirection_queue(unsigned char * dynamic_start_pointer, uint64_t dynamic_ipl_size, uint dynamic_ipl_max_page_count);
-unsigned char * alloc_dynamic_address_from_indirection_queue();
-void free_dynamic_address_to_indirection_queue(unsigned char * addr);
+void make_static_indirection_queue(buf_pool_t * buf_pool);
+unsigned char * alloc_static_address_from_indirection_queue(buf_pool_t * buf_pool);
+void free_static_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr);
+
+void make_dynamic_indirection_queue(buf_pool_t * buf_pool);
+unsigned char * alloc_dynamic_address_from_indirection_queue(buf_pool_t * buf_pool);
+void free_dynamic_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr);
+
 unsigned char * get_addr_from_ipl_index(unsigned char * start_ptr, uint index, uint64_t ipl_per_page_size);
 uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr, uint64_t ipl_per_page_size);
 
 /* IPL mapping */
-bool make_static_and_dynamic_ipl_region();
+bool make_static_and_dynamic_ipl_region(ulint number_of_buf_pool);
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size);
 void nvdimm_free(const uint64_t pool_size);
 
@@ -106,26 +106,17 @@ enum ipl_flag {
   DIRTIFIED = 4
 };
 
-
-
-typedef ib_mutex_t my_mutex;
-
 typedef struct NVDIMM_SYSTEM
 {
-  my_mutex static_region_mutex;
-  my_mutex dynamic_region_mutex;
-
   unsigned char* static_start_pointer;
   uint64_t static_ipl_size;
   uint64_t static_ipl_per_page_size;
-  uint static_ipl_count;
-  uint64_t static_ipl_max_page_count;
+  uint64_t static_ipl_page_number_per_buf_pool;
   
   unsigned char* dynamic_start_pointer;
   uint64_t dynamic_ipl_size;
   uint64_t dynamic_ipl_per_page_size;
-  uint dynamic_ipl_count;
-  uint64_t dynamic_ipl_max_page_count;
+  uint64_t dynamic_ipl_page_number_per_buf_pool;
 }nvdimm_system;
 
 typedef struct APPLY_LOG_INFO

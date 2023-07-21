@@ -1858,6 +1858,17 @@ buf_pool_init_instance(
 	rw_lock_create(ipl_map_mutex_key, &buf_pool->lookup_table_lock, SYNC_IPL_MAP_MUTEX);
 	//nvdimm make ipl_look_up_table
 
+	//nvdimm make static, dynamic allocator
+	buf_pool->static_ipl_allocator = new std::queue<uint>;
+	mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->static_allocator_mutex);
+	make_static_indirection_queue(buf_pool);
+
+	buf_pool->dynamic_ipl_allocator = new std::queue<uint>;
+	mutex_create(LATCH_ID_DYNAMIC_REGION, &buf_pool->dynamic_allocator_mutex);
+	make_dynamic_indirection_queue(buf_pool);
+	//nvdimm make static, dynamic allocator
+	
+
 	buf_pool_mutex_exit(buf_pool);
 
 	return(DB_SUCCESS);
@@ -1933,6 +1944,13 @@ buf_pool_free_instance(
 	ut_free(buf_pool->ipl_look_up_table);
 	rw_lock_free(&buf_pool->lookup_table_lock);
 	//nvdimm free ipl_look_up_table and lock
+
+	//nvdimm free ipl_allcator and mutex
+	ut_free(buf_pool->static_ipl_allocator);
+	ut_free(buf_pool->dynamic_ipl_allocator);
+	mutex_free(&buf_pool->static_allocator_mutex);
+	mutex_free(&buf_pool->dynamic_allocator_mutex);
+	//nvdimm free ipl_allcator and mutex
 
 	buf_pool->allocator.~ut_allocator();
 }

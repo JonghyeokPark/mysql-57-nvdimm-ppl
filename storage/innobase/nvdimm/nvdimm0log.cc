@@ -27,7 +27,7 @@
 // 나중에 시간되면 해보기.
 
 void alloc_static_ipl_to_bpage(buf_page_t * bpage){
-	unsigned char * static_ipl_pointer = alloc_static_address_from_indirection_queue();
+	unsigned char * static_ipl_pointer = alloc_static_address_from_indirection_queue(buf_pool_get(bpage->id));
 	unsigned char temp_buf[12] = {NULL, };
 	if(static_ipl_pointer == NULL) return;
 	ulint offset = 0;
@@ -49,7 +49,7 @@ void alloc_static_ipl_to_bpage(buf_page_t * bpage){
 }
 
 bool alloc_dynamic_ipl_region(buf_page_t * bpage){
-	unsigned char * dynamic_address = alloc_dynamic_address_from_indirection_queue();
+	unsigned char * dynamic_address = alloc_dynamic_address_from_indirection_queue(buf_pool_get(bpage->id));
 	if(dynamic_address == NULL)	return false; 
 	unsigned char * pointer_to_store_dynamic_address = bpage->static_ipl_pointer + DYNAMIC_ADDRESS_OFFSET;
 	mach_write_to_4(pointer_to_store_dynamic_address, get_ipl_index_from_addr(nvdimm_info->dynamic_start_pointer, dynamic_address, nvdimm_info->dynamic_ipl_per_page_size));
@@ -296,8 +296,8 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	rw_lock_x_lock(&buf_pool->lookup_table_lock);
 	buf_pool->ipl_look_up_table->erase(page_id);
 	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
-	free_dynamic_address_to_indirection_queue(get_dynamic_ipl_pointer(bpage));
-	free_static_address_to_indirection_queue(bpage->static_ipl_pointer);
+	free_dynamic_address_to_indirection_queue(buf_pool_get(page_id), get_dynamic_ipl_pointer(bpage));
+	free_static_address_to_indirection_queue(buf_pool_get(page_id), bpage->static_ipl_pointer);
 	bpage->static_ipl_pointer = NULL;
 	bpage->ipl_write_pointer = NULL;
 	bpage->flags = 0;

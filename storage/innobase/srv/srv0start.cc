@@ -1816,6 +1816,29 @@ innobase_start_or_create_for_mysql(void)
 		unit = 'M';
 	}
 
+#ifdef UNIV_NVDIMM_IPL
+	// TODO(jhpark): add configuration variable
+	// 앞으로 옮긴 이유는, Buf_pool instance에 대한 allocator를 할당하기 위해서는 먼저 nvdimm_info가 생성 필요
+	if (srv_use_nvdimm_ipl) {
+		char nvdimm_file_path[NVDIMM_MMAP_MAX_FILE_NAME_LENGTH];
+		sprintf(nvdimm_file_path, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
+		//const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";
+		size_t srv_nvdimm_pool_size = 5 * 1024;
+		uint64_t pool_size = srv_nvdimm_pool_size * 1024 * 1024UL;
+
+		nvdimm_ptr = nvdimm_create_or_initialize(nvdimm_file_path, pool_size);
+
+		if (!nvdimm_ptr) {
+			NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
+			assert(nvdimm_ptr);
+		}
+		if(make_static_and_dynamic_ipl_region(srv_buf_pool_instances)){
+    		NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
+		}
+	}
+#endif
+	
+
 	double	chunk_size;
 	char	chunk_unit;
 
@@ -1853,24 +1876,6 @@ innobase_start_or_create_for_mysql(void)
 			<< " deadlock if the buffer pool fills up.";
 	}
 #endif /* UNIV_DEBUG */
-
-#ifdef UNIV_NVDIMM_IPL
-	// TODO(jhpark): add configuration variable 
-	if (srv_use_nvdimm_ipl) {
-		char nvdimm_file_path[NVDIMM_MMAP_MAX_FILE_NAME_LENGTH];
-		sprintf(nvdimm_file_path, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
-		//const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";
-		size_t srv_nvdimm_pool_size = 5 * 1024;
-		uint64_t pool_size = srv_nvdimm_pool_size * 1024 * 1024UL;
-
-		nvdimm_ptr = nvdimm_create_or_initialize(nvdimm_file_path, pool_size);
-
-		if (!nvdimm_ptr) {
-			NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
-			assert(nvdimm_ptr);
-		}
-	}
-#endif
 
 	fsp_init();
 	log_init();

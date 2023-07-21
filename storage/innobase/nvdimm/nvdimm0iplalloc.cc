@@ -7,83 +7,85 @@
 #include <errno.h>
 #include <stddef.h>
 
-std::queue<uint> static_ipl_queue;
-std::queue<uint> dynamic_ipl_queue;
-
-void make_static_indirection_queue(unsigned char * static_start_pointer, uint64_t static_ipl_per_page_size, uint static_ipl_max_page_count){
-  mutex_enter(&nvdimm_info->static_region_mutex);
-  for (uint i = 1; i <= static_ipl_max_page_count; i++){
-    static_ipl_queue.push(i);
+void make_static_indirection_queue(buf_pool_t * buf_pool){
+  uint start_index = nvdimm_info->static_ipl_page_number_per_buf_pool * buf_pool->instance_no;
+  uint end_index = start_index + nvdimm_info->static_ipl_page_number_per_buf_pool;
+  mutex_enter(&buf_pool->static_allocator_mutex);
+  for (uint i = start_index + 1; i <= end_index; i++){
+    buf_pool->static_ipl_allocator->push(i);
   }
-  fprintf(stderr, "static_ipl_queue size : %d\n", static_ipl_queue.size());
-  mutex_exit(&nvdimm_info->static_region_mutex);
+  mutex_exit(&buf_pool->static_allocator_mutex);
+  fprintf(stderr, "buf_pool %lu static allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->static_ipl_allocator->size(), start_index, end_index);
 }
 
-unsigned char * alloc_static_address_from_indirection_queue(){
-  mutex_enter(&nvdimm_info->static_region_mutex);
-  if(static_ipl_queue.empty()){
+unsigned char * alloc_static_address_from_indirection_queue(buf_pool_t * buf_pool){
+  mutex_enter(&buf_pool->static_allocator_mutex);
+  if(buf_pool->static_ipl_allocator->empty()){
       // fprintf(stderr, "Error : static_ipl_queue is empty\n");
-      mutex_exit(&nvdimm_info->static_region_mutex);
+      mutex_exit(&buf_pool->static_allocator_mutex);
       return NULL;
   }
-  unsigned char * ret_address = get_addr_from_ipl_index(nvdimm_info->static_start_pointer, static_ipl_queue.front(), nvdimm_info->static_ipl_per_page_size);
-  static_ipl_queue.pop();
-  fprintf(stderr, "static_ipl usage : %d\n", nvdimm_info->static_ipl_max_page_count - static_ipl_queue.size());
-  mutex_exit(&nvdimm_info->static_region_mutex);
+  unsigned char * ret_address = get_addr_from_ipl_index(nvdimm_info->static_start_pointer, buf_pool->static_ipl_allocator->front(), nvdimm_info->static_ipl_per_page_size);
+  buf_pool->static_ipl_allocator->pop();
+  // fprintf(stderr, "buf_pool %lu static allocator_usage: %u\n", buf_pool->instance_no, nvdimm_info->static_ipl_page_number_per_buf_pool - buf_pool->static_ipl_allocator->size());
+  mutex_exit(&buf_pool->static_allocator_mutex);
+  
   return ret_address;
 }
 
-void free_static_address_to_indirection_queue(unsigned char * addr){
+void free_static_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr){
   if(addr == NULL){
       // fprintf(stderr, "free_static_address_to_indirection_queue Error: addr is NULL\n");
       return;
   }
-  mutex_enter(&nvdimm_info->static_region_mutex);
   memset(addr, 0x00, nvdimm_info->static_ipl_per_page_size);
   flush_cache(addr, nvdimm_info->static_ipl_per_page_size);
-  static_ipl_queue.push(get_ipl_index_from_addr(nvdimm_info->static_start_pointer, addr, nvdimm_info->static_ipl_per_page_size));
+  mutex_enter(&buf_pool->static_allocator_mutex);
+  buf_pool->static_ipl_allocator->push(get_ipl_index_from_addr(nvdimm_info->static_start_pointer, addr, nvdimm_info->static_ipl_per_page_size));
+  mutex_exit(&buf_pool->static_allocator_mutex);
   // fprintf(stderr, "free static address : %p\n", addr);
-  mutex_exit(&nvdimm_info->static_region_mutex);
 }
 
 
 
 
-void make_dynamic_indirection_queue(unsigned char * dynamic_start_pointer, uint64_t dynamic_ipl_per_page_size, uint dynamic_ipl_max_page_count){
-  mutex_enter(&nvdimm_info->dynamic_region_mutex);
-  for(uint i = 1; i <= dynamic_ipl_max_page_count; i++){
-    dynamic_ipl_queue.push(i);
+void make_dynamic_indirection_queue(buf_pool_t * buf_pool){
+  uint start_index = nvdimm_info->dynamic_ipl_page_number_per_buf_pool * buf_pool->instance_no;
+  uint end_index = start_index + nvdimm_info->dynamic_ipl_page_number_per_buf_pool;
+  mutex_enter(&buf_pool->dynamic_allocator_mutex);
+  for (uint i = start_index + 1; i <= end_index; i++){
+    buf_pool->dynamic_ipl_allocator->push(i);
   }
-  fprintf(stderr, "dynamic_ipl_queue size : %d\n", dynamic_ipl_queue.size());
-  mutex_exit(&nvdimm_info->dynamic_region_mutex);
+  mutex_exit(&buf_pool->dynamic_allocator_mutex);
+  fprintf(stderr, "buf_pool %lu dynamic allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->dynamic_ipl_allocator->size(), start_index, end_index);
 }
 
 
-unsigned char * alloc_dynamic_address_from_indirection_queue(){
-  mutex_enter(&nvdimm_info->dynamic_region_mutex);
-  if(dynamic_ipl_queue.empty()){
+unsigned char * alloc_dynamic_address_from_indirection_queue(buf_pool_t * buf_pool){
+  mutex_enter(&buf_pool->dynamic_allocator_mutex);
+  if(buf_pool->dynamic_ipl_allocator->empty()){
       // fprintf(stderr, "Error : dynamic_ipl_queue is empty\n");
-      mutex_exit(&nvdimm_info->dynamic_region_mutex);
+      mutex_exit(&buf_pool->dynamic_allocator_mutex);
       return NULL;
   }
-  unsigned char * ret_address = get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, dynamic_ipl_queue.front(), nvdimm_info->dynamic_ipl_per_page_size);
-  dynamic_ipl_queue.pop();
-  fprintf(stderr, "dynamic_ipl usage: %d\n", nvdimm_info->dynamic_ipl_max_page_count - dynamic_ipl_queue.size());
-  mutex_exit(&nvdimm_info->dynamic_region_mutex);
+  unsigned char * ret_address = get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, buf_pool->dynamic_ipl_allocator->front(), nvdimm_info->dynamic_ipl_per_page_size);
+  buf_pool->dynamic_ipl_allocator->pop();
+  mutex_exit(&buf_pool->dynamic_allocator_mutex);
+  // fprintf(stderr, "buf_pool %lu dynamic allocator_usage: %u\n", buf_pool->instance_no, nvdimm_info->dynamic_ipl_page_number_per_buf_pool - buf_pool->dynamic_ipl_allocator->size());
   return ret_address;
 }
 
-void free_dynamic_address_to_indirection_queue(unsigned char * addr){
+void free_dynamic_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr){
   if(addr == NULL){
       // fprintf(stderr, "free_dynamic_address_to_indirection_queue Error : addr is NULL\n");
       return;
   }
-  mutex_enter(&nvdimm_info->dynamic_region_mutex);
   memset(addr, 0x00, nvdimm_info->dynamic_ipl_per_page_size);
   flush_cache(addr, nvdimm_info->dynamic_ipl_per_page_size);
+  mutex_enter(&buf_pool->dynamic_allocator_mutex);
+  buf_pool->dynamic_ipl_allocator->push(get_ipl_index_from_addr(nvdimm_info->dynamic_start_pointer, addr, nvdimm_info->dynamic_ipl_per_page_size));
+  mutex_exit(&buf_pool->dynamic_allocator_mutex);
   // fprintf(stderr, "free dyanmic_address : %p\n", addr);
-  dynamic_ipl_queue.push(get_ipl_index_from_addr(nvdimm_info->dynamic_start_pointer, addr, nvdimm_info->dynamic_ipl_per_page_size));
-  mutex_exit(&nvdimm_info->dynamic_region_mutex);
 }
 
 //ipl index를 통해 해당 ipl의 주소를 찾아준다.
