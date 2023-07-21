@@ -185,9 +185,6 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 	if (real_size == 0) return true;
 
 	if(apply_info->dynamic_start_pointer == NULL){
-		ib::info() << "real_ipl_size: " << real_size << "::" 
-							<< apply_info->space_id << "," << apply_info->page_no;
-
 		apply_log_buffer = (byte *)calloc(nvdimm_info->static_ipl_per_page_size, sizeof(char));
 		memcpy(apply_log_buffer
 					, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE
