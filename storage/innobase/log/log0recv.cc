@@ -2409,6 +2409,11 @@ recv_recover_page_func(
 
 	page_newest_lsn = buf_page_get_newest_modification(&block->page);
 
+  // (jhpark):debug
+  if (block->page.id.space() == 30 && block->page.id.page_no() == 2633) {
+    fprintf(stderr, "debug !!! hey 30:2633 page_lsn : %lu newest_lsn %lu \n", page_lsn, page_newest_lsn);
+  }
+
 	if (page_newest_lsn) {
 
 		page_lsn = page_newest_lsn;
@@ -2434,6 +2439,12 @@ recv_recover_page_func(
 
 	while (recv) {
 		end_lsn = recv->end_lsn;
+
+    // (jhpark):debug
+    if (block->page.id.space() == 30 && block->page.id.page_no() == 2633) {
+      fprintf(stderr, "end_lsn: %lu start_lsn: %lu\n", end_lsn, start_lsn);
+    }
+
 
 		ut_ad(end_lsn
 		      <= UT_LIST_GET_FIRST(log_sys->log_groups)->scanned_lsn);

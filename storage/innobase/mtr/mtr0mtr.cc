@@ -1121,7 +1121,10 @@ mtr_t::Command::finish_write(
 		test_type test;
 		test.init(m_impl->m_log.size());
 		m_impl->m_log.for_each_block(test);
-		my_recv_parse_log_recs(test.buffer, test.log_size);
+		// (jhpark): recvoery
+		if (!nvdimm_recv_running) {
+			my_recv_parse_log_recs(test.buffer, test.log_size);
+		}
 		test.free_mem();
 	#endif
 

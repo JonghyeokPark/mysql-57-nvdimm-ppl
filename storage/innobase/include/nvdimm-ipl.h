@@ -98,7 +98,8 @@ void nvdimm_free(const uint64_t pool_size);
 #define PAGE_NO_OFFSET 4UL
 #define DYNAMIC_ADDRESS_OFFSET 8UL
 // TODO(jhpark): for recovery test; original: 12UL
-#define IPL_LOG_HEADER_SIZE 18UL
+// space (4) | page_no (4) | dynamic offset (4) | length (4) | counter (4) | LSN (4)
+#define IPL_LOG_HEADER_SIZE 24UL
 #define APPLY_LOG_HDR_SIZE 3UL
 
 enum ipl_flag {
@@ -215,8 +216,13 @@ typedef enum {
 void recv_ipl_parse_log();
 void recv_ipl_map_print();
 void recv_ipl_apply(buf_block_t* block);
-void recv_ipl_set_flush_bit(unsigned char* ipl_ptr);
-ulint recv_ipl_get_flush_bit(unsigned char* ipl_ptr);
+void recv_ipl_set_wp(unsigned char* ipl_ptr, uint32_t diff);
+ulint recv_ipl_get_wp(unsigned char* ipl_ptr);
+void recv_ipl_set_lsn(unsigned char* ipl_ptr, uint32_t lsn);
+ulint recv_ipl_get_lsn(unsigned char* ipl_ptr);
+
+bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr, ulint real_size, ulint page_lsn);
+void recv_ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t * temp_mtr, ulint real_size);
 
 RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
 extern std::tr1::unordered_map<page_id_t, std::vector<uint64_t> > ipl_recv_map;

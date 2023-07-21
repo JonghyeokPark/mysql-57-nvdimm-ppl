@@ -46,7 +46,7 @@ void recv_ipl_parse_log() {
 		page_no = mach_read_from_4(hdr + 4);
 		dynamic_addr = mach_read_from_4(hdr + 8);
 
-		fprintf(stderr, "%lu,%lu dynamic_addr: %lu\n", space_no, page_no, dynamic_addr);
+		//fprintf(stderr, "%lu,%lu dynamic_addr: %lu\n", space_no, page_no, dynamic_addr);
 
 		ipl_recv_map[page_id_t(space_no, page_no)].push_back(i);
 
@@ -80,36 +80,36 @@ RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id) {
 		++vit;
 		if (vit == recv_iter->second.end()) {
 			// this page is IPLized page return address
-			ib::info() << "Static IPL page " << page_id.space() << ":" << page_id.page_no() << " need to apply"; 
+//			ib::info() << "Static IPL page " << page_id.space() << ":" << page_id.page_no() << " need to apply"; 
 			return STATIC;
 		}
 			// this page is IPLized page return address
-			ib::info() << "Dynamic IPL page " << page_id.space()  << ":" << page_id.page_no() << " need to apply"; 
+//			ib::info() << "Dynamic IPL page " << page_id.space()  << ":" << page_id.page_no() << " need to apply"; 
 	
 		return DYNAMIC;
 	}
 
-	ib::info() << "Normal page " << page_id.space() << ":" << page_id.page_no() << " need to apply"; 
+	//ib::info() << "Normal page " << page_id.space() << ":" << page_id.page_no() << " need to apply"; 
 
 	return NORMAL;
 }
 
 // TODO(jhpark): integrate the `set_apply_info_and_log_apply` function
+// For dynamic address list, now we leave the list data structure in IPL map
 void recv_ipl_apply(buf_block_t* block) {
 	// step1. get the apply info
 	apply_log_info apply_info;
 	std::tr1::unordered_map<page_id_t, std::vector<uint64_t> >::iterator recv_iter;
 	recv_iter = ipl_recv_map.find(block->page.id);
+	ulint real_size, page_lsn;
 	
 	if (recv_iter != ipl_recv_map.end()) {
 		std::vector<uint64_t>::iterator vit = recv_iter->second.begin();
 		apply_info.static_start_pointer = nvdimm_recv_ptr + *vit;
-		// check apply or not
-		if (recv_ipl_get_flush_bit(nvdimm_recv_ptr + *vit) != 1) {
-			ib::info() << block->page.id.space() << ":" << block->page.id.page_no() 
-								<< " is not flushed, ignore it!";
-			return;
-		}
+
+		real_size = recv_ipl_get_wp(nvdimm_recv_ptr + *vit);
+		page_lsn = recv_ipl_get_lsn(nvdimm_recv_ptr + *vit);
+
 		++vit;	
 		if (vit == recv_iter->second.end()) {
 			apply_info.dynamic_start_pointer = 0;	
@@ -139,30 +139,126 @@ void recv_ipl_apply(buf_block_t* block) {
 		mtr_t temp_mtr;
 		mtr_start(&temp_mtr);
 		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-		if (!copy_log_to_mem_to_apply(&apply_info, &temp_mtr)) {
+
+		if (!recv_copy_log_to_mem_to_apply(&apply_info, &temp_mtr, real_size, page_lsn)) {
 			ib::info() << "IPL apply error " << block->page.id.space() 
 							<< ":" << block->page.id.page_no();
 		} else {
+#ifdef UNIV_IPL_DEBUG
 			ib::info() << "IPL apply success! " << block->page.id.space() 
 							<< ":" << block->page.id.page_no();
+#endif 
 		}
 
 		// step3. remove IPL log from recv_ipl_map
 		ipl_recv_map.erase(block->page.id);
+#ifdef UNIV_IPL_DEBUG
 		ib::info() << block->page.id.space() << ":" << block->page.id.page_no() 
 							<< " is erased";
 		recv_iter = ipl_recv_map.find(block->page.id);
 		if (recv_iter == ipl_recv_map.end()) {
 			ib::info() << "confirm!";
 		}
+#endif
 	}
 }
 
-void recv_ipl_set_flush_bit(unsigned char* ipl_ptr) {
-	mach_write_to_2(ipl_ptr + (IPL_LOG_HEADER_SIZE-2), 1);
+// TODO(jhpark): fix the IPL log header offset; plz double check!!!
+void recv_ipl_set_wp(unsigned char* ipl_ptr, uint32_t diff) {
+	mach_write_to_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-8), diff);
 }
 
-ulint recv_ipl_get_flush_bit(unsigned char* ipl_ptr) {
-	return mach_read_from_2(ipl_ptr + (IPL_LOG_HEADER_SIZE-2));
+ulint recv_ipl_get_wp(unsigned char* ipl_ptr) {
+	return mach_read_from_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-8));
+}
+
+void recv_ipl_set_lsn(unsigned char* ipl_ptr, uint32_t lsn) {
+	mach_write_to_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-4), lsn);
+}
+
+ulint recv_ipl_get_lsn(unsigned char* ipl_ptr) {
+	return mach_read_from_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-4));
+}
+
+bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr, ulint real_size, ulint page_lsn) {
+	byte * apply_log_buffer;
+	if (real_size == 0) return true;
+
+	if(apply_info->dynamic_start_pointer == NULL){
+		ib::info() << "real_ipl_size: " << real_size << "::" 
+							<< apply_info->space_id << "," << apply_info->page_no;
+
+		apply_log_buffer = (byte *)calloc(nvdimm_info->static_ipl_per_page_size, sizeof(char));
+		memcpy(apply_log_buffer
+					, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE
+					, real_size - IPL_LOG_HEADER_SIZE);
+					/* , nvdimm_info->static_ipl_page_size); */
+	} else {
+
+		ulint offset = 0;
+		ulint apply_buffer_size = nvdimm_info->static_ipl_per_page_size 
+															+ nvdimm_info->dynamic_ipl_per_page_size;
+		apply_log_buffer = (byte *)calloc(apply_buffer_size, sizeof(char));
+
+		// (jhpark) I do not know...
+		ulint actual_static = nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE;
+		ulint actual_dynamic = nvdimm_info->dynamic_ipl_per_page_size;
+		
+		if (real_size == 0) goto normal;
+
+		if (real_size < nvdimm_info->static_ipl_per_page_size) {
+			ib::info() << "This phase, we copy within the static IPL pages";
+			actual_static = real_size;
+		} else {
+			ib::info() << "This phase, we copy beyond the static IPL pages";
+			actual_dynamic = real_size;
+		}		
+
+normal:
+		memcpy(apply_log_buffer + offset
+					, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE
+					, actual_static);
+
+		offset += nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE;
+		memcpy(apply_log_buffer + offset
+						, apply_info->dynamic_start_pointer
+						, actual_dynamic);
+	}
+
+	recv_ipl_log_apply(apply_log_buffer, apply_info, temp_mtr, real_size);
+	
+	// set lsn 
+	mach_write_to_8(apply_info->block->frame + FIL_PAGE_LSN, page_lsn);
+	free(apply_log_buffer);
+	return true;
+}
+
+void recv_ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t * temp_mtr, ulint real_size){
+  byte * start_ptr = apply_log_buffer;
+  byte * end_ptr = (apply_info->dynamic_start_pointer == NULL) ? apply_log_buffer + real_size : apply_log_buffer + nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
+
+  ulint now_len = 0;
+  while (start_ptr < end_ptr) {
+    // log_hdr를 가져와서 저장
+    mlog_id_t log_type = mlog_id_t(mach_read_from_1(start_ptr));
+    start_ptr += 1;
+    ulint body_len = mach_read_from_2(start_ptr);
+    start_ptr += 2;
+    if(log_type == 0 && body_len == 0){
+      now_len = start_ptr - apply_log_buffer - 3;
+      goto apply_end;
+    }
+    // fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",apply_info->space_id, apply_info->page_no, log_type, body_len);
+
+    //log apply 진행 후, recovery 시작 위치 이동.
+    recv_parse_or_apply_log_rec_body(log_type, start_ptr, start_ptr + body_len, apply_info->space_id, apply_info->page_no, apply_info->block, temp_mtr);
+    start_ptr += body_len;
+  }
+  now_len = start_ptr - apply_log_buffer;
+apply_end:
+  now_len += IPL_LOG_HEADER_SIZE;
+  apply_info->block->page.ipl_write_pointer = apply_info->block->page.static_ipl_pointer + now_len;
+  temp_mtr->discard_modifications();
+  mtr_commit(temp_mtr);
 }
 

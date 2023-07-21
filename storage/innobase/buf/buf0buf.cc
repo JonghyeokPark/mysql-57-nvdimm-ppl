@@ -5681,6 +5681,7 @@ buf_page_io_complete(
 
 				buf_pool->n_pend_unzip--;
 				compressed_page = false;
+        ib::info() << "here (1)";
 				goto corrupt;
 			}
 			buf_pool->n_pend_unzip--;
@@ -5814,6 +5815,9 @@ corrupt:
 		if (recv_recovery_is_on()) {
 			/* Pages must be uncompressed for crash recovery. */
 			ut_a(uncompressed);
+			if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+				recv_ipl_apply((buf_block_t*)bpage);
+			}
 			recv_recover_page(TRUE, (buf_block_t*) bpage);
 		}
 
@@ -5865,7 +5869,11 @@ corrupt:
 	
 		// (jhpark): recovery
 		if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+			mtr_t temp_mtr;
+			mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+			mtr_start(&temp_mtr);
 			recv_ipl_apply((buf_block_t*)bpage);				
+			mtr_commit(&temp_mtr);
 		}
 	
 		if (!nvdimm_recv_running && get_flag(&(bpage->flags), IPLIZED)){
@@ -5891,9 +5899,18 @@ corrupt:
 		/* Write means a flush operation: call the completion
 		routine in the flush system */
 
+		// (jhpark): recvoery debug
+		if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+			ib::info() << "current page is iplized but write first! " << bpage->id.space() << ":" << bpage->id.page_no();
+			recv_ipl_apply((buf_block_t*)bpage);
+		}
+
 		buf_flush_write_complete(bpage);
+
 		//여기서 normalize page 실행
-		check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
+		if (!nvdimm_recv_running) {
+			check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
+		}
 
 		if (uncompressed) {
 			rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,

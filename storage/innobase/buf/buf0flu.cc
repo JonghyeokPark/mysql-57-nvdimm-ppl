@@ -1117,13 +1117,27 @@ buf_flush_write_block_low(
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage) == DB_SUCCESS)
 		{
-			// TODO(jhpark): for recvoery test; flush skip
+			// TODO(jhpark): naiive IPLization recovery process
+			// for IPLized pages, it's important to determine whether the page has been flushed or not
 			// step1. get current ipl pointer;
-			// step2. set flush flag;
+			// step2. get page lsn;
 			if ( !nvdimm_recv_running && bpage->static_ipl_pointer) {
-				recv_ipl_set_flush_bit(bpage->static_ipl_pointer);
-				fprintf(stderr, "ipl page set flush bit: %ld\n"
-						, recv_ipl_get_flush_bit(bpage->static_ipl_pointer));
+				// (set lsn here)
+				recv_ipl_set_lsn(bpage->static_ipl_pointer
+						, bpage->newest_modification);
+
+//				fprintf(stderr, "ipl store page_lsn %lu newest_lsn %lu (%u:%u)\n"
+//					, mach_read_from_4(((buf_block_t*)bpage)->frame + FIL_PAGE_LSN)
+//					, bpage->newest_modification
+//					, bpage->id.space(), bpage->id.page_no());
+
+				// (set counter here)
+				recv_ipl_set_wp(bpage->static_ipl_pointer
+					, get_ipl_length_from_write_pointer(bpage));
+
+//				fprintf(stderr, "ipl store write pointer %lu (%u:%u)\n"
+//					, get_ipl_length_from_write_pointer(bpage), bpage->id.space(), bpage->id.page_no());
+			
 			}
 			// -- 
 

@@ -2505,3 +2505,4 @@ my.cnf
 my-nvdimm.cnf
 
 START.sh
+*.swo

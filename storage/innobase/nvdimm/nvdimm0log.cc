@@ -43,12 +43,15 @@ void alloc_static_ipl_to_bpage(buf_page_t * bpage){
   // length;
 	mach_write_to_4(static_ipl_pointer + offset, 0);
 	flush_cache(static_ipl_pointer + offset, 4);
-  // flushed?
-	mach_write_to_2(static_ipl_pointer + offset, 0);
-	flush_cache(static_ipl_pointer + offset, 4);
-
 	offset += 4;
-
+	// counter 
+	mach_write_to_4(static_ipl_pointer + offset, 0);
+	flush_cache(static_ipl_pointer + offset, 4);
+	offset += 4;
+	// LSN
+	mach_write_to_4(static_ipl_pointer + offset, 0);
+	flush_cache(static_ipl_pointer + offset, 4);
+	offset += 4;
 
 	bpage->static_ipl_pointer = static_ipl_pointer;
 	bpage->ipl_write_pointer = static_ipl_pointer + IPL_LOG_HEADER_SIZE;
@@ -147,8 +150,12 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 	// fprintf(stderr, "write_ipl_log_header_and_body (%u, %u) static_ipl: %p now_write_pointer: %p, dynamic_ipl_index: %u\n", bpage->id.space(), bpage->id.page_no(),bpage->static_ipl_pointer ,bpage->ipl_write_pointer, get_dynamic_ipl_pointer(bpage));
 	//한 페이지당 사용할 static 영역이 다 찬 경우.
 	if(remain_len > 0){
+    // (jhpark): for now ignore dynamic allocation !!!
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
-			if(!alloc_dynamic_ipl_region(bpage)){
+      // -- original
+      if (true) {
+			//if(!alloc_dynamic_ipl_region(bpage)){
+      // -- original
 				//Dynamic 영역을 할당 받을 수 없는 경우, page를 flush하고 새로 할당받기
 				set_flag(&(bpage->flags), NORMALIZE);
 				free(write_ipl_log_buffer);
@@ -197,7 +204,10 @@ bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 		// bpage->id.space(), bpage->id.page_no(),bpage->static_ipl_pointer ,bpage->ipl_write_pointer, get_dynamic_ipl_pointer(bpage), get_ipl_length_from_write_pointer(bpage));
 	}
 	
-  	mtr_commit(&temp_mtr);
+  mtr_commit(&temp_mtr);
+
+	// (jhpark): ipl add here!
+
 	return return_value;
 }
 
@@ -233,7 +243,8 @@ bool copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 
 void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t * temp_mtr){
 	byte * start_ptr = apply_log_buffer;
-	byte * end_ptr = apply_info->dynamic_start_pointer == NULL ? apply_log_buffer + nvdimm_info->static_ipl_per_page_size : apply_log_buffer + nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
+	byte * end_ptr = (apply_info->dynamic_start_pointer == NULL) ? apply_log_buffer + nvdimm_info->static_ipl_per_page_size : apply_log_buffer + nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
+
 	ulint now_len = 0;
 	while (start_ptr < end_ptr) {
 		// log_hdr를 가져와서 저장

@@ -20,6 +20,6 @@ rm -rf /home/jhpark/test_log/mysql_error_nvdimm.log
 
 echo "Loading MySQL data finish"
 
-#echo 'my.cnf (nvdimm) working!'
+echo 'my.cnf (nvdimm) working!'
 #sudo ./bld/bin/mysqld --defaults-file=./my-nvdimm.cnf --disable-log-bin &>/dev/null &disown
 sudo gdb --args ./bld/bin/mysqld --defaults-file=./my-nvdimm.cnf --disable-log-bin

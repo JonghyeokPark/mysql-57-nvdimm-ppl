@@ -112,7 +112,7 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 		// TODO(jhpark): optimize
 		nvdimm_recv_running = true;
 		recv_ipl_parse_log();
-		recv_ipl_map_print();
+		//recv_ipl_map_print();
 	}
 
 	// Force to set NVIMMM
