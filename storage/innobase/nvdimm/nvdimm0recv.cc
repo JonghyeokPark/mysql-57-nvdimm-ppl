@@ -151,38 +151,50 @@ void recv_ipl_apply(buf_block_t* block) {
 		}
 
 		// step3. remove IPL log from recv_ipl_map
-		ipl_recv_map.erase(block->page.id);
+		//ipl_recv_map.erase(block->page.id);
 #ifdef UNIV_IPL_DEBUG
+/*
 		ib::info() << block->page.id.space() << ":" << block->page.id.page_no() 
 							<< " is erased";
 		recv_iter = ipl_recv_map.find(block->page.id);
 		if (recv_iter == ipl_recv_map.end()) {
 			ib::info() << "confirm!";
 		}
+*/
 #endif
 	}
 }
 
 // TODO(jhpark): fix the IPL log header offset; plz double check!!!
 void recv_ipl_set_wp(unsigned char* ipl_ptr, uint32_t diff) {
-	mach_write_to_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-8), diff);
+	mach_write_to_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-12), diff);
 }
 
 ulint recv_ipl_get_wp(unsigned char* ipl_ptr) {
-	return mach_read_from_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-8));
+	return mach_read_from_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-12));
 }
 
-void recv_ipl_set_lsn(unsigned char* ipl_ptr, uint32_t lsn) {
-	mach_write_to_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-4), lsn);
+void recv_ipl_set_lsn(unsigned char* ipl_ptr, lsn_t lsn) {
+	mach_write_to_8(ipl_ptr + (IPL_LOG_HEADER_SIZE-8), lsn);
 }
 
-ulint recv_ipl_get_lsn(unsigned char* ipl_ptr) {
-	return mach_read_from_4(ipl_ptr + (IPL_LOG_HEADER_SIZE-4));
+lsn_t recv_ipl_get_lsn(unsigned char* ipl_ptr) {
+	return mach_read_from_8(ipl_ptr + (IPL_LOG_HEADER_SIZE-8));
 }
 
-bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr, ulint real_size, ulint page_lsn) {
+bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr, ulint real_size, lsn_t page_lsn) {
 	byte * apply_log_buffer;
 	if (real_size == 0) return true;
+
+	// LSN check
+	ulint cur_page_lsn = mach_read_from_8(apply_info->block->frame + FIL_PAGE_LSN);
+	if (cur_page_lsn >= page_lsn) {
+#ifdef UNIV_NVDIMM_DEBUG
+		fprintf(stderr, "[debug] cur_page_lsn %lu page_lsn %lu (%lu:%lu)\n"
+									, cur_page_lsn, page_lsn, apply_info->space_id, apply_info->page_no);
+#endif
+		return true;
+	}
 
 	if(apply_info->dynamic_start_pointer == NULL){
 		apply_log_buffer = (byte *)calloc(nvdimm_info->static_ipl_per_page_size, sizeof(char));
@@ -197,7 +209,6 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 															+ nvdimm_info->dynamic_ipl_per_page_size;
 		apply_log_buffer = (byte *)calloc(apply_buffer_size, sizeof(char));
 
-		// (jhpark) I do not know...
 		ulint actual_static = nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE;
 		ulint actual_dynamic = nvdimm_info->dynamic_ipl_per_page_size;
 		
@@ -225,7 +236,11 @@ normal:
 	recv_ipl_log_apply(apply_log_buffer, apply_info, temp_mtr, real_size);
 	
 	// set lsn 
+  fprintf(stderr, "original page_lsn: %lu new: %lu (%lu:%lu)\n"
+                , mach_read_from_8(apply_info->block->frame + FIL_PAGE_LSN), page_lsn, apply_info->space_id, apply_info->page_no); 
+
 	mach_write_to_8(apply_info->block->frame + FIL_PAGE_LSN, page_lsn);
+
 	free(apply_log_buffer);
 	return true;
 }
@@ -259,3 +274,9 @@ apply_end:
   mtr_commit(temp_mtr);
 }
 
+void recv_clean_ipl_map() {
+	for (std::tr1::unordered_map<page_id_t, std::vector<uint64_t> >::iterator it = ipl_recv_map.begin(); it != ipl_recv_map.end(); ++it) {
+		ipl_recv_map.erase(it);
+	}	
+	ib::info() << "IPL mapping region is cleand!";
+}

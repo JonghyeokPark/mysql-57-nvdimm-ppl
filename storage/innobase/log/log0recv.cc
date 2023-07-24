@@ -2409,13 +2409,7 @@ recv_recover_page_func(
 
 	page_newest_lsn = buf_page_get_newest_modification(&block->page);
 
-  // (jhpark):debug
-  if (block->page.id.space() == 30 && block->page.id.page_no() == 2633) {
-    fprintf(stderr, "debug !!! hey 30:2633 page_lsn : %lu newest_lsn %lu \n", page_lsn, page_newest_lsn);
-  }
-
 	if (page_newest_lsn) {
-
 		page_lsn = page_newest_lsn;
 	}
 #else /* !UNIV_HOTBACKUP */
@@ -2439,13 +2433,6 @@ recv_recover_page_func(
 
 	while (recv) {
 		end_lsn = recv->end_lsn;
-
-    // (jhpark):debug
-    if (block->page.id.space() == 30 && block->page.id.page_no() == 2633) {
-      fprintf(stderr, "end_lsn: %lu start_lsn: %lu\n", end_lsn, start_lsn);
-    }
-
-
 		ut_ad(end_lsn
 		      <= UT_LIST_GET_FIRST(log_sys->log_groups)->scanned_lsn);
 
@@ -2727,9 +2714,17 @@ loop:
 					block = buf_page_get(
 						page_id, page_size,
 						RW_X_LATCH, &mtr);
-
+					
 					buf_block_dbg_add_level(
 						block, SYNC_NO_ORDER_CHECK);
+					
+					// (jhpark): this is rare case, 
+					// somehow, pages are fetched in the buffer pool 
+					// without applying using IPL log
+					if (nvdimm_recv_running 
+							&& recv_check_iplized(block->page.id) != NORMAL){
+						recv_ipl_apply(block);
+					}
 
 					recv_recover_page(FALSE, block);
 					mtr_commit(&mtr);

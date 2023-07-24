@@ -1123,21 +1123,27 @@ buf_flush_write_block_low(
 			// step2. get page lsn;
 			if ( !nvdimm_recv_running && bpage->static_ipl_pointer) {
 				// (set lsn here)
-				recv_ipl_set_lsn(bpage->static_ipl_pointer
-						, bpage->newest_modification);
+				lsn_t cur_page_lsn = mach_read_from_8(((buf_block_t*)bpage)->frame + FIL_PAGE_LSN);
 
-//				fprintf(stderr, "ipl store page_lsn %lu newest_lsn %lu (%u:%u)\n"
-//					, mach_read_from_4(((buf_block_t*)bpage)->frame + FIL_PAGE_LSN)
-//					, bpage->newest_modification
-//					, bpage->id.space(), bpage->id.page_no());
+				recv_ipl_set_lsn(bpage->static_ipl_pointer
+							, cur_page_lsn);
+
+#ifdef UNIV_IPL_DEBUG
+				fprintf(stderr, "ipl store page_lsn %lu newest_lsn %lu (%u:%u)\n"
+					, cur_page_lsn
+					, bpage->newest_modification
+					, bpage->id.space(), bpage->id.page_no());
+#endif
 
 				// (set counter here)
 				recv_ipl_set_wp(bpage->static_ipl_pointer
 					, get_ipl_length_from_write_pointer(bpage));
 
-//				fprintf(stderr, "ipl store write pointer %lu (%u:%u)\n"
-//					, get_ipl_length_from_write_pointer(bpage), bpage->id.space(), bpage->id.page_no());
-			
+#ifdef UNIV_IPL_DEBUG
+				fprintf(stderr, "ipl store write pointer %lu (%u:%u)\n"
+					, get_ipl_length_from_write_pointer(bpage), bpage->id.space(), bpage->id.page_no());
+#endif
+
 			}
 			// -- 
 

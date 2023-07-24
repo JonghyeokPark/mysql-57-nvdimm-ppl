@@ -2309,6 +2309,13 @@ files_checked:
 
 		recv_recovery_from_checkpoint_finish();
 
+		// (jhpark): now, we can toggle the recovery flag
+		// , and clean the IPL mapping region
+#ifdef UNIV_NVDIMM_IPL
+		nvdimm_recv_running = false;
+		recv_clean_ipl_map();
+#endif
+
 		/* Fix-up truncate of tables in the system tablespace
 		if server crashed while truncate was active. The non-
 		system tables are done after tablespace discovery. Do

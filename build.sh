@@ -1,9 +1,9 @@
 #!/bin/bash
 
-if [ $# -ne 2] 
+if [ $# -ne 2 ] 
 then
 	echo "usage: ./build.sh PASSWORD --ipl"
-	exit 1
+	exit 1;
 fi
 
 BASE_DIR=`pwd -P`
@@ -27,7 +27,7 @@ if [ "$2" = "--origin" ]; then
   BUILD_FLAGS=""
 elif [ "$2" = "--ipl" ]; then
   # Enable Flash-Friendly Checkpoint
-  BUILD_FLAGS="-DUNIV_NVDIMM_IPL"
+  BUILD_FLAGS="-DUNIV_NVDIMM_IPL -DUNIV_IPL_DEBUG"
 else
   BUILD_FLAGS="-DUNIV_NVDIMM_IPL"
 fi

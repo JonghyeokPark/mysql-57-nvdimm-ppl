@@ -5901,11 +5901,13 @@ corrupt:
 
 		// (jhpark): recvoery debug
 		if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
-			ib::info() << "current page is iplized but write first! " << bpage->id.space() << ":" << bpage->id.page_no();
 			recv_ipl_apply((buf_block_t*)bpage);
 		}
 
 		buf_flush_write_complete(bpage);
+
+		// (jhpark): 만약 여기서, 충돌이 발생한다면? 
+		// IPL 로그는 아직 있고, flush는 된 상태임.
 
 		//여기서 normalize page 실행
 		if (!nvdimm_recv_running) {
