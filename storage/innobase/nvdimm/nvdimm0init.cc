@@ -26,7 +26,7 @@ nvdimm_system * nvdimm_info = NULL;
 
 bool make_static_and_dynamic_ipl_region(){ //여기서 static 크기 바꿔주면 STATIC_MAX_SIZE 바꿔줘야함.
   nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
-  nvdimm_info->static_ipl_size = (1024UL + 824) * 1024UL * 1024UL; // static ipl size : 1,8GB
+  nvdimm_info->static_ipl_size = (1024UL + 824) * 1024UL * 1024UL; // stastic ipl size : 1,8GB
   nvdimm_info->dynamic_ipl_size = 200 * 1024 * 1024; // dynamic ipl size : 0.2GB
 
   nvdimm_info->static_ipl_per_page_size = 1024; // per page static size : 1KB
@@ -40,13 +40,13 @@ bool make_static_and_dynamic_ipl_region(){ //여기서 static 크기 바꿔주�
 
   nvdimm_info->static_start_pointer = nvdimm_ptr;
   nvdimm_info->dynamic_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_per_page_size * nvdimm_info->static_ipl_max_page_count ;
+	nvdimm_info->old_page = NULL;
   fprintf(stderr, "static start pointer : %p, dynamic start pointer : %p\n", nvdimm_info->static_start_pointer, nvdimm_info->dynamic_start_pointer);
-  make_static_indirection_queue(nvdimm_info->static_start_pointer, nvdimm_info->static_ipl_per_page_size, nvdimm_info->static_ipl_max_page_count);
-  make_dynamic_indirection_queue(nvdimm_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_per_page_size, nvdimm_info->dynamic_ipl_max_page_count);
-
   mutex_create(LATCH_ID_STATIC_REGION, &nvdimm_info->static_region_mutex);
   mutex_create(LATCH_ID_DYNAMIC_REGION, &nvdimm_info->dynamic_region_mutex);
   mutex_create(LATCH_ID_IPL_MAP_MUTEX, &nvdimm_info->ipl_map_mutex);
+  make_static_indirection_queue(nvdimm_info->static_start_pointer, nvdimm_info->static_ipl_per_page_size, nvdimm_info->static_ipl_max_page_count);
+  make_dynamic_indirection_queue(nvdimm_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_per_page_size, nvdimm_info->dynamic_ipl_max_page_count);
   return true;
 }
 

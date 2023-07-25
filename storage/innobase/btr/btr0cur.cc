@@ -3862,16 +3862,22 @@ btr_cur_update_in_place(
 		rec = btr_cur_get_rec(cursor);
 	}
 
-	/* Do lock checking and undo logging */
-	err = btr_cur_upd_lock_and_undo(flags, cursor, offsets,
-					update, cmpl_info,
-					thr, mtr, &roll_ptr);
-	if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
-		/* We may need to update the IBUF_BITMAP_FREE
-		bits after a reorganize that was done in
-		btr_cur_update_alloc_zip(). */
-		goto func_exit;
-	}
+	/* lbh if llt space id, donot leave undo log*/
+	// if(dict_index_get_space(index) != llt_space_id){
+
+		/* Do lock checking and undo logging */
+		err = btr_cur_upd_lock_and_undo(flags, cursor, offsets,
+						update, cmpl_info,
+						thr, mtr, &roll_ptr);
+		if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+			/* We may need to update the IBUF_BITMAP_FREE
+			bits after a reorganize that was done in
+			btr_cur_update_alloc_zip(). */
+			goto func_exit;
+		}
+	// }
+	/* end */
+
 
 	if (!(flags & BTR_KEEP_SYS_FLAG)
 	    && !dict_table_is_intrinsic(index->table)) {

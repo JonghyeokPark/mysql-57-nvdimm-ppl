@@ -129,6 +129,7 @@ typedef struct NVDIMM_SYSTEM
   uint64_t dynamic_ipl_per_page_size;
   uint dynamic_ipl_count;
   uint64_t dynamic_ipl_max_page_count;
+  byte* old_page;
 }nvdimm_system;
 
 typedef struct APPLY_LOG_INFO
@@ -138,7 +139,7 @@ typedef struct APPLY_LOG_INFO
   ulint space_id;
   ulint page_no;
   buf_block_t * block;
-
+  
 }apply_log_info;
 
 namespace std {
@@ -214,6 +215,7 @@ nvdimm_build_prev_vers_with_redo(
 	buf_page_t* bpage );
 
 /* end */
+
 
 #ifdef UNIV_NVDIMM_IPL
 unsigned char* 

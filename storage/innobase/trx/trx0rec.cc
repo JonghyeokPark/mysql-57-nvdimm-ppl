@@ -2174,6 +2174,10 @@ trx_undo_get_undo_rec(
 #define ATTRIB_USED_ONLY_IN_DEBUG	MY_ATTRIBUTE((unused))
 #endif /* UNIV_DEBUG */
 
+// /* lbh */
+
+// ipl_check_undo_page_buffer_miss()
+
 /*******************************************************************//**
 Build a previous version of a clustered index record. The caller must
 hold a latch on the index page of the clustered index record.
@@ -2249,10 +2253,12 @@ trx_undo_prev_version_build(
 	For temporary objects NON-REDO rollback segments are used. */
 	bool is_redo_rseg =
 		dict_table_is_temporary(index->table) ? false : true;
+
 	if (trx_undo_get_undo_rec(
 		roll_ptr, rec_trx_id, heap, is_redo_rseg,
 		index->table->name, &undo_rec)) {
 		if (v_status & TRX_UNDO_PREV_IN_PURGE) {
+			
 			/* We are fetching the record being purged */
 			undo_rec = trx_undo_get_undo_rec_low(
 				roll_ptr, heap, is_redo_rseg);

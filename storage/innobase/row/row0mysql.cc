@@ -813,6 +813,8 @@ handle_new_error:
 			<< FK_MAX_CASCADE_DEL << ". Please drop excessive"
 			" foreign constraints and try again";
 		break;
+	// case DB_UNDO_BUFFER_MISS:
+	// 	break;
 	default:
 		ib::fatal() << "Unknown error code " << err << ": "
 			<< ut_strerr(err);

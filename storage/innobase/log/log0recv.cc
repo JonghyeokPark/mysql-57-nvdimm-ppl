@@ -4412,7 +4412,7 @@ nvdimm_recv_parse_or_apply_log_rec_body(
 	trx_id_t ret_trx_id = prev_trx_id;
 	buf_block_t* block = NULL;
 
-	fprintf(stderr, "for mvcc: log_type: %d\n", type);
+	//fprintf(stderr, "for mvcc: log_type: %d\n", type);
 
 	switch (type) {
 	case MLOG_MULTI_REC_END:

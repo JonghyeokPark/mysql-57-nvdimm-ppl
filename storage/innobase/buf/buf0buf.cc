@@ -5901,6 +5901,7 @@ corrupt:
 
 		buf_flush_write_complete(bpage);
 		//여기서 normalize page 실행
+		/* lbh */
 		check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
 
 		if (uncompressed) {

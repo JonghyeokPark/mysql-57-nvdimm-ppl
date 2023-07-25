@@ -187,10 +187,12 @@ enum dberr_t {
 	DB_DATA_MISMATCH = 2000,	/*!< Column update or read failed
 					because the types mismatch */
 
-	DB_SCHEMA_NOT_LOCKED		/*!< If an API function expects the
+	DB_SCHEMA_NOT_LOCKED,		/*!< If an API function expects the
 					schema to be locked in exclusive mode
 					and if it's not then that API function
 					will return this error code */
+	/* lbh */
+	// DB_UNDO_BUFFER_MISS = 7988
 
 };
 
