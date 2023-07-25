@@ -73,9 +73,6 @@ Created 11/5/1995 Heikki Tuuri
 #include <map>
 #include <sstream>
 
-#include <time.h>
-#include <sys/time.h>
-
 my_bool  srv_numa_interleave = FALSE;
 
 #ifdef HAVE_LIBNUMA
