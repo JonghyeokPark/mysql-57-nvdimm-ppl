@@ -200,12 +200,17 @@ buf_read_page_low(
 
 
 	IORequest	request(type | IORequest::READ);
+	gettimeofday(&bpage->start, NULL);
 	*err = fil_io(
 		request, sync, page_id, page_size, 0, page_size.physical(),
 		dst, bpage);
 
 	if (sync) {
 		thd_wait_end(NULL);
+		gettimeofday(&bpage->end, NULL);
+		fprintf(stderr, "page_read_time,sync,%f\n",
+			(double) (bpage->end.tv_usec - bpage->start.tv_usec) / 1000000 +
+					(double) (bpage->end.tv_sec - bpage->start.tv_sec));
 	}
 
 	if (*err != DB_SUCCESS) {

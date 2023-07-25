@@ -293,14 +293,13 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p\n", page_id.space(), page_id.page_no(), bpage->static_ipl_pointer, get_dynamic_ipl_pointer(bpage));
 	// mutex_enter(&nvdimm_info->ipl_map_mutex);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	rw_lock_x_lock(&buf_pool->lookup_table_lock);
-	buf_pool->ipl_look_up_table->erase(page_id);
-	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
-	free_dynamic_address_to_indirection_queue(buf_pool_get(page_id), get_dynamic_ipl_pointer(bpage));
-	free_static_address_to_indirection_queue(buf_pool_get(page_id), bpage->static_ipl_pointer);
 	bpage->static_ipl_pointer = NULL;
 	bpage->ipl_write_pointer = NULL;
 	bpage->flags = 0;
+	rw_lock_x_lock(&buf_pool->lookup_table_lock);
+	buf_pool->ipl_look_up_table->erase(page_id);
+	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
+	
 }
 
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
@@ -359,25 +358,25 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 	return false;
 }
 
-void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
+bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
 	if(get_flag(&(bpage->flags), IPLIZED) == false){
-		return;
+		return false;
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
 			normalize_ipl_page(bpage, bpage->id);
-			return;
+			return true;
 		}
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
-			return;
+			return false;
 		}
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
-				return;
+				return false;
 			}
 			else{
 				normalize_ipl_page(bpage, bpage->id);
-				return;
+				return true;
 				
 			}
 
@@ -412,6 +411,7 @@ ulint get_ipl_length_from_write_pointer(buf_page_t * bpage){
 
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage){
 	// fprintf(stderr, "get_dynamic_ipl_pointer (%u, %u) static_ipl: %p now_write_pointer: %p\n", bpage->id.space(), bpage->id.page_no(),bpage->static_ipl_pointer ,bpage->ipl_write_pointer);
+	if(bpage->static_ipl_pointer == NULL) return NULL;
 	uint ipl_index = mach_read_from_4(bpage->static_ipl_pointer + DYNAMIC_ADDRESS_OFFSET);
 	// fprintf(stderr, "page_id: (%u, %u) dynamic ipl index: %u\n", bpage->id.space(), bpage->id.page_no(), ipl_index);
 	return get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, ipl_index, nvdimm_info->dynamic_ipl_per_page_size);

@@ -30,8 +30,8 @@ bool make_static_and_dynamic_ipl_region(ulint number_of_buf_pool){ //여기서 s
   nvdimm_info->static_ipl_size = (924) * 1024UL * 1024UL; // static ipl size : 1,8GB
   nvdimm_info->dynamic_ipl_size = 100 * 1024 * 1024; // dynamic ipl size : 0.2GB
 
-  nvdimm_info->static_ipl_per_page_size = 512; // per page static size : 1KB
-  nvdimm_info->dynamic_ipl_per_page_size = 1024 * 8; // per page dynamic size : 8KB
+  nvdimm_info->static_ipl_per_page_size = 128; // per page static size : 1KB
+  nvdimm_info->dynamic_ipl_per_page_size = 1024 * 2; // per page dynamic size : 8KB
 
   nvdimm_info->static_ipl_page_number_per_buf_pool = (nvdimm_info->static_ipl_size / nvdimm_info->static_ipl_per_page_size) / number_of_buf_pool; // 
   nvdimm_info->dynamic_ipl_page_number_per_buf_pool = (nvdimm_info->dynamic_ipl_size / nvdimm_info->dynamic_ipl_per_page_size) / number_of_buf_pool; // dynamic ipl max page count : 1M

@@ -153,7 +153,7 @@ bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
 bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush);
-void check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
+bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
 ulint get_ipl_length_from_write_pointer(buf_page_t * bpage);
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
 void set_flag(unsigned char * flags, ipl_flag flag);

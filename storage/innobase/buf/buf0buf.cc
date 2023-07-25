@@ -73,6 +73,9 @@ Created 11/5/1995 Heikki Tuuri
 #include <map>
 #include <sstream>
 
+#include <time.h>
+#include <sys/time.h>
+
 my_bool  srv_numa_interleave = FALSE;
 
 #ifdef HAVE_LIBNUMA
@@ -5880,6 +5883,11 @@ corrupt:
 
 	buf_page_set_io_fix(bpage, BUF_IO_NONE);
 	buf_page_monitor(bpage, io_type);
+	unsigned char * static_ipl_pointer;
+	unsigned char * dynamic_ipl_pointer;
+	bool return_ipl = false;
+	
+	
 
 	switch (io_type) {
 	case BUF_IO_READ:
@@ -5890,14 +5898,12 @@ corrupt:
 		ut_ad(buf_pool->n_pend_reads > 0);
 		buf_pool->n_pend_reads--;
 		buf_pool->stat.n_pages_read++;
+		//nvdimm
 		if (get_flag(&(bpage->flags), IPLIZED)){
 			//page를 완전히 가져오고 실행해보기
 			// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",bpage->id.space(), bpage->id.page_no(), bpage);
-			mtr_t temp_mtr;
-			mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-			mtr_start(&temp_mtr);
 			set_apply_info_and_log_apply((buf_block_t*) bpage);
-			mtr_commit(&temp_mtr);
+
 		}
 
 		if (uncompressed) {
@@ -5915,8 +5921,10 @@ corrupt:
 
 		buf_flush_write_complete(bpage);
 		//여기서 normalize page 실행
-		check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
-
+		static_ipl_pointer = bpage->static_ipl_pointer;
+		dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
+		return_ipl = check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
+		
 		if (uncompressed) {
 			rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
 					      BUF_IO_WRITE);
@@ -5954,6 +5962,10 @@ corrupt:
 			      bpage->id.space(), bpage->id.page_no()));
 
 	buf_pool_mutex_exit(buf_pool);
+	if(return_ipl){
+		free_dynamic_address_to_indirection_queue(buf_pool, dynamic_ipl_pointer);
+		free_static_address_to_indirection_queue(buf_pool, static_ipl_pointer);
+	}
 
 	return(true);
 }
