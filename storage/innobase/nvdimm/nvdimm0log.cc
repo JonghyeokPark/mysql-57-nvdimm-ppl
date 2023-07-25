@@ -153,8 +153,8 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
     // (jhpark): for now ignore dynamic allocation !!!
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
       // -- original
-      if (true) {
-			//if(!alloc_dynamic_ipl_region(bpage)){
+			// if(true) {
+			if(!alloc_dynamic_ipl_region(bpage)){
       // -- original
 				//Dynamic 영역을 할당 받을 수 없는 경우, page를 flush하고 새로 할당받기
 				set_flag(&(bpage->flags), NORMALIZE);

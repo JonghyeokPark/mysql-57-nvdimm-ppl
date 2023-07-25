@@ -201,7 +201,6 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 		memcpy(apply_log_buffer
 					, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE
 					, real_size - IPL_LOG_HEADER_SIZE);
-					/* , nvdimm_info->static_ipl_page_size); */
 	} else {
 
 		ulint offset = 0;
@@ -215,11 +214,28 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 		if (real_size == 0) goto normal;
 
 		if (real_size < nvdimm_info->static_ipl_per_page_size) {
-			ib::info() << "This phase, we copy within the static IPL pages";
-			actual_static = real_size;
+			actual_static = real_size - IPL_LOG_HEADER_SIZE;
+
+#ifdef UNIV_IPL_DEBUG
+			ib::info() << "This phase, we copy within the static IPL pages " << actual_static
+								<< " " << apply_info->space_id <<":" << apply_info->page_no;
+#endif
+
+			memcpy(apply_log_buffer + offset
+					, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE
+					, actual_static);
+
+			// invalidate dynamic ipl log region
+			apply_info->dynamic_start_pointer = NULL;
+			goto apply;
+		
 		} else {
-			ib::info() << "This phase, we copy beyond the static IPL pages";
-			actual_dynamic = real_size;
+			actual_dynamic = real_size - nvdimm_info->static_ipl_per_page_size;
+#ifdef UNIV_IPL_DEBUG
+			ib::info() << "This phase, we copy beyond the static IPL pages " << actual_dynamic
+								 << " " << apply_info->space_id <<":" << apply_info->page_no;
+#endif
+
 		}		
 
 normal:
@@ -233,11 +249,14 @@ normal:
 						, actual_dynamic);
 	}
 
+apply:
 	recv_ipl_log_apply(apply_log_buffer, apply_info, temp_mtr, real_size);
-	
-	// set lsn 
+
+#ifdef UNIV_IPL_DEBUG	
   fprintf(stderr, "original page_lsn: %lu new: %lu (%lu:%lu)\n"
-                , mach_read_from_8(apply_info->block->frame + FIL_PAGE_LSN), page_lsn, apply_info->space_id, apply_info->page_no); 
+                , mach_read_from_8(apply_info->block->frame + FIL_PAGE_LSN)
+								, page_lsn, apply_info->space_id, apply_info->page_no); 
+#endif
 
 	mach_write_to_8(apply_info->block->frame + FIL_PAGE_LSN, page_lsn);
 
