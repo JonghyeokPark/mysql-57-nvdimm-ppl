@@ -86,8 +86,12 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
   	}
 
   } else {
-  	// TODO(jhpark): recovery process! 
+  	// TODO(jhpark): recovery process!
 		NVDIMM_INFO_PRINT("IPL Recovery process start!\n");
+		if (srv_use_nvdimm_ipl_recovery) {
+			ib::info() << "We use IPLized recovery mode!";
+		}
+
 		nvdimm_fd = open(path, O_RDWR, 0777);
 
     if (nvdimm_fd < 0) {
