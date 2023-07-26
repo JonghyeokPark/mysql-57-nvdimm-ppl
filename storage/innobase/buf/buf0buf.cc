@@ -5897,10 +5897,16 @@ corrupt:
 		buf_pool->stat.n_pages_read++;
 		//nvdimm
 		if (get_flag(&(bpage->flags), IPLIZED)){
-			//page를 완전히 가져오고 실행해보기
+			buf_pool_mutex_exit(buf_pool);
 			// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",bpage->id.space(), bpage->id.page_no(), bpage);
 			set_apply_info_and_log_apply((buf_block_t*) bpage);
+			if (uncompressed) {
+				rw_lock_x_unlock_gen(&((buf_block_t*) bpage)->lock,
+							BUF_IO_READ);
+			}
 
+			mutex_exit(buf_page_get_mutex(bpage));
+			return(true);
 		}
 
 		if (uncompressed) {
