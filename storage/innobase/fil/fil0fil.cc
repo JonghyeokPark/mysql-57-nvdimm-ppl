@@ -5368,39 +5368,6 @@ fil_node_prepare_for_io(
 
 	return(true);
 }
-//ipl log 전용 함수
-static
-void
-fil_node_complete_io_for_ipl_log(
-/*=================*/
-	fil_node_t*	node,	/*!< in: file node */
-	fil_system_t*	system,	/*!< in: tablespace memory cache */
-	const IORequest&type)	/*!< in: IO_TYPE_*, marks the node as
-				modified if TYPE_IS_WRITE() */
-{ // Point!!!! write, read 과정 봐보기.
-	ut_ad(mutex_own(&system->mutex));
-	ut_a(node->n_pending > 0);
-
-	--node->n_pending;
-
-	ut_ad(type.validate());
-
-	if (type.is_write()) {
-
-		ut_ad(!srv_read_only_mode
-		      || fsp_is_system_temporary(node->space->id));
-
-		++system->modification_counter;
-
-		node->modification_counter = system->modification_counter;
-	}
-
-	if (node->n_pending == 0 && fil_space_belongs_in_lru(node->space)) {
-
-		/* The node must be put back to the LRU list */
-		UT_LIST_ADD_FIRST(system->LRU, node);
-	}
-}
 /********************************************************************//**
 Updates the data structures when an i/o operation finishes. Updates the
 pending i/o's field in the node appropriately. */

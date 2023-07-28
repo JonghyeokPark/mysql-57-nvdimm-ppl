@@ -557,6 +557,7 @@ struct mtr_t {
 	{
 		++m_impl.m_n_log_recs;
 	}
+	
 
 	/** Get the buffered redo log of this mini-transaction.
 	@return	redo log */
@@ -575,6 +576,35 @@ struct mtr_t {
 
 		return(&m_impl.m_log);
 	}
+
+	//nvdimm
+
+	void set_mtr_ipl_start_pointer(byte * ptr)
+	{
+		mtr_ipl_start_ptr = ptr;
+	}
+
+	byte * get_mtr_ipl_start_pointer()
+	{
+		return mtr_ipl_start_ptr;
+	}
+
+	void set_mtr_ipl_before_log_count(uint32_t count)
+	{
+		mtr_ipl_before_log_count = count;
+	}
+
+	uint32_t get_mtr_ipl_before_log_count()
+	{
+		return mtr_ipl_before_log_count;
+	}
+	uint32_t get_log_count()
+	{
+		return m_impl.m_n_log_recs;
+	}
+
+
+	//nvdimm
 
 	/** Push an object to an mtr memo stack.
 	@param object	object
@@ -606,7 +636,25 @@ private:
 
 	/** true if it is synchronous mini-transaction */
 	bool			m_sync;
+
+	//nvdimm
+	//IPL Start pointer
+	byte * mtr_ipl_start_ptr;
+	//IPL Log count
+	uint32_t mtr_ipl_before_log_count;
 };
+void
+my_recv_parse_log_recs(byte * start_ptr, ulint log_len);
+
+ulint
+ipl_recv_parse_log_rec(
+	mlog_id_t*	type,
+	byte*		ptr,
+	byte*		end_ptr,
+	ulint*		space,
+	ulint*		page_no,
+	bool		apply,
+	byte**		body);
 
 #ifndef UNIV_NONINL
 #include "mtr0mtr.ic"
