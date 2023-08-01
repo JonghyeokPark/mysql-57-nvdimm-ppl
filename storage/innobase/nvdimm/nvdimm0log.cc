@@ -62,7 +62,7 @@ bool alloc_dynamic_ipl_region(buf_page_t * bpage){
 
 ulint write_to_static_region(buf_page_t * bpage, ulint len, unsigned char * write_ipl_log_buffer){
 	
-	unsigned char * write_pointer = bpage->ipl_write_pointer;
+	// unsigned char * write_pointer = bpage->ipl_write_pointer;
 	ulint ipl_len = get_ipl_length_from_write_pointer(bpage);
 	//static 영역에 자리가 없는 경우.
 	if(nvdimm_info->static_ipl_per_page_size <= ipl_len){
@@ -113,8 +113,8 @@ ulint write_to_dynamic_region(buf_page_t * bpage, ulint len, unsigned char * wri
 	flush_cache(write_pointer, len);
 	bpage->ipl_write_pointer += len;
 
-	mlog_id_t log_type = mlog_id_t(mach_read_from_1(write_pointer));
-	ulint body_len = mach_read_from_2(write_pointer + 1);
+	// mlog_id_t log_type = mlog_id_t(mach_read_from_1(write_pointer));
+	// ulint body_len = mach_read_from_2(write_pointer + 1);
 	// fprintf(stderr, "Save complete in dynamic, Read log! write_pointer: %p type: %d, len: %u\n",write_pointer, log_type, body_len);
 	return 0;
 }
@@ -122,7 +122,6 @@ ulint write_to_dynamic_region(buf_page_t * bpage, ulint len, unsigned char * wri
 
 bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type, unsigned char * log){
 	//하나의 로그 header + body 만들기.
-	page_id_t page_id = bpage->id;
 	unsigned char write_ipl_log_buffer [len + 3] = {NULL, };
 
 	ulint offset = 0;
@@ -152,7 +151,6 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 		remain_len = write_to_dynamic_region(bpage, remain_len, write_ipl_log_buffer + offset);
 		//한 페이지당 사용할 dynamic 영역이 다 찬 경우.
 		if(remain_len > 0){
-			//나중에 수정하기####
 			// fprintf(stderr, "dynamic regions also full!! page_id:(%u, %u)\n", page_id.space(), page_id.page_no());
 			set_flag(&(bpage->flags), NORMALIZE);
 			return false;
@@ -163,33 +161,16 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 }
 
 
-bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage){
-	page_id_t page_id = bpage->id;
-	mtr_t temp_mtr;
-	mtr_start(&temp_mtr);
-	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage){
 	// fprintf(stderr, "Add log start! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), type, len);
-	// fprintf(stderr, "Type,%d\n",type);
 	if (!get_flag(&(bpage->flags), IPLIZED)) {
 		alloc_static_ipl_to_bpage(bpage);
 		if(bpage->static_ipl_pointer == NULL){
 			set_flag(&(bpage->flags), NORMALIZE);
-			mtr_commit(&temp_mtr);
-			return false;
+			return;
 		}
 	}
-
-	bool return_value = true;
-	if(!write_ipl_log_header_and_body(bpage, len, type, log)){
-		return_value = false;
-	}
-		if(return_value){
-		// fprintf(stderr, "nvdimm_ipl_add (%u, %u) static_ipl: %p now_write_pointer: %p, dynamic_ipl_index: %u now_len: %lu\n", 
-		// bpage->id.space(), bpage->id.page_no(),bpage->static_ipl_pointer ,bpage->ipl_write_pointer, get_dynamic_ipl_pointer(bpage), get_ipl_length_from_write_pointer(bpage));
-	}
-	
-  	mtr_commit(&temp_mtr);
-	return return_value;
+	write_ipl_log_header_and_body(bpage, len, type, log);
 }
 
 
@@ -197,7 +178,7 @@ bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 	//NVDIMM 내 redo log를 메모리로 카피
 	// fprintf(stderr, "apply_info! page_id:(%u, %u) static: %p dynamic: %p log_len: %zu\n", apply_info->space_id, apply_info->page_no, apply_info->static_start_pointer, apply_info->dynamic_start_pointer, apply_info->log_len);
-	if(!apply_info->dynamic_start_pointer == NULL){
+	if(!(apply_info->dynamic_start_pointer == NULL)){
 		//dynamic 영역이 존재하는 경우도 카피.
 		ulint offset = 0;
 		ulint apply_buffer_size = nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
@@ -240,20 +221,13 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 	now_len = start_ptr - apply_log_buffer;
 apply_end:
 	now_len += IPL_LOG_HEADER_SIZE;
-	if(apply_info->dynamic_start_pointer != NULL){
-		apply_info->block->page.ipl_write_pointer = apply_info->dynamic_start_pointer + (now_len - nvdimm_info->static_ipl_per_page_size);
-	}
-	else{
-		apply_info->block->page.ipl_write_pointer = apply_info->block->page.static_ipl_pointer + now_len;
-	}
-	
+	apply_info->block->page.ipl_write_pointer = apply_info->dynamic_start_pointer != NULL ? apply_info->dynamic_start_pointer + (now_len - nvdimm_info->static_ipl_per_page_size) : apply_info->static_start_pointer + now_len;
 	temp_mtr->discard_modifications();
 	mtr_commit(temp_mtr);
 }
 
 void set_apply_info_and_log_apply(buf_block_t* block) {
 	buf_page_t * apply_page = (buf_page_t *)block;
-	page_id_t page_id = apply_page->id;
 
 	mtr_t temp_mtr;
 	mtr_start(&temp_mtr);
@@ -273,14 +247,15 @@ void set_apply_info_and_log_apply(buf_block_t* block) {
 
 
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
-	// mutex_enter(&nvdimm_info->ipl_map_mutex);
 	page_id_t page_id = bpage->id;
 	std::pair <page_id_t, unsigned char *> insert_data = std::make_pair(bpage->id, bpage->static_ipl_pointer);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	rw_lock_x_lock(&buf_pool->lookup_table_lock);
-	buf_pool->ipl_look_up_table->insert(insert_data);
-	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
-	// mutex_exit(&nvdimm_info->ipl_map_mutex);
+	if(!get_flag(&(bpage->flags), IN_LOOK_UP)){
+		rw_lock_x_lock(&buf_pool->lookup_table_lock);
+		buf_pool->ipl_look_up_table->insert(insert_data);
+		rw_lock_x_unlock(&buf_pool->lookup_table_lock);
+		set_flag(&(bpage->flags), IN_LOOK_UP);
+	}
 }
 
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
@@ -294,13 +269,14 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p\n", page_id.space(), page_id.page_no(), bpage->static_ipl_pointer, get_dynamic_ipl_pointer(bpage));
 	// mutex_enter(&nvdimm_info->ipl_map_mutex);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
+	if(get_flag(&(bpage->flags), IN_LOOK_UP)){
+		rw_lock_x_lock(&buf_pool->lookup_table_lock);
+		buf_pool->ipl_look_up_table->erase(page_id);
+		rw_lock_x_unlock(&buf_pool->lookup_table_lock);
+	}
 	bpage->static_ipl_pointer = NULL;
 	bpage->ipl_write_pointer = NULL;
 	bpage->flags = 0;
-	rw_lock_x_lock(&buf_pool->lookup_table_lock);
-	buf_pool->ipl_look_up_table->erase(page_id);
-	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
-	
 }
 
 bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
@@ -322,6 +298,7 @@ void set_for_ipl_page(buf_page_t* bpage){
 	if(it != buf_pool->ipl_look_up_table->end()){
 		// fprintf(stderr, "Read ipl page! page_id(%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		set_flag(&(bpage->flags), IPLIZED);
+		set_flag(&(bpage->flags), IN_LOOK_UP);
 		bpage->static_ipl_pointer = it->second;
 	}
 	
@@ -402,19 +379,13 @@ ulint get_ipl_length_from_write_pointer(buf_page_t * bpage){
 	unsigned char * dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
 	unsigned char * write_pointer = bpage->ipl_write_pointer;
 	ulint static_ipl_len = write_pointer - static_ipl_pointer;
-	if(static_ipl_len <= nvdimm_info->static_ipl_per_page_size){
-		// fprintf(stderr, "page (%u, %u) ipl length : %lu\n", bpage->id.space(), bpage->id.page_no(), static_ipl_len);
-		return static_ipl_len;
-	}
-	// fprintf(stderr, "page (%u, %u) ipl length : %lu\n", bpage->id.space(), bpage->id.page_no(), nvdimm_info->static_ipl_per_page_size + (write_pointer - dynamic_ipl_pointer));
-	return nvdimm_info->static_ipl_per_page_size + (write_pointer - dynamic_ipl_pointer);
+	return static_ipl_len <= nvdimm_info->static_ipl_per_page_size ? static_ipl_len : nvdimm_info->static_ipl_per_page_size + (write_pointer - dynamic_ipl_pointer);
 }
 
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage){
 	// fprintf(stderr, "get_dynamic_ipl_pointer (%u, %u) static_ipl: %p now_write_pointer: %p\n", bpage->id.space(), bpage->id.page_no(),bpage->static_ipl_pointer ,bpage->ipl_write_pointer);
 	if(bpage->static_ipl_pointer == NULL) return NULL;
 	uint ipl_index = mach_read_from_4(bpage->static_ipl_pointer + DYNAMIC_ADDRESS_OFFSET);
-	// fprintf(stderr, "page_id: (%u, %u) dynamic ipl index: %u\n", bpage->id.space(), bpage->id.page_no(), ipl_index);
 	return get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, ipl_index, nvdimm_info->dynamic_ipl_per_page_size);
 }
 

@@ -103,7 +103,8 @@ void nvdimm_free(const uint64_t pool_size);
 enum ipl_flag {
   IPLIZED = 1,
   NORMALIZE = 2,
-  DIRTIFIED = 4
+  DIRTIFIED = 4,
+  IN_LOOK_UP=8
 };
 
 typedef struct NVDIMM_SYSTEM
@@ -137,7 +138,7 @@ bool alloc_dynamic_ipl_region(buf_page_t * bpage);
 ulint write_to_static_region(buf_page_t * bpage, ulint len, unsigned char * write_ipl_log_buffer);
 ulint write_to_dynamic_region(buf_page_t * bpage, ulint len, unsigned char * write_ipl_log_buffer);
 bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type, unsigned char * log);
-bool nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage);
+void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage);
 
 //page ipl log apply 관련 함수들
 void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr);
