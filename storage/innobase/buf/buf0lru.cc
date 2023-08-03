@@ -50,9 +50,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0mon.h"
 #include "lock0lock.h"
 
-#ifdef UNIV_NVDIMM_IPL
 #include "nvdimm-ipl.h"
-#endif
 /** The number of blocks from the LRU_old pointer onward, including
 the block pointed to, must be buf_pool->LRU_old_ratio/BUF_LRU_OLD_RATIO_DIV
 of the whole LRU list length, except that the tolerance defined below
@@ -1878,6 +1876,12 @@ buf_LRU_free_page(
 
 	rw_lock_x_lock(hash_lock);
 	mutex_enter(block_mutex);
+	//nvdimm
+	if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
+		// fprintf(stderr, "Free page: (%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage));
+	}
+	//nvdimm
 
 	if (!buf_page_can_relocate(bpage)) {
 

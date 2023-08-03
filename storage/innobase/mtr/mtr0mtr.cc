@@ -38,10 +38,9 @@ Created 11/26/1995 Heikki Tuuri
 #ifdef UNIV_NONINL
 #include "mtr0mtr.ic"
 #endif /* UNIV_NONINL */
-
-#ifdef UNIV_NVDIMM_IPL
+//nvdimm
 #include "nvdimm-ipl.h"
-#endif
+//nvdimm
 
 /** Iterate over a memo block in reverse. */
 template <typename Functor>
@@ -191,7 +190,6 @@ memo_slot_release(mtr_memo_slot_t* slot)
 		buf_block_t*	block;
 
 		block = reinterpret_cast<buf_block_t*>(slot->object);
-
 		buf_block_unfix(block);
 		buf_page_release_latch(block, slot->type);
 		break;
@@ -348,7 +346,11 @@ struct ReleaseBlocks {
 		buf_block_t*	block;
 
 		block = reinterpret_cast<buf_block_t*>(slot->object);
-
+		buf_page_t * bpage = (buf_page_t *)block;
+		if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+			// fprintf(stderr, "add_dirty_page_to_flush_list (%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage));
+			return;
+		}
 		buf_flush_note_modification(block, m_start_lsn,
 					    m_end_lsn, m_flush_observer);
 	}
@@ -622,7 +624,6 @@ mtr_t::commit()
 
 		ut_ad(!srv_read_only_mode
 		      || m_impl.m_log_mode == MTR_LOG_NO_REDO);
-
 		cmd.execute();
 	} else {
 		cmd.release_all();

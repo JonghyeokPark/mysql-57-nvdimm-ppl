@@ -23,6 +23,7 @@
 #include "nvdimm-ipl.h"
 #include "mtr0log.h"
 #include "page0page.h"
+#include "buf0flu.h"
 //싹다 클래스로 캡슐레이션을 해버려야 되나...
 // 나중에 시간되면 해보기.
 
@@ -162,7 +163,7 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 
 
 void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage){
-	// fprintf(stderr, "Add log start! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), type, len);
+	// fprintf(stderr, "Add log start! (%u, %u) Type : %d len: %lu\n",bpage->id.space(), bpage->id.page_no(), type, len);
 	if (!get_flag(&(bpage->flags), IPLIZED)) {
 		alloc_static_ipl_to_bpage(bpage);
 		if(bpage->static_ipl_pointer == NULL){
@@ -171,6 +172,29 @@ void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 		}
 	}
 	write_ipl_log_header_and_body(bpage, len, type, log);
+	if(get_flag(&(bpage->flags), IN_FLUSH_LIST) && buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){
+		buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
+		buf_pool_mutex_enter(buf_pool);
+		buf_flush_list_mutex_enter(buf_pool);
+		remove_ipl_page_from_flush_list(buf_pool, bpage);
+		buf_flush_list_mutex_exit(buf_pool);
+		buf_pool_mutex_exit(buf_pool);
+	}
+}
+void remove_ipl_page_from_flush_list(buf_pool_t * buf_pool, buf_page_t * bpage){
+		UT_LIST_REMOVE(buf_pool->flush_list, bpage);
+		if (buf_pool->flush_rbt != NULL) {
+			buf_flush_delete_from_flush_rbt(bpage);
+		}
+		buf_pool->stat.flush_list_bytes -= bpage->size.physical();
+		bpage->oldest_modification = 0;
+		bpage->newest_modification = 0;
+		if (bpage->flush_observer != NULL) {
+			bpage->flush_observer->notify_remove(buf_pool, bpage);
+			bpage->flush_observer = NULL;
+		}
+		unset_flag(&(bpage->flags), IN_FLUSH_LIST);
+		// fprintf(stderr, "Delete Page in Flush list (%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage));
 }
 
 
@@ -212,7 +236,7 @@ void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t *
 			now_len = start_ptr - apply_log_buffer - 3;
 			goto apply_end;
 		}
-		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",apply_info->space_id, apply_info->page_no, log_type, body_len);
+		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), log_type, body_len);
 
 		//log apply 진행 후, recovery 시작 위치 이동.
 		recv_parse_or_apply_log_rec_body(log_type, start_ptr, start_ptr + body_len, page_id.space(), page_id.page_no(), apply_info->block, temp_mtr);
@@ -232,7 +256,7 @@ void set_apply_info_and_log_apply(buf_block_t* block) {
 	mtr_t temp_mtr;
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-
+	page_id_t page_id = block->page.id;
 	// ib::info() << "(" << page_id.space() << ", " << page_id.page_no()  << ")" <<  " IPL applying start!";
 
 	apply_log_info apply_info;
@@ -250,12 +274,10 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 	page_id_t page_id = bpage->id;
 	std::pair <page_id_t, unsigned char *> insert_data = std::make_pair(bpage->id, bpage->static_ipl_pointer);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	if(!get_flag(&(bpage->flags), IN_LOOK_UP)){
-		rw_lock_x_lock(&buf_pool->lookup_table_lock);
-		buf_pool->ipl_look_up_table->insert(insert_data);
-		rw_lock_x_unlock(&buf_pool->lookup_table_lock);
-		set_flag(&(bpage->flags), IN_LOOK_UP);
-	}
+	rw_lock_x_lock(&buf_pool->lookup_table_lock);
+	buf_pool->ipl_look_up_table->insert(insert_data);
+	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
+	set_flag(&(bpage->flags), IN_LOOK_UP);
 }
 
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
@@ -267,7 +289,6 @@ void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
 
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	// fprintf(stderr, "ipl_remove page(%u, %u), static: %p, dynamic: %p\n", page_id.space(), page_id.page_no(), bpage->static_ipl_pointer, get_dynamic_ipl_pointer(bpage));
-	// mutex_enter(&nvdimm_info->ipl_map_mutex);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
 	if(get_flag(&(bpage->flags), IN_LOOK_UP)){
 		rw_lock_x_lock(&buf_pool->lookup_table_lock);
@@ -317,7 +338,7 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 			return false;
 		}
 		if(get_dynamic_ipl_pointer(bpage)== NULL){
-			// fprintf(stderr, "[Not Flush]Only Static ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
+			// fprintf(stderr, "[Not Flush]Only Static ipl page: (%u, %u) flush_type %u, old_lsn: %zu, buf_fix_count: %u, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(), flush_type, bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage));
 			return true;
 		}
 		else{
@@ -350,6 +371,7 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 		}
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
+				unset_flag(&(bpage->flags), IN_FLUSH_LIST);
 				return false;
 			}
 			else{

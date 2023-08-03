@@ -47,6 +47,11 @@ extern os_event_t	buf_flush_event;
 
 class ut_stage_alter_t;
 
+void
+buf_flush_delete_from_flush_rbt(
+/*============================*/
+	buf_page_t*	bpage);
+
 /********************************************************************//**
 Remove a block from the flush list of modified blocks. */
 void
@@ -180,16 +185,6 @@ buf_flush_wait_batch_end_wait_only(
 This function should be called at a mini-transaction commit, if a page was
 modified in it. Puts the block to the list of modified blocks, if it not
 already in it. */
-UNIV_INLINE
-void
-buf_flush_note_modification(
-/*========================*/
-	buf_block_t*	block,		/*!< in: block which is modified */
-	lsn_t		start_lsn,	/*!< in: start lsn of the first mtr in a
-					set of mtr's */
-	lsn_t		end_lsn,	/*!< in: end lsn of the last mtr in the
-					set of mtr's */
-	FlushObserver*	observer);	/*!< in: flush observer */
 
 /********************************************************************//**
 This function should be called when recovery has modified a buffer page. */
