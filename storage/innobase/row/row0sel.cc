@@ -789,19 +789,33 @@ row_sel_build_prev_vers(
 	uintmax_t	counter_time = ut_time_us(NULL);
 	/* end */
 
+	roll_ptr_t	roll_ptr;
 
-	 bool undo_buffer_miss = row_check_undo_page_buffer_miss(index, rec, offsets);
 
-	// buf_block_t* block = buf_page_get_block(bpage);
+	// roll_ptr = row_get_rec_roll_ptr(rec, index, *offsets);
 
-	// if((dict_index_get_space(index) ==llt_space_id) && get_flag(bpage, IPLIZED) && !get_flag(bpage, NORMALIZE) && undo_buffer_miss ){
-	// 	use_nvdimm_for_vers_build = true;
+	// if(trx_undo_roll_ptr_is_insert(roll_ptr)){
+	// 	*old_vers = NULL;
+	// 	counter_time = ut_time_us(NULL);
+	// 	fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu insert undo rec\n", (counter_time-cur_time), dict_index_get_space(index));
+	// 	return DB_SUCCESS;
 	// }
+
+
+	bool undo_buffer_miss = row_check_undo_page_buffer_miss(index, rec, offsets);
+
+	buf_block_t* block = buf_page_get_block(bpage);
+
+	if((dict_index_get_space(index) ==llt_space_id) && get_flag(bpage, IPLIZED) && !get_flag(bpage, NORMALIZE) && page_get_max_trx_id(block->frame)!=0 ){
+		use_nvdimm_for_vers_build = true;
+	}
 
 	use_nvdimm_for_vers_build = false;
 	if(use_nvdimm_for_vers_build){
+
+
 		
-		//redo-based version construction
+		//redo-based version constructions
 	//	fprintf(stderr, "version build with redo bpage : %lu space_id: %lu page_no: %lu max_trx_id: %lu\n", 
 	//	bpage, bpage->id.space(), bpage->id.page_no(), page_get_max_trx_id(block->frame));
 
@@ -3524,9 +3538,11 @@ row_sel_build_prev_vers_for_mysql(
 	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
 					column data */
 	mtr_t*		mtr, /*!< in: mtr */
-	buf_page_t* bpage) /* IPL page */
+	buf_page_t* bpage, 
+	trx_t* trx) /* IPL page */
 {
 	dberr_t	err;
+	dberr_t	temp_err;
 
 	if (prebuilt->old_vers_heap) {
 		mem_heap_empty(prebuilt->old_vers_heap);
@@ -3543,8 +3559,10 @@ row_sel_build_prev_vers_for_mysql(
 	ulint version_chasing = 0;
 	uintmax_t	cur_time = ut_time_us(NULL);
 	uintmax_t	counter_time = ut_time_us(NULL);
+
 	
 	roll_ptr_t	roll_ptr;
+
 
 	roll_ptr = row_get_rec_roll_ptr(rec, clust_index, *offsets);
 
@@ -3560,7 +3578,9 @@ row_sel_build_prev_vers_for_mysql(
 
 	buf_block_t* block = buf_page_get_block(bpage);
 
-	if((dict_index_get_space(clust_index) ==llt_space_id) && get_flag(bpage, IPLIZED) && !get_flag(bpage, NORMALIZE) ){
+	if((dict_index_get_space(clust_index) ==llt_space_id) && get_flag(bpage, IPLIZED) && !get_flag(bpage, NORMALIZE)
+	 && page_get_max_trx_id(block->frame)!=0 && page_is_leaf(block->frame) && bpage->io_fix==BUF_IO_NONE && buf_page_in_file(bpage)){ // undo_bufer_miss
+		
 		use_nvdimm_for_vers_build = true;
 	}
 	//use_nvdimm_for_vers_build = false;
@@ -3574,6 +3594,9 @@ row_sel_build_prev_vers_for_mysql(
 		err = nvdimm_build_prev_vers_with_redo(
 			rec, mtr, clust_index, offsets, read_view, offset_heap,
 			prebuilt->old_vers_heap, old_vers, vrow, bpage);
+
+		temp_err = err;
+
 
 	}
 	if(err!=DB_SUCCESS || !use_nvdimm_for_vers_build){
@@ -3592,13 +3615,13 @@ row_sel_build_prev_vers_for_mysql(
 
 	counter_time = ut_time_us(NULL);
 
-	if(use_nvdimm_for_vers_build){
-		fprintf(stderr, "Version build with redo version_build_time_(us): %lu space_id: %lu undo_buffer_miss: %d\n", (counter_time-cur_time), dict_index_get_space(clust_index), undo_buffer_miss);
+	if(use_nvdimm_for_vers_build && temp_err==DB_SUCCESS){
+		fprintf(stderr, "Version build with redo version_build_time_(us): %lu space_id: %lu\n", (counter_time-cur_time), dict_index_get_space(clust_index));
 	}else{
-		fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu undo_buffer_miss: %d\n", (counter_time-cur_time), dict_index_get_space(clust_index), undo_buffer_miss);
+		fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu\n", (counter_time-cur_time), dict_index_get_space(clust_index));
 	}
 
-	return(err);
+	return(DB_SUCCESS);
 }
 
 
@@ -3817,7 +3840,7 @@ row_sel_get_clust_rec_for_mysql(
 			err = row_sel_build_prev_vers_for_mysql(
 				trx->read_view, clust_index, prebuilt,
 				clust_rec, offsets, offset_heap, &old_vers,
-				vrow, mtr, bpage);
+				vrow, mtr, bpage, trx);
 
 			if (err != DB_SUCCESS || old_vers == NULL) {
 
@@ -5261,7 +5284,8 @@ wait_table_again:
 				prebuilt->rtr_info->search_mode = mode;
 			}
 		}
-
+		
+		//fprintf(stderr, "before btr_pcur_open_with_no_init: space_id: %d clust: %d\n", dict_index_get_space(index), dict_index_is_clust(index));
 		btr_pcur_open_with_no_init(index, search_tuple, mode,
 					   BTR_SEARCH_LEAF,
 					   pcur, 0, &mtr);
@@ -5428,6 +5452,7 @@ rec_loop:
 			case DB_SUCCESS:
 				break;
 			default:
+				fprintf(stderr, "lock_wait_or_error1: space_id: %lu\n", dict_index_get_space(index));
 				goto lock_wait_or_error;
 			}
 		}
@@ -5479,7 +5504,7 @@ wrong_offs:
 				" reimport the table.";
 			ut_ad(0);
 			err = DB_CORRUPTION;
-
+			fprintf(stderr, "lock_wait_or_error2: space_id: %lu\n", dict_index_get_space(index));
 			goto lock_wait_or_error;
 		} else {
 			/* The user may be dumping a corrupt table. Jump
@@ -5563,6 +5588,7 @@ wrong_offs:
 				case DB_SUCCESS:
 					break;
 				default:
+					//fprintf(stderr, "lock_wait_or_error3: space_id: %lu\n", dict_index_get_space(index));
 					goto lock_wait_or_error;
 				}
 			}
@@ -5608,6 +5634,7 @@ wrong_offs:
 				case DB_SUCCESS:
 					break;
 				default:
+					fprintf(stderr, "lock_wait_or_error4: space_id: %lu\n", dict_index_get_space(index));
 					goto lock_wait_or_error;
 				}
 			}
@@ -5705,6 +5732,11 @@ no_gap_lock:
 					!= ROW_READ_TRY_SEMI_CONSISTENT)
 			    || unique_search
 			    || index != clust_index) {
+				buf_block_t* block = btr_pcur_get_block(pcur);
+				page_t* page = block->frame;
+				buf_page_t* bpage = &block->page;
+				
+				//fprintf(stderr, "lock_wait_or_error5: space_id: %lu bpage: %lu page_no: %d\n", dict_index_get_space(index), bpage, bpage->id.page_no());
 
 				goto lock_wait_or_error;
 			}
@@ -5733,6 +5765,7 @@ no_gap_lock:
 					&heap);
 				goto locks_ok;
 			case DB_DEADLOCK:
+				fprintf(stderr, "lock_wait_or_error6: space_id: %lu\n", dict_index_get_space(index));
 				goto lock_wait_or_error;
 			case DB_LOCK_WAIT:
 				ut_ad(!dict_index_is_spatial(index));
@@ -5756,10 +5789,13 @@ no_gap_lock:
 			if (dict_index_is_spatial(index)) {
 				goto next_rec;
 			} else {
+				fprintf(stderr, "lock_wait_or_error7: space_id: %lu\n", dict_index_get_space(index));
+
 				goto lock_wait_or_error;
 			}
 
 		default:
+			fprintf(stderr, "lock_wait_or_error8: space_id: %lu\n", dict_index_get_space(index));
 
 			goto lock_wait_or_error;
 		}
@@ -5789,9 +5825,10 @@ no_gap_lock:
 				buf_block_t* block = btr_pcur_get_block(pcur);
 				page_t* page = block->frame;
 				buf_page_t* bpage = &block->page;
-				fprintf(stderr, "2completed get block: %lu and bpage: %lu page_no: %d page_max_trx_id: %lu\n", block, bpage, bpage->id.page_no(), page_get_max_trx_id(page));
+				page_id_t page_id = bpage->id;
+				//fprintf(stderr, "2completed get block: %lu and bpage: %lu page_no: %d page_max_trx_id: %lu\n", block, bpage, bpage->id.page_no(), page_get_max_trx_id(page));
 
-				/* end */
+				//fprintf(stderr, "Before version build space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
 
 				rec_t*	old_vers;
 				/* The following call returns 'offsets'
@@ -5800,9 +5837,17 @@ no_gap_lock:
 					trx->read_view, clust_index,
 					prebuilt, rec, &offsets, &heap,
 					&old_vers, need_vrow ? &vrow : NULL,
-					&mtr, bpage);
+					&mtr, bpage, trx);
+
+				/* end */
+				//fprintf(stderr, "After version build space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
 
 				if (err != DB_SUCCESS) {
+					
+					fprintf(stderr, "result of version build not sccess: bpage: %lu\n");
+					//rw_lock_s_unlock(&block->lock);
+
+					fprintf(stderr, "lock_wait_or_error9: space_id: %lu\n", dict_index_get_space(index));
 
 					goto lock_wait_or_error;
 				}
@@ -5960,6 +6005,7 @@ requires_clust_rec:
 			break;
 		default:
 			vrow = NULL;
+			fprintf(stderr, "lock_wait_or_error10: space_id: %lu\n", dict_index_get_space(index));
 			goto lock_wait_or_error;
 		}
 

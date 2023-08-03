@@ -2858,6 +2858,13 @@ row_upd_clust_step(
 		mode = BTR_MODIFY_LEAF;
 	}
 
+	buf_block_t* block = btr_pcur_get_block(pcur);
+	page_t* page = block->frame;
+	buf_page_t* bpage = &block->page;
+
+
+	//fprintf(stderr, "bpage: %lu space: %lu lock: %lu\n", bpage, dict_index_get_space(index), block->lock);
+
 	success = btr_pcur_restore_position(mode, pcur, &mtr);
 
 	if (!success) {

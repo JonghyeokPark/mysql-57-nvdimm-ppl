@@ -2987,11 +2987,14 @@ btr_cur_ins_lock_and_undo(
 
 		return(err);
 	}
-
+/* lbh if llt space id, donot leave undo log*/ //&&  get_flag(&block->page, IPLIZED) && !get_flag(&block->page, NORMALIZE)
+	buf_block_t* block  =  btr_cur_get_block(cursor);
+//if(!(dict_index_get_space(index) == llt_space_id && page_is_leaf(block->frame) && dict_index_is_clust(index))){
 	err = trx_undo_report_row_operation(flags, TRX_UNDO_INSERT_OP,
 					    thr, index, entry,
 					    NULL, 0, NULL, NULL,
 					    &roll_ptr);
+//	}
 	if (err != DB_SUCCESS) {
 
 		return(err);
@@ -3207,6 +3210,7 @@ fail_err:
 	/* Now, try the insert */
 	{
 		const rec_t*	page_cursor_rec = page_cur_get_rec(page_cursor);
+		/* lbh */
 
 		if (dict_table_is_intrinsic(index->table)) {
 
@@ -3214,7 +3218,9 @@ fail_err:
 
 			*rec = page_cur_tuple_direct_insert(
 				page_cursor, entry, index, n_ext, mtr);
-		} else {
+		
+		}
+		else{
 			/* Check locks and write to the undo log,
 			if specified */
 			err = btr_cur_ins_lock_and_undo(flags, cursor, entry,
@@ -3861,9 +3867,10 @@ btr_cur_update_in_place(
 
 		rec = btr_cur_get_rec(cursor);
 	}
+	bool stock_ipl_cnt = true;
 
 	/* lbh if llt space id, donot leave undo log*/
-	// if(dict_index_get_space(index) != llt_space_id){
+	//if(!(dict_index_get_space(index) == llt_space_id && page_is_leaf(block->frame) && dict_index_is_clust(index) &&  get_flag(&block->page, IPLIZED) && !get_flag(&block->page, NORMALIZE))){
 
 		/* Do lock checking and undo logging */
 		err = btr_cur_upd_lock_and_undo(flags, cursor, offsets,
@@ -3875,7 +3882,15 @@ btr_cur_update_in_place(
 			btr_cur_update_alloc_zip(). */
 			goto func_exit;
 		}
+	//}
+
+	// if((dict_index_get_space(index) == llt_space_id && page_is_leaf(block->frame) && dict_index_is_clust(index) &&  get_flag(&block->page, IPLIZED) && !get_flag(&block->page, NORMALIZE))){
+	// 	fprintf(stderr, "notnormalized\n");
 	// }
+	// if((dict_index_get_space(index) == llt_space_id && page_is_leaf(block->frame) && dict_index_is_clust(index) &&  get_flag(&block->page, IPLIZED) && get_flag(&block->page, NORMALIZE))){
+	// 	fprintf(stderr, "normalized\n");
+	// }
+		
 	/* end */
 
 

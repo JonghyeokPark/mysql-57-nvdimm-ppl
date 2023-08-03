@@ -26,6 +26,10 @@ nvdimm_system * nvdimm_info = NULL;
 
 bool make_static_and_dynamic_ipl_region(){ //여기서 static 크기 바꿔주면 STATIC_MAX_SIZE 바꿔줘야함.
   nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
+  // nvdimm_info->static_ipl_size = (18) * 1024UL * 1024UL; // stastic ipl size : 1,8GB
+  // nvdimm_info->dynamic_ipl_size = 2 * 1024UL * 1024; // dynamic ipl size : 0.2GB
+  // nvdimm_info->static_ipl_size = (2400) * 1024UL * 1024UL; // stastic ipl size : 1,8GB 96 12 & 8
+  // nvdimm_info->dynamic_ipl_size = 100 * 1024UL * 1024; // dynamic ipl size : 0.2GB
   nvdimm_info->static_ipl_size = (1024UL + 824) * 1024UL * 1024UL; // stastic ipl size : 1,8GB
   nvdimm_info->dynamic_ipl_size = 200 * 1024 * 1024; // dynamic ipl size : 0.2GB
 
