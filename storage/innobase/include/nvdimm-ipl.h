@@ -104,8 +104,7 @@ enum ipl_flag {
   IPLIZED = 1,
   NORMALIZE = 2,
   DIRTIFIED = 4,
-  IN_LOOK_UP = 8,
-  IN_FLUSH_LIST = 16
+  IN_LOOK_UP = 8
 };
 
 typedef struct NVDIMM_SYSTEM

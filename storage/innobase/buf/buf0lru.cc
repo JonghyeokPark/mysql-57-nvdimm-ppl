@@ -1879,7 +1879,6 @@ buf_LRU_free_page(
 	//nvdimm
 	if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
 		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
-		// fprintf(stderr, "Free page: (%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage));
 	}
 	//nvdimm
 
@@ -1898,7 +1897,6 @@ buf_LRU_free_page(
 		/* Do not completely free dirty blocks. */
 
 		if (bpage->oldest_modification) {
-			// fprintf(stderr, "[FAIL] buf_LRU_free_page: page_id: (%u, %u) frame: %u\n", bpage->id.space(), bpage->id.page_no(), ((buf_block_t*) bpage)->frame);
 			goto func_exit;
 		}
 	} else if (bpage->oldest_modification > 0

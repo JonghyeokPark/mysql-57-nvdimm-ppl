@@ -172,29 +172,46 @@ void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 		}
 	}
 	write_ipl_log_header_and_body(bpage, len, type, log);
-	if(get_flag(&(bpage->flags), IN_FLUSH_LIST) && buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){
-		buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
-		buf_pool_mutex_enter(buf_pool);
-		buf_flush_list_mutex_enter(buf_pool);
-		remove_ipl_page_from_flush_list(buf_pool, bpage);
-		buf_flush_list_mutex_exit(buf_pool);
-		buf_pool_mutex_exit(buf_pool);
-	}
 }
 void remove_ipl_page_from_flush_list(buf_pool_t * buf_pool, buf_page_t * bpage){
-		UT_LIST_REMOVE(buf_pool->flush_list, bpage);
+		/* Important that we adjust the hazard pointer before removing
+		the bpage from flush list. */
+		buf_pool->flush_hp.adjust(bpage);
+
+		switch (buf_page_get_state(bpage)) {
+		case BUF_BLOCK_POOL_WATCH:
+		case BUF_BLOCK_ZIP_PAGE:
+			/* Clean compressed pages should not be on the flush list */
+		case BUF_BLOCK_NOT_USED:
+		case BUF_BLOCK_READY_FOR_USE:
+		case BUF_BLOCK_MEMORY:
+		case BUF_BLOCK_REMOVE_HASH:
+			ut_error;
+			return;
+		case BUF_BLOCK_ZIP_DIRTY:
+			buf_page_set_state(bpage, BUF_BLOCK_ZIP_PAGE);
+			UT_LIST_REMOVE(buf_pool->flush_list, bpage);
+			break;
+		case BUF_BLOCK_FILE_PAGE:
+			UT_LIST_REMOVE(buf_pool->flush_list, bpage);
+			break;
+		}
+
+		/* If the flush_rbt is active then delete from there as well. */
 		if (buf_pool->flush_rbt != NULL) {
 			buf_flush_delete_from_flush_rbt(bpage);
 		}
 		buf_pool->stat.flush_list_bytes -= bpage->size.physical();
 		bpage->oldest_modification = 0;
-		bpage->newest_modification = 0;
+
+		/* If there is an observer that want to know if the asynchronous
+		flushing was done then notify it. */
 		if (bpage->flush_observer != NULL) {
 			bpage->flush_observer->notify_remove(buf_pool, bpage);
+
 			bpage->flush_observer = NULL;
 		}
-		unset_flag(&(bpage->flags), IN_FLUSH_LIST);
-		// fprintf(stderr, "Delete Page in Flush list (%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage));
+		// fprintf(stderr, "Delete Page in Flush list (%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, frame: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), ((buf_block_t *)bpage)->frame);
 }
 
 
@@ -328,6 +345,7 @@ void set_for_ipl_page(buf_page_t* bpage){
 
 //Dynamic 영역을 가지고 있는 checkpoint page인지 확인하기.
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
+	// fprintf(stderr, "Flush(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, frame: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), ((buf_block_t *)bpage)->frame);
 	if(get_flag(&(bpage->flags), IPLIZED) == false){
 		// fprintf(stderr, "[FLUSH] Normal page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		return false;
@@ -371,7 +389,6 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 		}
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
-				unset_flag(&(bpage->flags), IN_FLUSH_LIST);
 				return false;
 			}
 			else{
