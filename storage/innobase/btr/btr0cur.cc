@@ -3484,7 +3484,7 @@ btr_cur_pessimistic_insert(
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
 #endif
 
 	return(DB_SUCCESS);
@@ -4661,13 +4661,7 @@ return_after_reservations:
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
-  // (jhpark): skip split/merge page from IPLization path
-//   nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
-//   if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
-// 	fprintf(stderr, "splited update Page: (%lu, %lu)\n", btr_cur_get_block(cursor)->page.id.space(), btr_cur_get_block(cursor)->page.id.page_no());
-//     // nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
-//   }
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
 #endif
 
 
@@ -5446,7 +5440,7 @@ return_after_reservations:
 
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
 #endif
 
 

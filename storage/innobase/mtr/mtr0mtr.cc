@@ -875,9 +875,8 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len)
 	const page_id_t	page_id(space, page_no);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
 	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
-	buf_block_t * buf_block = buf_page_get_block(buf_page);
-	if(!is_system_or_undo_tablespace(space) && !nvdimm_ipl_is_split_or_merge_page(page_id)
-		&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
+	if(!is_system_or_undo_tablespace(space) && !get_flag(&(buf_page->flags), NORMALIZE)
+		&& page_is_leaf(((buf_block_t *)buf_page)->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
 		nvdimm_ipl_add(body, (ptr + len) - body, type, buf_page);
 	}
 }

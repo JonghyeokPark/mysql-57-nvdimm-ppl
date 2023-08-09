@@ -1074,9 +1074,14 @@ buf_LRU_free_from_common_LRU_list(
 		unsigned	accessed = buf_page_is_accessed(bpage);
 
 		if (buf_flush_ready_for_replace(bpage)) {
+			if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){
+				fprintf(stderr, "Skip Victim for Dynamic IPL page(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, flush_type:%d, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), bpage->flush_type, get_dynamic_ipl_pointer(bpage));
+				goto dynamic_end;
+			}
 			mutex_exit(mutex);
 			freed = buf_LRU_free_page(bpage, true);
 		} else {
+dynamic_end:		
 			mutex_exit(mutex);
 		}
 

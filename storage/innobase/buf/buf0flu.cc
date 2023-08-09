@@ -598,6 +598,11 @@ buf_flush_note_modification(
 	block->page.flush_observer = observer;
 
 	if (block->page.oldest_modification == 0 ) {
+		// buf_page_t * bpage = (buf_page_t * )block;
+		// if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+		// 	buf_page_mutex_exit(block);
+		// 	return;
+		// }
 		buf_pool_t*	buf_pool = buf_pool_from_block(block);
 		buf_flush_insert_into_flush_list(buf_pool, block, start_lsn);
 	} else {
@@ -1718,11 +1723,10 @@ buf_flush_LRU_list_batch(
 			/* block is ready for eviction i.e., it is
 			clean and is not IO-fixed or buffer fixed. */
 			if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){ // Checkpoint안됐지만 Dynamic ipl을 가진 애들
-				set_flag(&(bpage->flags), NORMALIZE);
+				nvdimm_ipl_add_split_merge_map(bpage);
 				set_flag(&(bpage->flags), DIRTIFIED);
 				mutex_exit(block_mutex);
-				buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage, BUF_FLUSH_LRU, false);
-				count++;
+				ipl_flush_page_and_try_neighbors(bpage, BUF_FLUSH_LRU, max, &count);
 				goto finish_write;
 			}
 			mutex_exit(block_mutex);
@@ -1730,9 +1734,11 @@ buf_flush_LRU_list_batch(
 				++evict_count;
 			}
 		}
-		else if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)&& buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){ // 여기서 Page를 Clean화가 필요함
+		else if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){ // 여기서 Page를 Clean화가 필요함
 			if(get_dynamic_ipl_pointer(bpage) != NULL){ // Checkpoint안됐지만 Dynamic ipl을 가진 애들
+				nvdimm_ipl_add_split_merge_map(bpage);
 				mutex_exit(block_mutex);
+				ipl_flush_page_and_try_neighbors(bpage, BUF_FLUSH_LRU, max, &count);
 				goto finish_write;
 			}
 			buf_flush_list_mutex_enter(buf_pool);
@@ -1861,6 +1867,16 @@ buf_do_flush_list_batch(
 	     ++scanned) {
 		buf_page_t*	prev;
 		//nvdimm
+		// if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+		// 	// fprintf(stderr, "Real!! (%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u frame: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), ((buf_block_t *)bpage)->frame);
+		// 	prev = UT_LIST_GET_PREV(list, bpage);
+		// 	if(buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){
+		// 		remove_ipl_page_from_flush_list(buf_pool, bpage);
+		// 	}
+		// 	buf_pool->flush_hp.set(prev);
+		// 	--len;
+		// 	continue;
+		// }
 		//nvdimm
 		ut_a(bpage->oldest_modification > 0);
 		ut_ad(bpage->in_flush_list);
@@ -1871,7 +1887,7 @@ buf_do_flush_list_batch(
 
 
 #ifdef UNIV_DEBUG
-		// bool flushed =
+		bool flushed =
 #endif /* UNIV_DEBUG */
 		buf_flush_page_and_try_neighbors(
 			bpage, BUF_FLUSH_LIST, min_n, &count);
@@ -1887,7 +1903,7 @@ buf_do_flush_list_batch(
 	buf_flush_list_mutex_exit(buf_pool);
 
 	if (scanned) {
-		MONITOR_INC_VALUE_CUMULATIVE(!
+		MONITOR_INC_VALUE_CUMULATIVE(
 			MONITOR_FLUSH_BATCH_SCANNED,
 			MONITOR_FLUSH_BATCH_SCANNED_NUM_CALL,
 			MONITOR_FLUSH_BATCH_SCANNED_PER_CALL,
@@ -2292,7 +2308,8 @@ buf_flush_single_page_from_LRU(
 		if (buf_flush_ready_for_replace(bpage)) {
 			/* block is ready for eviction i.e., it is
 			clean and is not IO-fixed or buffer fixed. */
-			if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){ // Checkpoint안됐지만 Dynamic ipl을 가진 애들
+			if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){
+				//clean하지만, Dynamic ipl을 가진 애들
 				goto clean_flush_end;
 			}
 			mutex_exit(block_mutex);
@@ -2304,7 +2321,8 @@ buf_flush_single_page_from_LRU(
 
 		}
 		else if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)&& buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){
-			if(get_dynamic_ipl_pointer(bpage) != NULL){ // Checkpoint안됐지만 Dynamic ipl을 가진 애들
+			if(get_dynamic_ipl_pointer(bpage) != NULL){ 
+				// Dirty하지만 Dynamic IPL을 가진 경우
 				goto clean_flush_end;
 			}
 			buf_flush_list_mutex_enter(buf_pool);
@@ -3955,6 +3973,227 @@ FlushObserver::flush()
 }
 
 //checpoint됐으며 dyanmic ipl영역을 가지는 clean page flush custom 함수
+bool
+ipl_flush_page_and_try_neighbors(
+	buf_page_t*		bpage,
+	buf_flush_t		flush_type,
+	ulint			n_to_flush,
+	ulint*			count)
+{
+#ifdef UNIV_DEBUG
+	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
+
+	ut_ad(buf_pool_mutex_own(buf_pool));
+#endif /* UNIV_DEBUG */
+
+	bool		flushed;
+	BPageMutex*	block_mutex = buf_page_get_mutex(bpage);
+
+	mutex_enter(block_mutex);
+
+	ut_a(buf_page_in_file(bpage));
+
+	buf_pool_t*	buf_pool;
+
+	buf_pool = buf_pool_from_bpage(bpage);
+
+	const page_id_t	page_id = bpage->id;
+
+	mutex_exit(block_mutex);
+
+	buf_pool_mutex_exit(buf_pool);
+
+	/* Try to flush also all the neighbors */
+	*count += ipl_flush_try_neighbors(
+		page_id, flush_type, *count, n_to_flush);
+
+	buf_pool_mutex_enter(buf_pool);
+	flushed = TRUE;
+
+	ut_ad(buf_pool_mutex_own(buf_pool));
+
+	return(flushed);
+}
+ulint
+ipl_flush_try_neighbors(
+	const page_id_t&	page_id,
+	buf_flush_t		flush_type,
+	ulint			n_flushed,
+	ulint			n_to_flush)
+{
+	ulint		i;
+	ulint		low;
+	ulint		high;
+	ulint		count = 0;
+	buf_pool_t*	buf_pool = buf_pool_get(page_id);
+
+	ut_ad(flush_type == BUF_FLUSH_LRU || flush_type == BUF_FLUSH_LIST);
+
+	if (UT_LIST_GET_LEN(buf_pool->LRU) < BUF_LRU_OLD_MIN_LEN
+	    || srv_flush_neighbors == 0) {
+		/* If there is little space or neighbor flushing is
+		not enabled then just flush the victim. */
+		low = page_id.page_no();
+		high = page_id.page_no() + 1;
+	} else {
+		/* When flushed, dirty blocks are searched in
+		neighborhoods of this size, and flushed along with the
+		original page. */
+
+		ulint	buf_flush_area;
+
+		buf_flush_area	= ut_min(
+			BUF_READ_AHEAD_AREA(buf_pool),
+			buf_pool->curr_size / 16);
+
+		low = (page_id.page_no() / buf_flush_area) * buf_flush_area;
+		high = (page_id.page_no() / buf_flush_area + 1) * buf_flush_area;
+
+		if (srv_flush_neighbors == 1) {
+			/* adjust 'low' and 'high' to limit
+			   for contiguous dirty area */
+			if (page_id.page_no() > low) {
+				for (i = page_id.page_no() - 1; i >= low; i--) {
+					if (!buf_flush_check_neighbor(
+						page_id_t(page_id.space(), i),
+						flush_type)) {
+
+						break;
+					}
+
+					if (i == low) {
+						/* Avoid overwrap when low == 0
+						and calling
+						buf_flush_check_neighbor() with
+						i == (ulint) -1 */
+						i--;
+						break;
+					}
+				}
+				low = i + 1;
+			}
+
+			for (i = page_id.page_no() + 1;
+			     i < high
+			     && buf_flush_check_neighbor(
+				     page_id_t(page_id.space(), i),
+				     flush_type);
+			     i++) {
+				/* do nothing */
+			}
+			high = i;
+		}
+	}
+
+	const ulint	space_size = fil_space_get_size(page_id.space());
+	if (high > space_size) {
+		high = space_size;
+	}
+
+	DBUG_PRINT("ib_buf", ("flush " UINT32PF ":%u..%u",
+			      page_id.space(),
+			      (unsigned) low, (unsigned) high));
+
+	for (ulint i = low; i < high; i++) {
+		buf_page_t*	bpage;
+
+		if ((count + n_flushed) >= n_to_flush) {
+
+			/* We have already flushed enough pages and
+			should call it a day. There is, however, one
+			exception. If the page whose neighbors we
+			are flushing has not been flushed yet then
+			we'll try to flush the victim that we
+			selected originally. */
+			if (i <= page_id.page_no()) {
+				i = page_id.page_no();
+			} else {
+				break;
+			}
+		}
+
+		const page_id_t	cur_page_id(page_id.space(), i);
+
+		buf_pool = buf_pool_get(cur_page_id);
+
+		buf_pool_mutex_enter(buf_pool);
+
+		/* We only want to flush pages from this buffer pool. */
+		bpage = buf_page_hash_get(buf_pool, cur_page_id);
+
+		if (bpage == NULL) {
+
+			buf_pool_mutex_exit(buf_pool);
+			continue;
+		}
+
+		ut_a(buf_page_in_file(bpage));
+
+		/* We avoid flushing 'non-old' blocks in an LRU flush,
+		because the flushed blocks are soon freed */
+
+		if (flush_type != BUF_FLUSH_LRU
+		    || i == page_id.page_no()
+		    || buf_page_is_old(bpage)) {
+
+			BPageMutex* block_mutex = buf_page_get_mutex(bpage);
+
+			mutex_enter(block_mutex);
+
+			if (buf_flush_ready_for_flush(bpage, flush_type)
+			    && (i == page_id.page_no()
+				|| bpage->buf_fix_count == 0)) {
+
+				/* We also try to flush those
+				neighbors != offset */
+
+				if (buf_flush_page(
+					buf_pool, bpage
+					,flush_type, false)) {
+
+					++count;
+				} else {
+					mutex_exit(block_mutex);
+					buf_pool_mutex_exit(buf_pool);
+				}
+
+				continue;
+			}
+			else if(page_id.equals_to(cur_page_id)){
+				if(get_flag(&(bpage->flags), DIRTIFIED) && buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0 ){
+					if (buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage,flush_type, false)) {
+						++count;
+					} else {
+						mutex_exit(block_mutex);
+						buf_pool_mutex_exit(buf_pool);
+					}
+					continue;
+				}
+				else{
+					fprintf(stderr, "Cannot Flush DIPL page(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, flush_type:%d, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), bpage->flush_type, get_dynamic_ipl_pointer(bpage));
+					mutex_exit(block_mutex);
+				}
+			}
+			else {
+				// fprintf(stderr, "What2(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, frame: %p, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), ((buf_block_t *)bpage)->frame, get_dynamic_ipl_pointer(bpage));
+				mutex_exit(block_mutex);
+			}
+		}
+		buf_pool_mutex_exit(buf_pool);
+	}
+
+	if (count > 1) {
+		MONITOR_INC_VALUE_CUMULATIVE(
+			MONITOR_FLUSH_NEIGHBOR_TOTAL_PAGE,
+			MONITOR_FLUSH_NEIGHBOR_COUNT,
+			MONITOR_FLUSH_NEIGHBOR_PAGES,
+			(count - 1));
+	}
+
+	return(count);
+}
+
+
 ibool
 buf_flush_ipl_clean_checkpointed_page( 
 /*===========*/
@@ -4170,14 +4409,5 @@ buf_flush_ipl_clean_checkpointed_block_low(
 		LRU list as well. */
 		buf_page_io_complete(bpage, true);
 	}
-
-	/* Increment the counter of I/O operations used
-	for selecting LRU policy. */
-	if(flush_type == BUF_FLUSH_LRU){
-		buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
-		buf_pool_mutex_enter(buf_pool);
-		ut_ad(buf_pool_mutex_own(buf_pool));
-	}
 	buf_LRU_stat_inc_io();
-	
 }

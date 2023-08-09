@@ -45,6 +45,7 @@ void alloc_static_ipl_to_bpage(buf_page_t * bpage){
 
 	bpage->static_ipl_pointer = static_ipl_pointer;
 	bpage->ipl_write_pointer = static_ipl_pointer + IPL_LOG_HEADER_SIZE;
+	// fprintf(stderr, "Iplized,%f,%u,\n",(double)(time(NULL) - start),bpage->id.space());
 	set_flag(&(bpage->flags), IPLIZED);
 	// fprintf(stderr, "alloc static ipl (%u, %u) static_ipl: %p now_write_pointer: %p\n", bpage->id.space(), bpage->id.page_no(),bpage->static_ipl_pointer ,bpage->ipl_write_pointer);
 }
@@ -56,6 +57,7 @@ bool alloc_dynamic_ipl_region(buf_page_t * bpage){
 	mach_write_to_4(pointer_to_store_dynamic_address, get_ipl_index_from_addr(nvdimm_info->dynamic_start_pointer, dynamic_address, nvdimm_info->dynamic_ipl_per_page_size));
 	flush_cache(pointer_to_store_dynamic_address, 4);
 	bpage->ipl_write_pointer = dynamic_address;
+	// fprintf(stderr, "Dynamic,%f,%u,\n",(double)(time(NULL) - start),bpage->id.space());
 	// fprintf(stderr, "Dynamic region allocated %p to (%u, %u) write_pointer: %p\n", dynamic_address, bpage->id.space(), bpage->id.page_no(), bpage->ipl_write_pointer);
 	return true;
 }
@@ -143,7 +145,7 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
 			if(!alloc_dynamic_ipl_region(bpage)){
 				//Dynamic 영역을 할당 받을 수 없는 경우, page를 flush하고 새로 할당받기
-				set_flag(&(bpage->flags), NORMALIZE);
+				nvdimm_ipl_add_split_merge_map(bpage);
 				return false;
 			}
 		}
@@ -153,7 +155,7 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 		//한 페이지당 사용할 dynamic 영역이 다 찬 경우.
 		if(remain_len > 0){
 			// fprintf(stderr, "dynamic regions also full!! page_id:(%u, %u)\n", page_id.space(), page_id.page_no());
-			set_flag(&(bpage->flags), NORMALIZE);
+			nvdimm_ipl_add_split_merge_map(bpage);
 			return false;
 		}
 		
@@ -167,11 +169,19 @@ void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 	if (!get_flag(&(bpage->flags), IPLIZED)) {
 		alloc_static_ipl_to_bpage(bpage);
 		if(bpage->static_ipl_pointer == NULL){
-			set_flag(&(bpage->flags), NORMALIZE);
+			nvdimm_ipl_add_split_merge_map(bpage);
 			return;
 		}
 	}
 	write_ipl_log_header_and_body(bpage, len, type, log);
+	// if(bpage->oldest_modification != 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){
+	// 	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
+	// 	buf_pool_mutex_enter(buf_pool);
+	// 	buf_flush_list_mutex_enter(buf_pool);
+	// 	remove_ipl_page_from_flush_list(buf_pool, bpage);
+	// 	buf_flush_list_mutex_exit(buf_pool);
+	// 	buf_pool_mutex_exit(buf_pool);
+	// }
 }
 void remove_ipl_page_from_flush_list(buf_pool_t * buf_pool, buf_page_t * bpage){
 		/* Important that we adjust the hazard pointer before removing
@@ -297,11 +307,18 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 	set_flag(&(bpage->flags), IN_LOOK_UP);
 }
 
-void nvdimm_ipl_add_split_merge_map(page_id_t page_id){
+void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
 	// fprintf(stderr, "ipl_add Split page(%u, %u)\n", page_id.space(), page_id.page_no());
-	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	buf_page_t * bpage = buf_page_get_also_watch(buf_pool, page_id);
+	if(!get_flag(&(bpage->flags), IN_LOOK_UP)){
+		buf_pool_t * buf_pool = buf_pool_get(bpage->id);
+		free_dynamic_address_to_indirection_queue(buf_pool, get_dynamic_ipl_pointer(bpage));
+		free_static_address_to_indirection_queue(buf_pool, bpage->static_ipl_pointer);
+		bpage->static_ipl_pointer = NULL;
+		bpage->ipl_write_pointer = NULL;
+		bpage->flags = 0;
+	}
 	set_flag(&(bpage->flags), NORMALIZE);
+	
 }
 
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
@@ -317,11 +334,6 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	bpage->flags = 0;
 }
 
-bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id){
-	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	buf_page_t * bpage = buf_page_get_also_watch(buf_pool, page_id);
-	return get_flag(&(bpage->flags), NORMALIZE);
-}
 
 
 void set_for_ipl_page(buf_page_t* bpage){
@@ -362,10 +374,9 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
 				// fprintf(stderr, "[Not Flush]Checkpoint ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
-				return true;
+				// return true;
 			}
 			else{
-				// fprintf(stderr, "[FLUSH]Dynamic ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 				return false;
 			}
 

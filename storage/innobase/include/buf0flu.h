@@ -294,6 +294,18 @@ writes! NOTE: buf_pool->mutex and buf_page_get_mutex(bpage) must be
 held upon entering this function, and they will be released by this
 function.
 @return TRUE if page was flushed */
+bool
+ipl_flush_page_and_try_neighbors(
+	buf_page_t*		bpage,
+	buf_flush_t		flush_type,
+	ulint			n_to_flush,
+	ulint*			count);
+ulint
+ipl_flush_try_neighbors(
+	const page_id_t&	page_id,
+	buf_flush_t		flush_type,
+	ulint			n_flushed,
+	ulint			n_to_flush);
 
 ibool
 buf_flush_ipl_clean_checkpointed_page(
