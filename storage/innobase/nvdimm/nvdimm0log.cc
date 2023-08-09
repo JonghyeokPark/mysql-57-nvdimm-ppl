@@ -374,7 +374,7 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
 				// fprintf(stderr, "[Not Flush]Checkpoint ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
-				// return true;
+				return true;
 			}
 			else{
 				return false;
@@ -385,24 +385,57 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 	}
 	return false;
 }
+static inline void print_flush_type(buf_flush_t flush_type, bool iplized){
+	if(iplized){
+		switch(flush_type){
+			case BUF_FLUSH_LIST:
+				fprintf(stderr, "%f,ipl_checkpoint_flush\n",(double)(time(NULL) - start));
+				break;
+			case BUF_FLUSH_SINGLE_PAGE:
+				fprintf(stderr, "%f,ipl_single_page_flush\n",(double)(time(NULL) - start));
+				break;
+			case BUF_FLUSH_LRU:
+				fprintf(stderr, "%f,ipl_lru_flush\n",(double)(time(NULL) - start));
+				break;
+		}
+	}
+	else{
+		switch(flush_type){
+			case BUF_FLUSH_LIST:
+				fprintf(stderr, "%f,normal_checkpoint_flush\n",(double)(time(NULL) - start));
+				break;
+			case BUF_FLUSH_SINGLE_PAGE:
+				fprintf(stderr, "%f,normal_single_page_flush\n",(double)(time(NULL) - start));
+				break;
+			case BUF_FLUSH_LRU:
+				fprintf(stderr, "%f,normal_lru_flush\n",(double)(time(NULL) - start));
+				break;
+		}
+	}
+}
 
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
 	if(get_flag(&(bpage->flags), IPLIZED) == false){
+		print_flush_type(flush_type, false);
 		return false;
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
+			print_flush_type(flush_type, false);
 			normalize_ipl_page(bpage, bpage->id);
 			return true;
 		}
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
+			print_flush_type(flush_type, true);
 			return false;
 		}
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
+				print_flush_type(flush_type, true);
 				return false;
 			}
 			else{
+				print_flush_type(flush_type, false);
 				normalize_ipl_page(bpage, bpage->id);
 				return true;
 				

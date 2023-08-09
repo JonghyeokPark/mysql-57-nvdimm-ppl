@@ -2340,7 +2340,9 @@ buf_flush_single_page_from_LRU(
 		}
 		else if (buf_flush_ready_for_flush(
 				   bpage, BUF_FLUSH_SINGLE_PAGE)) {
-
+			// if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+			// 	fprintf(stderr, "Single Page Flush(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, flush_type:%d, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), bpage->flush_type, get_dynamic_ipl_pointer(bpage));
+			// }
 			/* Block is ready for flush. Try and dispatch an IO
 			request. We'll put it on free list in IO completion
 			routine if it is not buffer fixed. The following call
@@ -4159,6 +4161,7 @@ ipl_flush_try_neighbors(
 
 				continue;
 			}
+			//nvdimm
 			else if(page_id.equals_to(cur_page_id)){
 				if(get_flag(&(bpage->flags), DIRTIFIED) && buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0 ){
 					if (buf_flush_ipl_clean_checkpointed_page(buf_pool, bpage,flush_type, false)) {
@@ -4170,10 +4173,11 @@ ipl_flush_try_neighbors(
 					continue;
 				}
 				else{
-					fprintf(stderr, "Cannot Flush DIPL page(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, flush_type:%d, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), bpage->flush_type, get_dynamic_ipl_pointer(bpage));
+					// fprintf(stderr, "Cannot Flush DIPL page(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, flush_type:%d, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), bpage->flush_type, get_dynamic_ipl_pointer(bpage));
 					mutex_exit(block_mutex);
 				}
 			}
+			//nvdimm
 			else {
 				// fprintf(stderr, "What2(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, frame: %p, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), ((buf_block_t *)bpage)->frame, get_dynamic_ipl_pointer(bpage));
 				mutex_exit(block_mutex);
