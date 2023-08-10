@@ -16,6 +16,7 @@ std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map;
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
 nvdimm_system * nvdimm_info = NULL;
+nc_redo_buf * nc_redo_info = NULL;
 time_t start;
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
@@ -28,26 +29,24 @@ time_t start;
 
 bool make_static_and_dynamic_ipl_region(ulint number_of_buf_pool){ //여기서 static 크기 바꿔주면 STATIC_MAX_SIZE 바꿔줘야함.
   nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
-  nvdimm_info->static_ipl_size = (1024 + 624) * 1024UL * 1024UL; // static ipl size : 1,8GB
-  nvdimm_info->dynamic_ipl_size = (400) * 1024 * 1024; // dynamic ipl size : 0.2GB
+  nvdimm_info->static_ipl_size = (1024 + 824) * 1024UL * 1024UL; // static ipl size : 1,8GB
+  nvdimm_info->dynamic_ipl_size = (200) * 1024 * 1024; // dynamic ipl size : 0.2GB
 
   nvdimm_info->static_ipl_per_page_size = 256; // per page static size : 1KB
-  nvdimm_info->dynamic_ipl_per_page_size = 1024; // per page dynamic size : 8KB
+  nvdimm_info->dynamic_ipl_per_page_size = 1024 * 4; // per page dynamic size : 8KB
 
   nvdimm_info->static_ipl_page_number_per_buf_pool = (nvdimm_info->static_ipl_size / nvdimm_info->static_ipl_per_page_size) / number_of_buf_pool; // 
   nvdimm_info->dynamic_ipl_page_number_per_buf_pool = (nvdimm_info->dynamic_ipl_size / nvdimm_info->dynamic_ipl_per_page_size) / number_of_buf_pool; // dynamic ipl max page count : 1M
 
   nvdimm_info->static_start_pointer = nvdimm_ptr;
   nvdimm_info->dynamic_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_size;
+  nvdimm_info->nc_redo_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_size + nvdimm_info->dynamic_ipl_size + (1024 * 1024 * 1024UL);
   fprintf(stderr, "static start pointer : %p, dynamic start pointer : %p\n", nvdimm_info->static_start_pointer, nvdimm_info->dynamic_start_pointer);
   fprintf(stderr, "static IPL size per buf_pool : %u\n", nvdimm_info->static_ipl_page_number_per_buf_pool);
   fprintf(stderr, "Dynamic IPL size per buf_pool : %u\n", nvdimm_info->dynamic_ipl_page_number_per_buf_pool);
   start = time(NULL);
   return true;
 }
-
-
-//1차 목표, static하게 구현한거 새로운 구조로 바꿔보기.
 
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size) {
  
@@ -68,10 +67,11 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 		memset(nvdimm_ptr, 0x00, pool_size);
 		NVDIMM_INFO_PRINT("NVDIMM mmaped success!\n");
 
+  // 추후, nvdimm영역에 nc_redo_buffer가 존재한다면 아래 함수에서 읽어오는 로직 필요
+  // 아직은 Caching만해서 Write reduction의 효과만 보자.
   } else {
   	// TODO(jhpark): recovery process!    
 	}
-
 	// Force to set NVIMMM
   setenv("PMEM_IS_PMEM_FORCE", "1", 1);
   NVDIMM_INFO_PRINT("Current kernel does not recognize NVDIMM as the persistenct memory \n \

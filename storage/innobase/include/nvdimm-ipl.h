@@ -121,6 +121,8 @@ typedef struct NVDIMM_SYSTEM
   uint64_t dynamic_ipl_size;
   uint64_t dynamic_ipl_per_page_size;
   uint64_t dynamic_ipl_page_number_per_buf_pool;
+
+  unsigned char * nc_redo_start_pointer;
 }nvdimm_system;
 
 typedef struct APPLY_LOG_INFO
@@ -163,6 +165,16 @@ unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
 void set_flag(unsigned char * flags, ipl_flag flag);
 void unset_flag(unsigned char * flags, ipl_flag flag);
 bool get_flag(unsigned char * flags, ipl_flag flag);
+
+//redo log buffer caching
+struct nc_redo_buf{
+  uint64_t nc_buf_free;
+  uint64_t nc_lsn;
+};
+
+// redo info spot
+#define REDO_INFO_OFFSET  (512*1024*1024)
+extern nc_redo_buf* nc_redo_info;
 
 
 #ifdef UNIV_NVDIMM_IPL

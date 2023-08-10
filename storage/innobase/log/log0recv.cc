@@ -68,6 +68,10 @@ bool	recv_replay_file_ops	= true;
 #include "fut0lst.h"
 #endif /* !UNIV_HOTBACKUP */
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
+
 /** Log records are stored in the hash table in chunks at most of this size;
 this must be less than UNIV_PAGE_SIZE as it is stored in the buffer pool */
 #define RECV_DATA_BLOCK_SIZE	(MEM_MAX_ALLOC_IN_BUF - sizeof(recv_data_t))
@@ -3848,6 +3852,84 @@ recv_group_scan_log_recs(
 	if (recv_sys->found_corrupt_log || recv_sys->found_corrupt_fs) {
 		DBUG_RETURN(false);
 	}
+// #ifdef UNIV_NVDIMM_IPL
+  
+//   // (jhpark): so far we scan from log files; now we read from persistent log buffer
+//   memcpy(log_sys->buf, nvdimm_info->nc_redo_start_pointer, log_sys->buf_size);
+
+//   fprintf(stderr, "[DEBUG] begin scan and parse persist redo log buffer size: %d\n", log_sys->buf_size);
+
+//   // parse current log buffer;
+//   // read from first secion of the redo log buffer
+  
+//   byte *log_block = log_sys->buf;
+//   ulint start_offset = log_block_get_first_rec_group(log_block);
+//   byte *nc_ptr = log_block + start_offset;
+
+//   byte* body;
+//   mlog_id_t type;
+//   ulint space, page_no;
+//   lsn_t old_lsn = recv_sys->recovered_lsn;
+//   lsn_t recovered_lsn;
+
+//   uint64_t nc_scanned_lsn  = 0;
+//   uint64_t nc_total_scanned_lsn = 0;
+
+//   for(;;) {
+
+// 	ulint nc_len = recv_parse_log_rec(
+// 		&type, nc_ptr, nc_ptr + (4*1024),
+// 		&space, &page_no, false, &body);
+
+// 	// LLL
+// 	ib::info() << "nc redo log : " << space 
+// 		<< ":" << page_no << " len: " << nc_len;
+
+// 	// jhpark: add parsing buffer
+// 	if (type != MLOG_MULTI_REC_END) {
+
+// 		if (space == 0) {
+// 		recv_add_to_hash_table(
+// 			type, space, page_no, body,
+// 			nc_ptr+nc_len, old_lsn,
+// 			recv_sys->recovered_lsn);   
+// 		}
+
+// 	}
+
+// 	if(nc_len == 0) {
+// 		log_block = nc_ptr;
+// 		ulint diff = 0;
+// 		if (nc_scanned_lsn > OS_FILE_LOG_BLOCK_SIZE) {
+// 		diff = nc_scanned_lsn - OS_FILE_LOG_BLOCK_SIZE;
+// 		nc_ptr = nc_ptr + log_block_get_first_rec_group(nc_ptr);
+// 		} else {
+// 		diff  = OS_FILE_LOG_BLOCK_SIZE - nc_scanned_lsn;
+// 		nc_ptr += (512-diff) + log_block_get_first_rec_group(nc_ptr);
+// 		}      
+
+// 		nc_total_scanned_lsn += nc_scanned_lsn;
+// 		nc_scanned_lsn = 0;
+// 	}
+
+// 	if (nc_scanned_lsn >= log_sys->buf_size) {
+// 		break;
+// 	}
+
+
+// 	nc_scanned_lsn += nc_len;    
+// 	nc_ptr += nc_len;
+// 	recovered_lsn = recv_calc_lsn_on_data_add(old_lsn, nc_len);
+// 	old_lsn = recovered_lsn;
+
+// 	// reset ptr info.
+
+//   } 
+
+//   recv_sys->found_corrupt_log = false;
+//   fprintf(stderr, "[DEBUG] finsish scan and parse persist redo log buffer size: %d\n", log_sys->buf_size);
+
+// #endif
 
 	DBUG_PRINT("ib_log", ("%s " LSN_PF
 			      " completed for log group " ULINTPF,

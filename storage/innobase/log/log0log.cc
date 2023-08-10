@@ -57,6 +57,10 @@ Created 12/9/1995 Heikki Tuuri
 #include "sync0sync.h"
 #endif /* !UNIV_HOTBACKUP */
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
+
 /*
 General philosophy of InnoDB redo-logs:
 
@@ -218,7 +222,25 @@ log_buffer_extend(
 
 	log_sys->buf_free -= move_start;
 	log_sys->buf_next_to_write -= move_start;
+#ifdef UNIV_NVDIMM_IPL
+    srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
+    log_sys->buf_size = LOG_BUFFER_SIZE;
 
+    log_sys->buf_ptr = static_cast<byte*>(
+        ut_zalloc_nokey(log_sys->buf_size * 2 + OS_FILE_LOG_BLOCK_SIZE));
+    log_sys->buf = static_cast<byte*>(
+        ut_align(log_sys->buf_ptr, OS_FILE_LOG_BLOCK_SIZE));
+    
+    log_sys->first_in_use = true;
+    log_sys->max_buf_free = log_sys->buf_size / LOG_BUF_FLUSH_RATIO
+                - LOG_BUF_FLUSH_MARGIN;
+
+    // update lsn
+    nc_redo_info->nc_lsn = log_sys->lsn;
+    nc_redo_info->nc_buf_free = log_sys->buf_free;
+    memcpy(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
+    flush_cache(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, sizeof(nc_redo_info));
+#else
 	/* reallocate log buffer */
 	srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
 	ut_free(log_sys->buf_ptr);
@@ -237,6 +259,7 @@ log_buffer_extend(
 
 	/* restore the last log block */
 	ut_memcpy(log_sys->buf, tmp_buf, move_end - move_start);
+#endif
 
 	ut_ad(log_sys->is_extending);
 	log_sys->is_extending = false;
@@ -428,8 +451,13 @@ part_loop:
 			- (log->buf_free % OS_FILE_LOG_BLOCK_SIZE)
 			- LOG_BLOCK_TRL_SIZE;
 	}
-
+#ifdef UNIV_NVDIMM_IPL
+    ut_memcpy(log->buf + log->buf_free, str, len);
+    flush_cache(log->buf+log->buf_free, len);
+	// fprintf(stderr, "log_sys->buf = %p\n", log_sys->buf);
+#else
 	ut_memcpy(log->buf + log->buf_free, str, len);
+#endif
 
 	str_len -= len;
 	str = str + len;
@@ -456,6 +484,12 @@ part_loop:
 	}
 
 	log->buf_free += len;
+#ifdef UNIV_NVDIMM_IPL
+    nc_redo_info->nc_lsn = log_sys->lsn;
+    nc_redo_info->nc_buf_free = log_sys->buf_free;
+    memcpy(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
+    flush_cache(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, sizeof(nc_redo_info));
+#endif
 
 	ut_ad(log->buf_free <= log->buf_size);
 
@@ -807,11 +841,24 @@ log_init(void)
 
 	log_sys->buf_size = LOG_BUFFER_SIZE;
 
+#ifdef UNIV_NVDIMM_IPL
+    // initialize nc_redo_info
+    nc_redo_info = static_cast<nc_redo_buf*> (malloc(sizeof(nc_redo_buf)));
+    nc_redo_info->nc_lsn = 0;
+    nc_redo_info->nc_buf_free = 0;
+    memcpy(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
+    flush_cache(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, sizeof(nc_redo_info));
+
+    log_sys->buf_ptr = static_cast<byte*>(nvdimm_info->nc_redo_start_pointer);
+    log_sys->buf = static_cast<byte*>(
+        ut_align(log_sys->buf_ptr, OS_FILE_LOG_BLOCK_SIZE));
+	// fprintf(stderr, "log_sys->buf = %p\n", log_sys->buf);
+#else
 	log_sys->buf_ptr = static_cast<byte*>(
 		ut_zalloc_nokey(log_sys->buf_size * 2 + OS_FILE_LOG_BLOCK_SIZE));
 	log_sys->buf = static_cast<byte*>(
 		ut_align(log_sys->buf_ptr, OS_FILE_LOG_BLOCK_SIZE));
-
+#endif
 	log_sys->first_in_use = true;
 
 	log_sys->max_buf_free = log_sys->buf_size / LOG_BUF_FLUSH_RATIO
@@ -1415,8 +1462,6 @@ log_buffer_flush_to_disk(
 	bool sync)
 {
 	ut_ad(!srv_read_only_mode); // catch_log
-	#ifdef UNIV_NVDIMM_IPL
-	#endif
 	log_write_up_to(log_get_lsn(), sync);
 }
 
@@ -1881,7 +1926,14 @@ log_checkpoint(
 
 		return(false);
 	}
-
+// #ifdef UNIV_NVDIMM_IPL
+  // 이 부분은 nv-sql을 위해서 존재하는 것 같은데 나중에 추후 확인 필요
+//   lsn_t nvdimm_lsn = buf_pool_get_oldest_modification();
+//   if ( (nvdimm_lsn < oldest_lsn) 
+//       && (oldest_lsn - nvdimm_lsn) > NC_REDO_LOG_THRESHOLD) {
+//     nc_flush_flag = true;
+//   }
+// #endif
 	log_sys->next_checkpoint_lsn = oldest_lsn;
 	log_write_checkpoint_info(sync);
 	ut_ad(!log_mutex_own());

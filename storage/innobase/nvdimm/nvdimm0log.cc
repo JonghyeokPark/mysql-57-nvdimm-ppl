@@ -416,26 +416,26 @@ static inline void print_flush_type(buf_flush_t flush_type, bool iplized){
 
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
 	if(get_flag(&(bpage->flags), IPLIZED) == false){
-		print_flush_type(flush_type, false);
+		// print_flush_type(flush_type, false);
 		return false;
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
-			print_flush_type(flush_type, false);
+			// print_flush_type(flush_type, false);
 			normalize_ipl_page(bpage, bpage->id);
 			return true;
 		}
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
-			print_flush_type(flush_type, true);
+			// print_flush_type(flush_type, true);
 			return false;
 		}
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
-				print_flush_type(flush_type, true);
+				// print_flush_type(flush_type, true);
 				return false;
 			}
 			else{
-				print_flush_type(flush_type, false);
+				// print_flush_type(flush_type, false);
 				normalize_ipl_page(bpage, bpage->id);
 				return true;
 				
