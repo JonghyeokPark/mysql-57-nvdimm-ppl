@@ -118,6 +118,8 @@ typedef struct NVDIMM_SYSTEM
   uint64_t dynamic_ipl_size;
   uint64_t dynamic_ipl_per_page_size;
   uint64_t dynamic_ipl_page_number_per_buf_pool;
+
+  unsigned char * nc_redo_start_pointer;
 }nvdimm_system;
 
 typedef struct APPLY_LOG_INFO
@@ -151,7 +153,6 @@ void set_apply_info_and_log_apply(buf_block_t* block);
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage);
 void nvdimm_ipl_add_split_merge_map(page_id_t page_id);
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
-bool nvdimm_ipl_is_split_or_merge_page(page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
 bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush);
@@ -161,6 +162,16 @@ unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
 void set_flag(unsigned char * flags, ipl_flag flag);
 void unset_flag(unsigned char * flags, ipl_flag flag);
 bool get_flag(unsigned char * flags, ipl_flag flag);
+
+//redo log buffer caching
+struct nc_redo_buf{
+  uint64_t nc_buf_free;
+  uint64_t nc_lsn;
+};
+
+// redo info spot
+#define REDO_INFO_OFFSET  (512*1024*1024)
+extern nc_redo_buf* nc_redo_info;
 
 
 #ifdef UNIV_NVDIMM_IPL
