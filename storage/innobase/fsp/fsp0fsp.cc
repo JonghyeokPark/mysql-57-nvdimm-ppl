@@ -1881,6 +1881,7 @@ fsp_page_create(
 	buf_block_buf_fix_inc(block, __FILE__, __LINE__);
 
 	mutex_exit(&block->mutex);
+	// fprintf(stderr, "fsp_page_create fix_type: %d, fix_block: (%u, %u)\n", MTR_MEMO_PAGE_X_FIX, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(init_mtr, block, rw_latch == RW_X_LATCH
 		      ? MTR_MEMO_PAGE_X_FIX : MTR_MEMO_PAGE_SX_FIX);
 

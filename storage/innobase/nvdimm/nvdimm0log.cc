@@ -165,7 +165,7 @@ bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type
 
 
 void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage){
-	// fprintf(stderr, "Add log start! (%u, %u) Type : %d len: %lu\n",bpage->id.space(), bpage->id.page_no(), type, len);
+	// fprintf(stderr, "nvdimm_ipl_add(%u, %u) oldest_lsn: %lu flag: %d frmae: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification,bpage->flags, ((buf_block_t *)bpage)->frame);
 	if (!get_flag(&(bpage->flags), IPLIZED)) {
 		alloc_static_ipl_to_bpage(bpage);
 		if(bpage->static_ipl_pointer == NULL){
@@ -174,14 +174,6 @@ void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * 
 		}
 	}
 	write_ipl_log_header_and_body(bpage, len, type, log);
-	// if(bpage->oldest_modification != 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){
-	// 	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
-	// 	buf_pool_mutex_enter(buf_pool);
-	// 	buf_flush_list_mutex_enter(buf_pool);
-	// 	remove_ipl_page_from_flush_list(buf_pool, bpage);
-	// 	buf_flush_list_mutex_exit(buf_pool);
-	// 	buf_pool_mutex_exit(buf_pool);
-	// }
 }
 void remove_ipl_page_from_flush_list(buf_pool_t * buf_pool, buf_page_t * bpage){
 		/* Important that we adjust the hazard pointer before removing
@@ -298,6 +290,7 @@ void set_apply_info_and_log_apply(buf_block_t* block) {
 
 
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
+	// fprintf(stderr, "insert lookup table(%u, %u) before oldest_lsn: %lu\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification);
 	page_id_t page_id = bpage->id;
 	std::pair <page_id_t, unsigned char *> insert_data = std::make_pair(bpage->id, bpage->static_ipl_pointer);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
@@ -308,7 +301,6 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 }
 
 void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
-	// fprintf(stderr, "ipl_add Split page(%u, %u)\n", page_id.space(), page_id.page_no());
 	if(!get_flag(&(bpage->flags), IN_LOOK_UP)){
 		buf_pool_t * buf_pool = buf_pool_get(bpage->id);
 		free_dynamic_address_to_indirection_queue(buf_pool, get_dynamic_ipl_pointer(bpage));
@@ -318,6 +310,9 @@ void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
 		bpage->flags = 0;
 	}
 	set_flag(&(bpage->flags), NORMALIZE);
+	// fprintf(stderr, "ipl_add Split page(%u, %u) before oldest_lsn: %lu flag: %d frmae: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->flags, ((buf_block_t *)bpage)->frame);
+	buf_flush_note_modification((buf_block_t *)bpage, log_sys->lsn, log_sys->lsn, NULL);
+	// fprintf(stderr, "ipl_add Split page(%u, %u) after oldest_lsn: %lu flag: %d frmae: %p \n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->flags, ((buf_block_t *)bpage)->frame);
 	
 }
 
@@ -338,6 +333,7 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 
 void set_for_ipl_page(buf_page_t* bpage){
 	bpage->static_ipl_pointer = NULL;
+	// fprintf(stderr, "Read page! page_id(%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	bpage->flags = 0;
 	bpage->ipl_write_pointer = NULL;
 	page_id_t page_id = bpage->id;
@@ -364,16 +360,16 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
-			// fprintf(stderr, "[FLUSH]split ipl page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+			// fprintf(stderr, "[FLUSH]split ipl page: (%u, %u), flush_type: %d\n", bpage->id.space(), bpage->id.page_no(), flush_type);
 			return false;
 		}
 		if(get_dynamic_ipl_pointer(bpage)== NULL){
-			// fprintf(stderr, "[Not Flush]Only Static ipl page: (%u, %u) flush_type %u, old_lsn: %zu, buf_fix_count: %u, io_fix: %u\n", bpage->id.space(), bpage->id.page_no(), flush_type, bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage));
+			fprintf(stderr, "[Not Flush]Only Static ipl page: (%u, %u) flush_type %u, old_lsn: %zu, buf_fix_count: %u, io_fix: %u, frmae: %p\n", bpage->id.space(), bpage->id.page_no(), flush_type, bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), ((buf_block_t *)bpage)->frame);
 			return true;
 		}
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
-				// fprintf(stderr, "[Not Flush]Checkpoint ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
+				fprintf(stderr, "[Not Flush]Checkpoint ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
 				return true;
 			}
 			else{

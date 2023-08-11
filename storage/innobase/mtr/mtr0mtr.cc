@@ -39,9 +39,9 @@ Created 11/26/1995 Heikki Tuuri
 #include "mtr0mtr.ic"
 #endif /* UNIV_NONINL */
 
-#ifdef UNIV_NVDIMM_IPL
+// #ifdef UNIV_NVDIMM_IPL
 #include "nvdimm-ipl.h"
-#endif
+// #endif
 
 /** Iterate over a memo block in reverse. */
 template <typename Functor>
@@ -631,7 +631,7 @@ mtr_t::commit()
 
 		ut_ad(!srv_read_only_mode
 		      || m_impl.m_log_mode == MTR_LOG_NO_REDO);
-#ifdef UNIV_NVDIMM_CACHE
+#ifdef UNIV_NVDIMM_IPL
     	cmd.execute_nvm();
 #else
 		cmd.execute();

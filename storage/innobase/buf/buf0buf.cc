@@ -4675,7 +4675,7 @@ got_block:
 		fix_type = MTR_MEMO_PAGE_X_FIX;
 		break;
 	}
-
+	// fprintf(stderr, "buf_page_get_gen fix_type: %d, fix_block: (%u, %u)\n", fix_type, fix_block->page.id.space(),fix_block->page.id.page_no());
 	mtr_memo_push(mtr, fix_block, fix_type);
 
 	if (mode != BUF_PEEK_IF_IN_POOL && !access_time) {
@@ -4782,7 +4782,7 @@ buf_page_optimistic_get(
 
 		return(FALSE);
 	}
-
+	// fprintf(stderr, "buf_page_optimistic_get fix_type: %d, fix_block: (%u, %u)\n", fix_type, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(mtr, block, fix_type);
 
 #if defined UNIV_DEBUG || defined UNIV_BUF_DEBUG
@@ -4890,7 +4890,7 @@ buf_page_get_known_nowait(
 
 		return(FALSE);
 	}
-
+	// fprintf(stderr, "buf_page_get_known_nowait fix_type: %d, fix_block: (%u, %u)\n", fix_type, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(mtr, block, fix_type);
 
 #if defined UNIV_DEBUG || defined UNIV_BUF_DEBUG
@@ -4987,7 +4987,7 @@ buf_page_try_get_func(
 
 		return(NULL);
 	}
-
+	// fprintf(stderr, "buf_page_try_get_func fix_type: %d, fix_block: (%u, %u)\n", fix_type, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(mtr, block, fix_type);
 
 #if defined UNIV_DEBUG || defined UNIV_BUF_DEBUG
@@ -5473,7 +5473,7 @@ buf_page_create(
 	}
 
 	buf_pool_mutex_exit(buf_pool);
-
+	// fprintf(stderr, "buf_page_create fix_type: %d, fix_block: (%u, %u)\n", MTR_MEMO_BUF_FIX, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(mtr, block, MTR_MEMO_BUF_FIX);
 
 	buf_page_set_accessed(&block->page);
