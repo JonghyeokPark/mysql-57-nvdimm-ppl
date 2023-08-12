@@ -1022,18 +1022,8 @@ buf_LRU_free_from_unzip_LRU_list(
 		ut_ad(block->page.in_LRU_list);
 		buf_page_t * bpage = (buf_page_t *) block;
 		if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){
-			// fprintf(stderr, "2Skip Victim for Dynamic IPL page(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, flush_type:%d, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), bpage->flush_type, get_dynamic_ipl_pointer(bpage));
 			goto scan_end;
 		}
-		// else if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){ // 여기서 Page를 Clean화가 필요함
-		// 	if(get_dynamic_ipl_pointer(bpage) != NULL){ // Checkpoint안됐지만 Dynamic ipl을 가진 애들
-		// 		goto scan_end;
-		// 	}
-		// 	buf_flush_list_mutex_enter(buf_pool);
-		// 	remove_ipl_page_from_flush_list(buf_pool, bpage); // Flush List에서 제거
-		// 	buf_flush_list_mutex_exit(buf_pool);
-		// } 
-		// fprintf(stderr, "buf_LRU_free_page block before: page_id:(%u, %u) oldest_lsn: %lu, frame: %p\n",bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, ((buf_block_t*)bpage)->frame);
 		freed = buf_LRU_free_page(&block->page, false);
 		if(freed){
 			//nvdimm
@@ -1097,11 +1087,6 @@ buf_LRU_free_from_common_LRU_list(
 			mutex_exit(mutex);
 			// fprintf(stderr, "buf_LRU_free_page block before: page_id:(%u, %u) oldest_lsn: %lu, frame: %p\n",bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, ((buf_block_t*)bpage)->frame);
 			freed = buf_LRU_free_page(bpage, true);
-			if(freed){
-				//nvdimm
-				// fprintf(stderr, "buf_LRU_free_page block after: page_id:(%u, %u) oldest_lsn: %lu frame: %p\n",bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, ((buf_block_t*)bpage)->frame);
-				//nvdimm
-			}
 		} 
 		else {
 dynamic_end:		

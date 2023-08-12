@@ -1782,8 +1782,8 @@ buf_flush_LRU_list_batch(
 			clean and is not IO-fixed or buffer fixed. */
 			if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){ // Checkpoint안됐지만 Dynamic ipl을 가진 애들
 				mutex_exit(block_mutex);
-				nvdimm_ipl_add_split_merge_map(bpage);
-				buf_flush_page_and_try_neighbors(
+				set_flag(&(bpage->flags), DIRTIFIED);
+				ipl_flush_page_and_try_neighbors(
 				bpage, BUF_FLUSH_LRU, max, &count);
 				goto finish_write;
 			}
@@ -1796,24 +1796,6 @@ buf_flush_LRU_list_batch(
 				++evict_count;
 			}
 		}
-		// else if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){ // 여기서 Page를 Clean화가 필요함
-		// 	if(get_dynamic_ipl_pointer(bpage) != NULL){ // Checkpoint안됐지만 Dynamic ipl을 가진 애들
-		// 		nvdimm_ipl_add_split_merge_map(bpage);
-		// 		mutex_exit(block_mutex);
-		// 		ipl_flush_page_and_try_neighbors(bpage, BUF_FLUSH_LRU, max, &count);
-		// 		goto finish_write;
-		// 	}
-		// 	buf_flush_list_mutex_enter(buf_pool);
-		// 	remove_ipl_page_from_flush_list(buf_pool, bpage); // Flush List에서 제거
-		// 	buf_flush_list_mutex_exit(buf_pool);
-		// 	mutex_exit(block_mutex);
-		// 	if (buf_LRU_free_page(bpage, true)) {
-		// 		++evict_count;
-		// 	}
-		// 	else{
-		// 		fprintf(stderr, "Error!\n");
-		// 	}
-		// } 
 		else if (buf_flush_ready_for_flush(bpage, BUF_FLUSH_LRU)) {
 			/* Block is ready for flush. Dispatch an IO
 			request. The IO helper thread will put it on
@@ -2372,8 +2354,8 @@ buf_flush_single_page_from_LRU(
 			clean and is not IO-fixed or buffer fixed. */
 			if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){
 				//clean하지만, Dynamic ipl을 가진 애들
-				set_flag(&(bpage->flags), NORMALIZE);
-				buf_flush_note_modification_for_ipl_page((buf_block_t *)bpage, log_sys->lsn, log_sys->lsn, NULL);
+				// set_flag(&(bpage->flags), NORMALIZE);
+				// buf_flush_note_modification_for_ipl_page((buf_block_t *)bpage, log_sys->lsn, log_sys->lsn, NULL);
 				goto clean_flush_end;
 			}
 			mutex_exit(block_mutex);
@@ -2388,24 +2370,6 @@ buf_flush_single_page_from_LRU(
 			}
 
 		}
-		// else if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)&& buf_page_get_io_fix(bpage) == BUF_IO_NONE && bpage->buf_fix_count == 0){
-		// 	if(get_dynamic_ipl_pointer(bpage) != NULL){ 
-		// 		// Dirty하지만 Dynamic IPL을 가진 경우
-		// 		goto clean_flush_end;
-		// 	}
-		// 	buf_flush_list_mutex_enter(buf_pool);
-		// 	remove_ipl_page_from_flush_list(buf_pool, bpage); // Flush List에서 제거
-		// 	buf_flush_list_mutex_exit(buf_pool);
-		// 	mutex_exit(block_mutex);
-		// 	if (buf_LRU_free_page(bpage, true)) {
-		// 		buf_pool_mutex_exit(buf_pool);
-		// 		freed = true;
-		// 		break;
-		// 	}
-		// 	else{
-		// 		fprintf(stderr, "Error!\n");
-		// 	}
-		// }
 		else if (buf_flush_ready_for_flush(
 				   bpage, BUF_FLUSH_SINGLE_PAGE)) {
 			// if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
@@ -2418,10 +2382,10 @@ buf_flush_single_page_from_LRU(
 
 			Note: There is no guarantee that this page has actually
 			been freed, only that it has been flushed to disk */
-clean_flush_end:
+
 			freed = buf_flush_page(
 				buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
-
+clean_flush_end:
 			if (freed) {
 				break;
 			}

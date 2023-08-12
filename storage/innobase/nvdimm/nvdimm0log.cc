@@ -311,7 +311,9 @@ void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
 	}
 	set_flag(&(bpage->flags), NORMALIZE);
 	// fprintf(stderr, "ipl_add Split page(%u, %u) before oldest_lsn: %lu flag: %d frmae: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->flags, ((buf_block_t *)bpage)->frame);
-	buf_flush_note_modification((buf_block_t *)bpage, log_sys->lsn, log_sys->lsn, NULL);
+	// if(bpage->oldest_modification == 0){
+	// 	buf_flush_note_modification((buf_block_t *)bpage, log_sys->lsn, log_sys->lsn, NULL);
+	// }
 	// fprintf(stderr, "ipl_add Split page(%u, %u) after oldest_lsn: %lu flag: %d frmae: %p \n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->flags, ((buf_block_t *)bpage)->frame);
 	
 }
@@ -457,8 +459,7 @@ ulint get_ipl_length_from_write_pointer(buf_page_t * bpage){
 	unsigned char * static_ipl_pointer = bpage->static_ipl_pointer;
 	unsigned char * dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
 	unsigned char * write_pointer = bpage->ipl_write_pointer;
-	ulint static_ipl_len = write_pointer - static_ipl_pointer;
-	return static_ipl_len <= nvdimm_info->static_ipl_per_page_size ? static_ipl_len : nvdimm_info->static_ipl_per_page_size + (write_pointer - dynamic_ipl_pointer);
+	return dynamic_ipl_pointer != NULL ? nvdimm_info->static_ipl_per_page_size + (write_pointer - dynamic_ipl_pointer) : write_pointer - static_ipl_pointer;
 }
 
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage){
