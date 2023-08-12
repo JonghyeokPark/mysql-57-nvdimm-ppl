@@ -139,12 +139,10 @@ extern nvdimm_system * nvdimm_info;
 
 /* IPL operations */
 void alloc_static_ipl_to_bpage(buf_page_t * bpage);
-bool alloc_dynamic_ipl_region(buf_page_t * bpage);
-ulint write_to_static_region(buf_page_t * bpage, ulint len, unsigned char * write_ipl_log_buffer);
-ulint write_to_dynamic_region(buf_page_t * bpage, ulint len, unsigned char * write_ipl_log_buffer);
-bool write_ipl_log_header_and_body(buf_page_t * bpage, ulint len, mlog_id_t type, unsigned char * log);
-void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage);
+void alloc_dynamic_ipl_region(buf_page_t * bpage);
+void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len);
 void remove_ipl_page_from_flush_list(buf_pool_t * buf_pool, buf_page_t * bpage);
+bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len);
 
 //page ipl log apply 관련 함수들
 void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr);
@@ -160,7 +158,7 @@ void set_for_ipl_page(buf_page_t* bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
 bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush);
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
-ulint get_ipl_length_from_write_pointer(buf_page_t * bpage);
+ulint get_can_write_size_from_write_pointer(buf_page_t * bpage);
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
 void set_flag(unsigned char * flags, ipl_flag flag);
 void unset_flag(unsigned char * flags, ipl_flag flag);

@@ -903,7 +903,7 @@ buf_flush_write_complete(
 
 			bpage->flush_observer = NULL;
 		}
-		fprintf(stderr, "Skip flush_list remove : (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+		// fprintf(stderr, "Skip flush_list remove : (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	}
 	else{
 		buf_flush_remove(bpage);

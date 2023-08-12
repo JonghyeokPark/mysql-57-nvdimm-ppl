@@ -965,7 +965,14 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len)
 	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
 	if(!is_system_or_undo_tablespace(space) && !get_flag(&(buf_page->flags), NORMALIZE)
 		&& page_is_leaf(((buf_block_t *)buf_page)->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
-		nvdimm_ipl_add(body, (ptr + len) - body, type, buf_page);
+		ulint log_len = (ptr + len) - body + APPLY_LOG_HDR_SIZE;
+		ulint rest_log_len = 0;
+		if(can_write_in_ipl(buf_page, log_len, &rest_log_len)){
+			nvdimm_ipl_add(body, log_len, type, buf_page, rest_log_len);
+		}
+		else{
+			nvdimm_ipl_add_split_merge_map(buf_page);
+		}
 	}
 }
 
