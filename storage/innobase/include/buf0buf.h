@@ -2104,8 +2104,10 @@ struct buf_pool_t{
 	rw_lock_t lookup_table_lock;
 	std::queue<uint> * static_ipl_allocator;
 	std::queue<uint> * dynamic_ipl_allocator;
+	std::queue<uint> * second_dynamic_ipl_allocator;
 	ib_mutex_t static_allocator_mutex;
  	ib_mutex_t dynamic_allocator_mutex;
+	ib_mutex_t second_dynamic_allocator_mutex;
 	//nvdimm
 
 	BufPoolMutex	mutex;		/*!< Buffer pool mutex of this

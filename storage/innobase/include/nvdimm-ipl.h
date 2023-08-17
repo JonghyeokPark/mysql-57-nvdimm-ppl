@@ -85,6 +85,10 @@ void make_dynamic_indirection_queue(buf_pool_t * buf_pool);
 unsigned char * alloc_dynamic_address_from_indirection_queue(buf_pool_t * buf_pool);
 void free_dynamic_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr);
 
+void make_second_dynamic_indirection_queue(buf_pool_t * buf_pool);
+unsigned char * alloc_second_dynamic_address_from_indirection_queue(buf_pool_t * buf_pool);
+void free_dynamic_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr);
+
 unsigned char * get_addr_from_ipl_index(unsigned char * start_ptr, uint index, uint64_t ipl_per_page_size);
 uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr, uint64_t ipl_per_page_size);
 
@@ -122,6 +126,11 @@ typedef struct NVDIMM_SYSTEM
   uint64_t dynamic_ipl_per_page_size;
   uint64_t dynamic_ipl_page_number_per_buf_pool;
 
+  unsigned char* second_dynamic_start_pointer;
+  uint64_t second_dynamic_ipl_size;
+  uint64_t second_dynamic_ipl_per_page_size;
+  uint64_t second_dynamic_ipl_page_number_per_buf_pool;
+
   unsigned char * nc_redo_start_pointer;
 }nvdimm_system;
 
@@ -141,7 +150,6 @@ extern nvdimm_system * nvdimm_info;
 void alloc_static_ipl_to_bpage(buf_page_t * bpage);
 void alloc_dynamic_ipl_region(buf_page_t * bpage);
 void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len);
-void remove_ipl_page_from_flush_list(buf_pool_t * buf_pool, buf_page_t * bpage);
 bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len);
 
 //page ipl log apply 관련 함수들

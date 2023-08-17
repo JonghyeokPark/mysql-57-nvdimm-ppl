@@ -1424,6 +1424,8 @@ sync_latch_meta_init()
 
 	LATCH_ADD_MUTEX(DYNAMIC_REGION, SYNC_DYNAMIC_REGION, nvdimm_dynamic_region_mutex_key);
 
+	LATCH_ADD_MUTEX(SECOND_DYNAMIC_REGION, SYNC_SECOND_DYNAMIC_REGION, nvdimm_second_dynamic_region_mutex_key);
+
 	LATCH_ADD_MUTEX(IPL_MAP_MUTEX, SYNC_IPL_MAP_MUTEX, ipl_map_mutex_key);
 	#endif /* UNIV_NVDIMM_IPL */
 

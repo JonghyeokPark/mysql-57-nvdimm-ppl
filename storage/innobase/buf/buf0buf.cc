@@ -1866,6 +1866,10 @@ buf_pool_init_instance(
 	buf_pool->dynamic_ipl_allocator = new std::queue<uint>;
 	mutex_create(LATCH_ID_DYNAMIC_REGION, &buf_pool->dynamic_allocator_mutex);
 	make_dynamic_indirection_queue(buf_pool);
+
+	buf_pool->second_dynamic_ipl_allocator = new std::queue<uint>;
+	mutex_create(LATCH_ID_SECOND_DYNAMIC_REGION, &buf_pool->second_dynamic_allocator_mutex);
+	// make_static_indirection_queue(buf_pool);
 	//nvdimm make static, dynamic allocator
 	
 
@@ -1948,8 +1952,10 @@ buf_pool_free_instance(
 	//nvdimm free ipl_allcator and mutex
 	ut_free(buf_pool->static_ipl_allocator);
 	ut_free(buf_pool->dynamic_ipl_allocator);
+	ut_free(buf_pool->second_dynamic_ipl_allocator);
 	mutex_free(&buf_pool->static_allocator_mutex);
 	mutex_free(&buf_pool->dynamic_allocator_mutex);
+	mutex_free(&buf_pool->second_dynamic_allocator_mutex);
 	//nvdimm free ipl_allcator and mutex
 
 	buf_pool->allocator.~ut_allocator();
