@@ -27,10 +27,10 @@
 //싹다 클래스로 캡슐레이션을 해버려야 되나...
 // 나중에 시간되면 해보기.
 
-void alloc_static_ipl_to_bpage(buf_page_t * bpage){
+bool alloc_static_ipl_to_bpage(buf_page_t * bpage){
 	unsigned char * static_ipl_pointer = alloc_static_address_from_indirection_queue(buf_pool_get(bpage->id));
 	unsigned char temp_buf[12] = {NULL, };
-	if(static_ipl_pointer == NULL) return;
+	if(static_ipl_pointer == NULL) return false;
 	ulint offset = 0;
 	mach_write_to_4(((unsigned char *)temp_buf) + offset, bpage->id.space());
 	offset += 4;
@@ -48,21 +48,42 @@ void alloc_static_ipl_to_bpage(buf_page_t * bpage){
 	// fprintf(stderr, "Iplized,%f,%u,\n",(double)(time(NULL) - start),bpage->id.space());
 	set_flag(&(bpage->flags), IPLIZED);
 	// fprintf(stderr, "alloc static ipl (%u, %u) static_ipl: %p now_write_pointer: %p\n", bpage->id.space(), bpage->id.page_no(),bpage->static_ipl_pointer ,bpage->ipl_write_pointer);
+	return true;
 }
 
-void alloc_dynamic_ipl_region(buf_page_t * bpage){
+bool alloc_dynamic_ipl_to_bpage(buf_page_t * bpage){
 	unsigned char * dynamic_address = alloc_dynamic_address_from_indirection_queue(buf_pool_get(bpage->id));
-	if(dynamic_address == NULL)	return;
+	if(dynamic_address == NULL)	return false;
 	unsigned char * pointer_to_store_dynamic_address = bpage->static_ipl_pointer + DYNAMIC_ADDRESS_OFFSET;
+
+	//Statci region에 dynamic address를 저장
 	mach_write_to_4(pointer_to_store_dynamic_address, get_ipl_index_from_addr(nvdimm_info->dynamic_start_pointer, dynamic_address, nvdimm_info->dynamic_ipl_per_page_size));
 	flush_cache(pointer_to_store_dynamic_address, 4);
-	// bpage->ipl_write_pointer = dynamic_address;
-	// fprintf(stderr, "Dynamic,%f,%u,\n",(double)(time(NULL) - start),bpage->id.space());
-	// fprintf(stderr, "Dynamic region allocated %p to (%u, %u) write_pointer: %p\n", dynamic_address, bpage->id.space(), bpage->id.page_no(), bpage->ipl_write_pointer);
+
+	//Dynamic address에 second DIPL 영역 저장
+	mach_write_to_4(dynamic_address, 0UL);
+	flush_cache(dynamic_address, 4);
+
+	// fprintf(stderr, "Dynamic region allocated %p to (%u, %u) now_write_pointer: %p\n", dynamic_address, bpage->id.space(), bpage->id.page_no(), bpage->ipl_write_pointer);
+	return true;
+}
+
+bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage){
+	unsigned char * second_dynamic_address = alloc_second_dynamic_address_from_indirection_queue(buf_pool_get(bpage->id));
+	if(second_dynamic_address == NULL)	return false;
+	unsigned char * pointer_to_store_dynamic_address = get_dynamic_ipl_pointer(bpage);
+
+	//First DIPL region에 index 저장
+	mach_write_to_4(pointer_to_store_dynamic_address, get_ipl_index_from_addr(nvdimm_info->second_dynamic_start_pointer, second_dynamic_address, nvdimm_info->second_dynamic_ipl_per_page_size));
+	flush_cache(pointer_to_store_dynamic_address, 4);
+	set_flag(&(bpage->flags), SECOND_DIPL);
+	// fprintf(stderr, "Second Dynamic region allocated %p to (%u, %u) write_pointer: %p\n", second_dynamic_address, bpage->id.space(), bpage->id.page_no(), bpage->ipl_write_pointer);
+	return true;
 }
 
 void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len){
-	// fprintf(stderr, "nvdimm_ipl_add(%u, %u) oldest_lsn: %lu flag: %d frmae: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification,bpage->flags, ((buf_block_t *)bpage)->frame);
+	uint test;
+	// fprintf(stderr, "nvdimm_ipl_add(%u, %u) log_len: %lu now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), len, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
 	unsigned char write_ipl_log_buffer [len] = {NULL, };
 
 	ulint offset = 0;
@@ -86,14 +107,30 @@ fit_size:
 	else{ // 다 들어갈 수 없는 경우
 		ulint first_write_len = len - rest_log_len;
 		if(first_write_len == 0){
-			bpage->ipl_write_pointer = get_dynamic_ipl_pointer(bpage);
+			if(!get_flag(&(bpage->flags), SECOND_DIPL)){
+				bpage->ipl_write_pointer = get_dynamic_ipl_pointer(bpage);
+				bpage->ipl_write_pointer += DIPL_HEADER_SIZE;
+			}
+			else{ // 두번쨰 DIPL 할당
+				bpage->ipl_write_pointer = get_second_dynamic_ipl_pointer(bpage);
+			}
 			goto fit_size;
 		}
 		memcpy(write_ipl_log_buffer + offset, log, log_body_size);
 
 		memcpy(bpage->ipl_write_pointer, write_ipl_log_buffer, first_write_len);
 		flush_cache(bpage->ipl_write_pointer, first_write_len);
-		bpage->ipl_write_pointer = get_dynamic_ipl_pointer(bpage);
+
+		//첫번쨰 DIPL 할당
+		if(!get_flag(&(bpage->flags), SECOND_DIPL)){
+			bpage->ipl_write_pointer = get_dynamic_ipl_pointer(bpage);
+			bpage->ipl_write_pointer += DIPL_HEADER_SIZE;
+		}
+		else{ // 두번쨰 DIPL 할당
+			bpage->ipl_write_pointer = get_second_dynamic_ipl_pointer(bpage);
+		}
+		
+
 		memcpy(bpage->ipl_write_pointer, write_ipl_log_buffer + first_write_len, rest_log_len);
 		flush_cache(bpage->ipl_write_pointer, rest_log_len);
 		bpage->ipl_write_pointer += rest_log_len;
@@ -103,16 +140,29 @@ fit_size:
 
 bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len){
 	if(!get_flag(&(bpage->flags), IPLIZED)){
-		alloc_static_ipl_to_bpage(bpage);
-		return bpage->static_ipl_pointer != NULL;
+		return alloc_static_ipl_to_bpage(bpage);
 	}
 	unsigned char * dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
 	ulint can_write_size;
-	can_write_size = get_can_write_size_from_write_pointer(bpage);
-	if(dynamic_ipl_pointer == NULL && log_len > can_write_size ){ // Static이 넘치는 경우
-		alloc_dynamic_ipl_region(bpage);
-		*rest_log_len = log_len - can_write_size;
-		return get_dynamic_ipl_pointer(bpage) != NULL;
+	uint type; // 쓰고있는 영역 0: Static 영역, 1: First DIPL 영역, 2: Second DIPL 영역
+	can_write_size = get_can_write_size_from_write_pointer(bpage, &type);
+
+	switch (type)
+	{
+	case 0:
+		if(log_len > can_write_size){
+			*rest_log_len = log_len - can_write_size;
+			return alloc_dynamic_ipl_to_bpage(bpage);
+		}
+		break;
+	case 1:
+		if(log_len > can_write_size){
+			*rest_log_len = log_len - can_write_size;
+			return alloc_second_dynamic_ipl_to_bpage(bpage);
+		}
+		break;
+	default:
+		break;
 	}
 	return log_len <= can_write_size;
 }
@@ -202,6 +252,7 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
 	if(!get_flag(&(bpage->flags), IN_LOOK_UP)){
 		buf_pool_t * buf_pool = buf_pool_get(bpage->id);
+		free_second_dynamic_address_to_indirection_queue(buf_pool, get_second_dynamic_ipl_pointer(bpage));
 		free_dynamic_address_to_indirection_queue(buf_pool, get_dynamic_ipl_pointer(bpage));
 		free_static_address_to_indirection_queue(buf_pool, bpage->static_ipl_pointer);
 		bpage->static_ipl_pointer = NULL;
@@ -354,11 +405,25 @@ bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush){
 	return false;
 }
 
-ulint get_can_write_size_from_write_pointer(buf_page_t * bpage){
+ulint get_can_write_size_from_write_pointer(buf_page_t * bpage, uint * type){
 	unsigned char * static_ipl_pointer = bpage->static_ipl_pointer;
 	unsigned char * dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
+	unsigned char * second_dynamic_ipl_pointer = get_second_dynamic_ipl_pointer(bpage);
 	unsigned char * write_pointer = bpage->ipl_write_pointer;
-	return dynamic_ipl_pointer != NULL ? (nvdimm_info->dynamic_ipl_per_page_size - (write_pointer - dynamic_ipl_pointer)) : (nvdimm_info->static_ipl_per_page_size - (write_pointer - static_ipl_pointer));
+	ulint return_value;
+	if(dynamic_ipl_pointer == NULL){
+		return_value = nvdimm_info->static_ipl_per_page_size - (write_pointer - static_ipl_pointer);
+		*type = 0;
+	}
+	else if(second_dynamic_ipl_pointer == NULL){
+		return_value = nvdimm_info->dynamic_ipl_per_page_size - (write_pointer - dynamic_ipl_pointer);
+		*type = 1;
+	}
+	else{
+		return_value = nvdimm_info->second_dynamic_ipl_per_page_size - (write_pointer - second_dynamic_ipl_pointer);
+		*type = 2;
+	}
+	return return_value;
 }
 
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage){
@@ -366,6 +431,14 @@ unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage){
 	if(bpage->static_ipl_pointer == NULL) return NULL;
 	uint ipl_index = mach_read_from_4(bpage->static_ipl_pointer + DYNAMIC_ADDRESS_OFFSET);
 	return get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, ipl_index, nvdimm_info->dynamic_ipl_per_page_size);
+}
+
+unsigned char * get_second_dynamic_ipl_pointer(buf_page_t * bpage){
+	// fprintf(stderr, "get_second_dynamic_ipl_pointer (%u, %u) static_ipl: %p now_write_pointer: %p\n", bpage->id.space(), bpage->id.page_no(),bpage->static_ipl_pointer ,bpage->ipl_write_pointer);
+	unsigned char * dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
+	if(dynamic_ipl_pointer == NULL) return NULL;
+	uint ipl_index = mach_read_from_4(dynamic_ipl_pointer);
+	return get_addr_from_ipl_index(nvdimm_info->second_dynamic_start_pointer, ipl_index, nvdimm_info->second_dynamic_ipl_per_page_size);
 }
 
 void set_flag(unsigned char * flags, ipl_flag flag_type){

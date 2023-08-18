@@ -87,7 +87,7 @@ void free_dynamic_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned c
 
 void make_second_dynamic_indirection_queue(buf_pool_t * buf_pool);
 unsigned char * alloc_second_dynamic_address_from_indirection_queue(buf_pool_t * buf_pool);
-void free_dynamic_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr);
+void free_second_dynamic_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr);
 
 unsigned char * get_addr_from_ipl_index(unsigned char * start_ptr, uint index, uint64_t ipl_per_page_size);
 uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr, uint64_t ipl_per_page_size);
@@ -99,11 +99,17 @@ void nvdimm_free(const uint64_t pool_size);
 
 
 
-
+//Static reion info
 #define PAGE_NO_OFFSET 4UL
 #define DYNAMIC_ADDRESS_OFFSET 8UL
 #define IPL_LOG_HEADER_SIZE 12UL
 #define APPLY_LOG_HDR_SIZE 3UL
+
+// Space | Page No | Dynamic_index || IPL Log | ...
+
+// Dynamic region info
+#define DIPL_HEADER_SIZE 4UL
+// Second Dynamic index || IPL LOG | ..
 
 extern time_t start;
 
@@ -111,7 +117,8 @@ enum ipl_flag {
   IPLIZED = 1,
   NORMALIZE = 2,
   DIRTIFIED = 4,
-  IN_LOOK_UP = 8
+  IN_LOOK_UP = 8,
+  SECOND_DIPL = 16
 };
 
 typedef struct NVDIMM_SYSTEM
@@ -147,8 +154,9 @@ typedef struct APPLY_LOG_INFO
 extern nvdimm_system * nvdimm_info;
 
 /* IPL operations */
-void alloc_static_ipl_to_bpage(buf_page_t * bpage);
-void alloc_dynamic_ipl_region(buf_page_t * bpage);
+bool alloc_static_ipl_to_bpage(buf_page_t * bpage);
+bool alloc_dynamic_ipl_to_bpage(buf_page_t * bpage);
+bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage);
 void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len);
 bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len);
 
@@ -166,8 +174,9 @@ void set_for_ipl_page(buf_page_t* bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
 bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush);
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
-ulint get_can_write_size_from_write_pointer(buf_page_t * bpage);
+ulint get_can_write_size_from_write_pointer(buf_page_t * bpage, uint * type);
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
+unsigned char * get_second_dynamic_ipl_pointer(buf_page_t * bpage);
 void set_flag(unsigned char * flags, ipl_flag flag);
 void unset_flag(unsigned char * flags, ipl_flag flag);
 bool get_flag(unsigned char * flags, ipl_flag flag);

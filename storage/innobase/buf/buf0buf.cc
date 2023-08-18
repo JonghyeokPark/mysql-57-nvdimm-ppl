@@ -1869,7 +1869,7 @@ buf_pool_init_instance(
 
 	buf_pool->second_dynamic_ipl_allocator = new std::queue<uint>;
 	mutex_create(LATCH_ID_SECOND_DYNAMIC_REGION, &buf_pool->second_dynamic_allocator_mutex);
-	// make_static_indirection_queue(buf_pool);
+	make_second_dynamic_indirection_queue(buf_pool);
 	//nvdimm make static, dynamic allocator
 	
 
@@ -5886,8 +5886,7 @@ corrupt:
 
 	buf_page_set_io_fix(bpage, BUF_IO_NONE);
 	buf_page_monitor(bpage, io_type);
-	unsigned char * static_ipl_pointer;
-	unsigned char * dynamic_ipl_pointer;
+	unsigned char *static_ipl_pointer, *dynamic_ipl_pointer, *second_dynamic_ipl_pointer;
 	bool return_ipl = false;
 	
 	
@@ -5929,11 +5928,13 @@ corrupt:
 		routine in the flush system */
 
 		buf_flush_write_complete(bpage);
-		//여기서 normalize page 실행
-		static_ipl_pointer = bpage->static_ipl_pointer;
+		//nvdimm
+		second_dynamic_ipl_pointer = get_second_dynamic_ipl_pointer(bpage);
 		dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
+		static_ipl_pointer = bpage->static_ipl_pointer;
 		return_ipl = check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
-		
+		//nvdimm
+
 		if (uncompressed) {
 			rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
 					      BUF_IO_WRITE);
@@ -5972,6 +5973,7 @@ corrupt:
 
 	buf_pool_mutex_exit(buf_pool);
 	if(return_ipl){
+		free_second_dynamic_address_to_indirection_queue(buf_pool, second_dynamic_ipl_pointer);
 		free_dynamic_address_to_indirection_queue(buf_pool, dynamic_ipl_pointer);
 		free_static_address_to_indirection_queue(buf_pool, static_ipl_pointer);
 	}
