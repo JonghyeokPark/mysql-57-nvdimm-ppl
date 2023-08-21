@@ -145,6 +145,7 @@ typedef struct APPLY_LOG_INFO
 {
   byte * static_start_pointer;
   byte * dynamic_start_pointer;
+  byte * second_dynamic_start_pointer;
   buf_block_t * block;
 
 }apply_log_info;
@@ -162,7 +163,7 @@ bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len);
 
 //page ipl log apply 관련 함수들
 void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr);
-void ipl_log_apply(byte * start_ptr, apply_log_info * apply_info, mtr_t * temp_mtr);
+void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info, mtr_t * temp_mtr);
 void set_apply_info_and_log_apply(buf_block_t* block);
 
 
@@ -172,7 +173,6 @@ void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage);
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
-bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush);
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
 ulint get_can_write_size_from_write_pointer(buf_page_t * bpage, uint * type);
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);

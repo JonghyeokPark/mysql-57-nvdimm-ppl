@@ -82,13 +82,12 @@ bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage){
 }
 
 void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len){
-	uint test;
-	// fprintf(stderr, "nvdimm_ipl_add(%u, %u) log_len: %lu now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), len, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
 	unsigned char write_ipl_log_buffer [len] = {NULL, };
-
+	uint test;
 	ulint offset = 0;
 	unsigned char store_type = type;
 	unsigned short log_body_size = len - 3;
+	// fprintf(stderr, "nvdimm_ipl_add(%u, %u) Log type: %d, log_len: %lu now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, log_body_size, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
 
 	mach_write_to_1(write_ipl_log_buffer + offset, store_type);
 	offset += 1;
@@ -103,6 +102,8 @@ fit_size:
 		memcpy(bpage->ipl_write_pointer, log, log_body_size);
 		flush_cache(bpage->ipl_write_pointer, log_body_size);
 		bpage->ipl_write_pointer += log_body_size;
+		
+		return;
 	}
 	else{ // 다 들어갈 수 없는 경우
 		ulint first_write_len = len - rest_log_len;
@@ -117,10 +118,10 @@ fit_size:
 			goto fit_size;
 		}
 		memcpy(write_ipl_log_buffer + offset, log, log_body_size);
-
+		// fprintf(stderr, "First Write! (%u, %u) Log type: %d, first_write_len: %lu now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, first_write_len, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
 		memcpy(bpage->ipl_write_pointer, write_ipl_log_buffer, first_write_len);
 		flush_cache(bpage->ipl_write_pointer, first_write_len);
-
+		
 		//첫번쨰 DIPL 할당
 		if(!get_flag(&(bpage->flags), SECOND_DIPL)){
 			bpage->ipl_write_pointer = get_dynamic_ipl_pointer(bpage);
@@ -130,10 +131,12 @@ fit_size:
 			bpage->ipl_write_pointer = get_second_dynamic_ipl_pointer(bpage);
 		}
 		
-
+		// fprintf(stderr, "Second Write(%u, %u) Log type: %d, rest_log_len: %lu now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, rest_log_len, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
 		memcpy(bpage->ipl_write_pointer, write_ipl_log_buffer + first_write_len, rest_log_len);
 		flush_cache(bpage->ipl_write_pointer, rest_log_len);
 		bpage->ipl_write_pointer += rest_log_len;
+		
+		
 	}
 	
 }
@@ -169,51 +172,79 @@ bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len){
 
 void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 	//NVDIMM 내 redo log를 메모리로 카피
-	// fprintf(stderr, "apply_info! page_id:(%u, %u) static: %p dynamic: %p log_len: %zu\n", apply_info->space_id, apply_info->page_no, apply_info->static_start_pointer, apply_info->dynamic_start_pointer, apply_info->log_len);
-	if(!(apply_info->dynamic_start_pointer == NULL)){
+	ulint offset, sipl_size, dipl_size, sdipl_size, apply_buffer_size;
+	offset = 0;
+	apply_buffer_size = 0;
+
+	sipl_size = nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE;
+	dipl_size = nvdimm_info->dynamic_ipl_per_page_size - DIPL_HEADER_SIZE;
+	sdipl_size = nvdimm_info->second_dynamic_ipl_per_page_size;
+
+	if(apply_info->second_dynamic_start_pointer != NULL){
+		// fprintf(stderr, "SDIPL apply! page_id:(%u, %u) static: %p dynamic: %p second_dynamic:%p\n", apply_info->block->page.id.space(), apply_info->block->page.id.page_no(), apply_info->static_start_pointer, apply_info->dynamic_start_pointer, apply_info->second_dynamic_start_pointer);
+		apply_buffer_size = sipl_size + dipl_size + sdipl_size;
+		unsigned char temp_mtr_buffer [apply_buffer_size] = {NULL, };
+		memcpy(temp_mtr_buffer, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,sipl_size);
+		offset += sipl_size;
+		memcpy(temp_mtr_buffer + offset, apply_info->dynamic_start_pointer + DIPL_HEADER_SIZE, dipl_size);
+		offset += dipl_size;
+		memcpy(temp_mtr_buffer + offset, apply_info->second_dynamic_start_pointer, sdipl_size);
+		ipl_log_apply(temp_mtr_buffer, temp_mtr_buffer + apply_buffer_size, apply_info, temp_mtr);
+		return;
+	}
+	else if(apply_info->dynamic_start_pointer != NULL){
 		//dynamic 영역이 존재하는 경우도 카피.
-		ulint offset = 0;
-		ulint apply_buffer_size = nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size;
+		// fprintf(stderr, "DIPL apply! page_id:(%u, %u) static: %p dynamic: %p second_dynamic:%p\n", apply_info->block->page.id.space(), apply_info->block->page.id.page_no(), apply_info->static_start_pointer, apply_info->dynamic_start_pointer, apply_info->second_dynamic_start_pointer);
+		apply_buffer_size = sipl_size + dipl_size;
 		unsigned char temp_mtr_buffer [apply_buffer_size] = {NULL, };
 		
-		memcpy(temp_mtr_buffer + offset, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
-		offset += nvdimm_info->static_ipl_per_page_size	- IPL_LOG_HEADER_SIZE;
-		memcpy(temp_mtr_buffer + offset, apply_info->dynamic_start_pointer, nvdimm_info->dynamic_ipl_per_page_size);
-		ipl_log_apply(temp_mtr_buffer, apply_info, temp_mtr);
+		memcpy(temp_mtr_buffer, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,sipl_size);
+		offset += sipl_size;
+		memcpy(temp_mtr_buffer + offset, apply_info->dynamic_start_pointer + DIPL_HEADER_SIZE, dipl_size);
+		ipl_log_apply(temp_mtr_buffer,temp_mtr_buffer + apply_buffer_size, apply_info, temp_mtr);
 		return;
 	}
 	else{
-		ipl_log_apply(apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE, apply_info, temp_mtr);
+		ipl_log_apply(apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE + sipl_size, apply_info, temp_mtr);
 	}
 	
 }
 
-void ipl_log_apply(byte * apply_log_buffer, apply_log_info * apply_info, mtr_t * temp_mtr){
-	byte * start_ptr = apply_log_buffer;
-	byte * end_ptr = apply_info->dynamic_start_pointer == NULL ? apply_log_buffer + (nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE) : 
-	apply_log_buffer + ((nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE) + nvdimm_info->dynamic_ipl_per_page_size);
+void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info, mtr_t * temp_mtr){
+	// fprintf(stderr,"Apply! (%u, %u) start_ptr: %p, end_ptr: %p\n", apply_info->block->page.id.space(), apply_info->block->page.id.page_no(), start_ptr, end_ptr);
+	byte * apply_ptr = start_ptr;
 	ulint now_len = 0;
 	page_id_t page_id = apply_info->block->page.id;
-	while (start_ptr < end_ptr) {
+	while (apply_ptr < end_ptr) {
 		// log_hdr를 가져와서 저장
-		mlog_id_t log_type = mlog_id_t(mach_read_from_1(start_ptr));
-		start_ptr += 1;
-		ulint body_len = mach_read_from_2(start_ptr);
-		start_ptr += 2;
-		if(log_type == 0 && body_len == 0){
-			now_len = start_ptr - apply_log_buffer - 3;
+		mlog_id_t log_type = mlog_id_t(mach_read_from_1(apply_ptr));
+		apply_ptr += 1;
+		if(apply_ptr >= end_ptr || log_type == 0){
+			now_len = apply_ptr - start_ptr - 1;
 			goto apply_end;
 		}
-		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu\n",page_id.space(), page_id.page_no(), log_type, body_len);
+		ulint body_len = mach_read_from_2(apply_ptr);
+		apply_ptr += 2;
+		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu, apply_ptr: %p, start_ptr: %p\n",page_id.space(), page_id.page_no(), log_type, body_len, apply_ptr, start_ptr);
 
 		//log apply 진행 후, recovery 시작 위치 이동.
-		recv_parse_or_apply_log_rec_body(log_type, start_ptr, start_ptr + body_len, page_id.space(), page_id.page_no(), apply_info->block, temp_mtr);
-		start_ptr += body_len;
+		recv_parse_or_apply_log_rec_body(log_type, apply_ptr, apply_ptr + body_len, page_id.space(), page_id.page_no(), apply_info->block, temp_mtr);
+		apply_ptr += body_len;
 	}
-	now_len = start_ptr - apply_log_buffer;
+	now_len = apply_ptr - start_ptr;
 apply_end:
 	now_len += IPL_LOG_HEADER_SIZE;
-	apply_info->block->page.ipl_write_pointer = apply_info->dynamic_start_pointer != NULL ? apply_info->dynamic_start_pointer + (now_len - nvdimm_info->static_ipl_per_page_size) : apply_info->static_start_pointer + now_len;
+	if(apply_info->second_dynamic_start_pointer != NULL){
+		now_len += DIPL_HEADER_SIZE;
+		apply_info->block->page.ipl_write_pointer = apply_info->second_dynamic_start_pointer + (now_len - nvdimm_info->static_ipl_per_page_size - nvdimm_info->dynamic_ipl_per_page_size);
+	}
+	else if(apply_info->dynamic_start_pointer != NULL){
+		now_len += DIPL_HEADER_SIZE;
+		apply_info->block->page.ipl_write_pointer = apply_info->dynamic_start_pointer + (now_len - nvdimm_info->static_ipl_per_page_size);
+	}
+	else{
+		apply_info->block->page.ipl_write_pointer = apply_info->static_start_pointer + now_len;
+	}
 	temp_mtr->discard_modifications();
 	mtr_commit(temp_mtr);
 }
@@ -230,6 +261,7 @@ void set_apply_info_and_log_apply(buf_block_t* block) {
 	apply_log_info apply_info;
 	apply_info.static_start_pointer = apply_page->static_ipl_pointer;
 	apply_info.dynamic_start_pointer = get_dynamic_ipl_pointer(apply_page);
+	apply_info.second_dynamic_start_pointer = get_second_dynamic_ipl_pointer(apply_page);
 	apply_info.block = block;
 
 	// fprintf(stderr, "static pointer : %p, dynamic pointer : %p\n", apply_info.static_start_pointer, apply_info.dynamic_start_pointer);
@@ -392,17 +424,6 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 		}
 
 	}
-}
-
-bool check_clean_checkpoint_page(buf_page_t * bpage, bool is_single_page_flush){
-	if(bpage->oldest_modification == 0 && bpage->buf_fix_count == 0 && buf_page_get_io_fix(bpage) == BUF_IO_NONE){
-		if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
-			if(get_dynamic_ipl_pointer(bpage) != NULL){
-				return true;
-			}
-		}
-	}
-	return false;
 }
 
 ulint get_can_write_size_from_write_pointer(buf_page_t * bpage, uint * type){

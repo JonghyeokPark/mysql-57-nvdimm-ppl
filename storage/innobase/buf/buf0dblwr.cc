@@ -163,11 +163,11 @@ buf_dblwr_init(
 	dberr_t err;
 	byte * buf;
 	buf_dblwr->write_buf_unaligned = static_cast<byte*>(
-		nvdimm_ptr + nvdimm_info->static_ipl_size + nvdimm_info->dynamic_ipl_size);
+	nvdimm_info->second_dynamic_start_pointer + (1024 * 1024 * 1024UL));
 	buf_dblwr->write_buf = static_cast<byte*>(
 		ut_align(buf_dblwr->write_buf_unaligned,
 			 UNIV_PAGE_SIZE));
-	ib::info() << "NVDIMM DWB is created";
+	fprintf(stderr, "NVDIMM DWB is created at %p\n", buf_dblwr->write_buf);
 
 	buf = buf_dblwr->write_buf;
 	IORequest read_request(IORequest::READ);

@@ -44,8 +44,8 @@ bool make_static_and_dynamic_ipl_region(ulint number_of_buf_pool){ //여기서 s
   nvdimm_info->static_start_pointer = nvdimm_ptr;
   nvdimm_info->dynamic_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_size;
   nvdimm_info->second_dynamic_start_pointer = nvdimm_info->dynamic_start_pointer + nvdimm_info->dynamic_ipl_size;
-  nvdimm_info->nc_redo_start_pointer = nvdimm_info->second_dynamic_start_pointer + (1024 * 1024 * 1024UL);
-  fprintf(stderr, "static start pointer : %p, dynamic start pointer : %p, second dynamic start pointer: %p\n", nvdimm_info->static_start_pointer, nvdimm_info->dynamic_start_pointer, nvdimm_info->second_dynamic_start_pointer);
+  nvdimm_info->nc_redo_start_pointer = nvdimm_info->second_dynamic_start_pointer + (2 * 1024 * 1024 * 1024UL);
+  fprintf(stderr, "static start pointer : %p, dynamic start pointer : %p, second dynamic start pointer: %p, nc_redo: %p\n", nvdimm_info->static_start_pointer, nvdimm_info->dynamic_start_pointer, nvdimm_info->second_dynamic_start_pointer, nvdimm_info->nc_redo_start_pointer);
   fprintf(stderr, "static IPL size per buf_pool : %u\n", nvdimm_info->static_ipl_page_number_per_buf_pool);
   fprintf(stderr, "Dynamic IPL size per buf_pool : %u\n", nvdimm_info->dynamic_ipl_page_number_per_buf_pool);
   fprintf(stderr, "Second Dynamic IPL size per buf_pool : %u\n", nvdimm_info->second_dynamic_ipl_page_number_per_buf_pool);

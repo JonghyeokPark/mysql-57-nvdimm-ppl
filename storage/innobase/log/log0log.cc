@@ -2537,7 +2537,10 @@ log_shutdown(void)
 {
 	log_group_close_all();
 
+#ifndef UNIV_NVDIMM_IPL
 	ut_free(log_sys->buf_ptr);
+#endif
+	
 	log_sys->buf_ptr = NULL;
 	log_sys->buf = NULL;
 	ut_free(log_sys->checkpoint_buf_ptr);
