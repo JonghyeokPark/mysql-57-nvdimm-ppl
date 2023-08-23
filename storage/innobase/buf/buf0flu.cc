@@ -1199,8 +1199,7 @@ buf_flush_write_block_low(
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL
 	    || srv_read_only_mode
-	    || fsp_is_system_temporary(bpage->id.space())
-		|| check_not_flush_page(bpage, flush_type)) {
+	    || fsp_is_system_temporary(bpage->id.space())) {
 
 		ut_ad(!srv_read_only_mode
 		      || fsp_is_system_temporary(bpage->id.space()));
@@ -1208,20 +1207,10 @@ buf_flush_write_block_low(
 		ulint	type = IORequest::WRITE | IORequest::DO_NOT_WAKE;
 
 		IORequest	request(type);
-//block_flush
-#ifdef UNIV_NVDIMM_IPL
-	if (check_not_flush_page(bpage, flush_type)){
-		insert_page_ipl_info_in_hash_table(bpage);
-		buf_page_io_complete(bpage, sync);
-		buf_LRU_stat_inc_io();
-		return;
-	}
-	else{
+
 		fil_io(request,
 		sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 		frame, bpage);
-	}
-#endif
 		
 	} else if (flush_type == BUF_FLUSH_SINGLE_PAGE) {
 		buf_dblwr_write_single_page(bpage, sync);
@@ -2354,7 +2343,6 @@ buf_flush_single_page_from_LRU(
 			clean and is not IO-fixed or buffer fixed. */
 			if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){
 				//clean하지만, Dynamic ipl을 가진 애들
-				// set_flag(&(bpage->flags), NORMALIZE);
 				// buf_flush_note_modification_for_ipl_page((buf_block_t *)bpage, log_sys->lsn, log_sys->lsn, NULL);
 				goto clean_flush_end;
 			}
@@ -4412,6 +4400,9 @@ buf_flush_ipl_clean_checkpointed_block_low(
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
 	adds an overhead during flushing. */
+	// fprintf(stderr, "Flush DIPL page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+	lsn_t cur_page_lsn = mach_read_from_8(((buf_block_t*)bpage)->frame + FIL_PAGE_LSN);
+	set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, cur_page_lsn); // DIPL page들은 SIPL header에 lsn을 저장해둔다.
 
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL
@@ -4424,7 +4415,6 @@ buf_flush_ipl_clean_checkpointed_block_low(
 		ulint	type = IORequest::WRITE | IORequest::DO_NOT_WAKE;
 
 		IORequest	request(type);
-
 		fil_io(request,
 			sync, bpage->id, bpage->size, 0, bpage->size.physical(),
 			frame, bpage);

@@ -17,7 +17,7 @@ void make_static_indirection_queue(buf_pool_t * buf_pool){
     buf_pool->static_ipl_allocator->push(i);
   }
   mutex_exit(&buf_pool->static_allocator_mutex);
-  fprintf(stderr, "buf_pool %lu static allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->static_ipl_allocator->size(), start_index, end_index);
+  fprintf(stderr, "buf_pool %lu static allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->static_ipl_allocator->size(), buf_pool->static_ipl_allocator->back(), buf_pool->static_ipl_allocator->front());
 }
 
 unsigned char * alloc_static_address_from_indirection_queue(buf_pool_t * buf_pool){
@@ -56,8 +56,8 @@ void make_dynamic_indirection_queue(buf_pool_t * buf_pool){
   for (uint i = start_index + 1; i <= end_index; i++){
     buf_pool->dynamic_ipl_allocator->push(i);
   }
+  fprintf(stderr, "buf_pool %lu dynamic allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->dynamic_ipl_allocator->size(), buf_pool->dynamic_ipl_allocator->back(), buf_pool->dynamic_ipl_allocator->front());
   mutex_exit(&buf_pool->dynamic_allocator_mutex);
-  fprintf(stderr, "buf_pool %lu dynamic allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->dynamic_ipl_allocator->size(), start_index, end_index);
 }
 
 
@@ -100,7 +100,7 @@ void make_second_dynamic_indirection_queue(buf_pool_t * buf_pool){
     buf_pool->second_dynamic_ipl_allocator->push(i);
   }
   mutex_exit(&buf_pool->second_dynamic_allocator_mutex);
-  fprintf(stderr, "buf_pool %lu second dynamic allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->second_dynamic_ipl_allocator->size(), start_index, end_index);
+  fprintf(stderr, "buf_pool %lu second dynamic allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->second_dynamic_ipl_allocator->size(), buf_pool->second_dynamic_ipl_allocator->back(), buf_pool->second_dynamic_ipl_allocator->front());
 }
 
 
@@ -115,7 +115,7 @@ unsigned char * alloc_second_dynamic_address_from_indirection_queue(buf_pool_t *
   unsigned char * ret_address = get_addr_from_ipl_index(nvdimm_info->second_dynamic_start_pointer, buf_pool->second_dynamic_ipl_allocator->front(), nvdimm_info->second_dynamic_ipl_per_page_size);
   buf_pool->second_dynamic_ipl_allocator->pop();
   mutex_exit(&buf_pool->second_dynamic_allocator_mutex);
-  // fprintf(stderr,"Dynamic,%f,%lu,%u\n", (double)(time(NULL) - start), buf_pool->instance_no, (nvdimm_info->dynamic_ipl_page_number_per_buf_pool - buf_pool->dynamic_ipl_allocator->size()) * 100 / nvdimm_info->dynamic_ipl_page_number_per_buf_pool);
+  // fprintf(stderr,"Second_Dynamic,%f,%lu,%u\n", (double)(time(NULL) - start), buf_pool->instance_no, (nvdimm_info->second_dynamic_ipl_page_number_per_buf_pool - buf_pool->second_dynamic_ipl_allocator->size()) * 100 / nvdimm_info->second_dynamic_ipl_page_number_per_buf_pool);
   return ret_address;
 }
 

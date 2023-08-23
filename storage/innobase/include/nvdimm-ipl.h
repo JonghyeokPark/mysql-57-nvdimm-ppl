@@ -98,18 +98,20 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 void nvdimm_free(const uint64_t pool_size);
 
 
-
-//Static reion info
+/* space (4) | page_no (4) | First_Dynamic_index (4) | length (4) | LSN (8) | Flag(1) | mtr_log | mtr_log | ... */
 #define PAGE_NO_OFFSET 4UL
 #define DYNAMIC_ADDRESS_OFFSET 8UL
-#define IPL_LOG_HEADER_SIZE 12UL
-#define APPLY_LOG_HDR_SIZE 3UL
+#define IPL_LENGTH_OFFSET 12UL
+#define IPL_PAGE_LSN_OFFSET 16UL
+#define IPL_FLAG_OFFSET 24UL
+#define IPL_LOG_HEADER_SIZE 25UL
 
-// Space | Page No | Dynamic_index || IPL Log | ...
-
-// Dynamic region info
+/* Second_Dynamic_index (4) | mtr_log | ... */
 #define DIPL_HEADER_SIZE 4UL
-// Second Dynamic index || IPL LOG | ..
+
+/* In apply log strucrute*/
+/* mtr_log_type(1) | mtr_body_len (2) | trx_id (8) | mtr_log_body(1 ~ 110) | */
+#define APPLY_LOG_HDR_SIZE 11UL
 
 extern time_t start;
 
@@ -146,6 +148,7 @@ typedef struct APPLY_LOG_INFO
   byte * static_start_pointer;
   byte * dynamic_start_pointer;
   byte * second_dynamic_start_pointer;
+  uint ipl_log_length;
   buf_block_t * block;
 
 }apply_log_info;
@@ -155,28 +158,43 @@ typedef struct APPLY_LOG_INFO
 extern nvdimm_system * nvdimm_info;
 
 /* IPL operations */
+
+//Page별 IPL allocation function
 bool alloc_static_ipl_to_bpage(buf_page_t * bpage);
 bool alloc_dynamic_ipl_to_bpage(buf_page_t * bpage);
 bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage);
+
+//IPL Log 추가 관련 함수들
 void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len);
 bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len);
 
 //page ipl log apply 관련 함수들
+void set_apply_info_and_log_apply(buf_block_t* block);
 void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr);
 void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info, mtr_t * temp_mtr);
-void set_apply_info_and_log_apply(buf_block_t* block);
 
 
-//page ipl info metadata 관련 함수들
+
+//page Normalize, lookup table 함수들
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage);
 void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage);
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
+
+
+//ipl metadata set, get 함수들
+ulint get_ipl_length_from_write_pointer(buf_page_t * bpage);
 ulint get_can_write_size_from_write_pointer(buf_page_t * bpage, uint * type);
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
 unsigned char * get_second_dynamic_ipl_pointer(buf_page_t * bpage);
+void set_ipl_length_in_ipl_header(buf_page_t * bpage);
+uint get_ipl_length_from_ipl_header(buf_page_t * bpage);
+void set_page_lsn_in_ipl_header(unsigned char* static_ipl_pointer, lsn_t lsn);
+lsn_t get_page_lsn_from_ipl_header(unsigned char* static_ipl_pointer);
+
+//page IPL flag 관련 함수
 void set_flag(unsigned char * flags, ipl_flag flag);
 void unset_flag(unsigned char * flags, ipl_flag flag);
 bool get_flag(unsigned char * flags, ipl_flag flag);
@@ -186,8 +204,6 @@ struct nc_redo_buf{
   uint64_t nc_buf_free;
   uint64_t nc_lsn;
 };
-
-// redo info spot
 #define REDO_INFO_OFFSET  (512*1024*1024)
 extern nc_redo_buf* nc_redo_info;
 

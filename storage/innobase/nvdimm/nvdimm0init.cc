@@ -29,8 +29,8 @@ time_t start;
 
 bool make_static_and_dynamic_ipl_region(ulint number_of_buf_pool){ //여기서 static 크기 바꿔주면 STATIC_MAX_SIZE 바꿔줘야함.
   nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
-  nvdimm_info->static_ipl_size = (1024 + 724) * 1024UL * 1024UL; // static ipl size : 1,8GB
-  nvdimm_info->dynamic_ipl_size = (200) * 1024 * 1024; // dynamic ipl size : 0.2GB
+  nvdimm_info->static_ipl_size = (1024 + 824) * 1024UL * 1024UL; // static ipl size : 1,8GB
+  nvdimm_info->dynamic_ipl_size = (100) * 1024 * 1024; // dynamic ipl size : 0.2GB
   nvdimm_info->second_dynamic_ipl_size = (100) * 1024 * 1024; // dynamic ipl size : 0.2GB
 
   nvdimm_info->static_ipl_per_page_size = 256; // per page static size : 1KB

@@ -1889,11 +1889,6 @@ buf_LRU_free_page(
 
 	rw_lock_x_lock(hash_lock);
 	mutex_enter(block_mutex);
-	//nvdimm
-	if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
-		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
-	}
-	//nvdimm
 	if (!buf_page_can_relocate(bpage)) {
 
 		/* Do not free buffer fixed and I/O-fixed blocks. */
@@ -1931,6 +1926,13 @@ func_exit:
 	ut_ad(buf_page_in_file(bpage));
 	ut_ad(bpage->in_LRU_list);
 	ut_ad(!bpage->in_flush_list == !bpage->oldest_modification);
+
+	//nvdimm
+	if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
+		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification); // Page가 Discard되기 전에 Page_lsn IPL header에 저장
+	}
+	//nvdimm
 
 	DBUG_PRINT("ib_buf", ("free page " UINT32PF ":" UINT32PF,
 			      bpage->id.space(), bpage->id.page_no()));
