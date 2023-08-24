@@ -20303,6 +20303,12 @@ static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl, srv_use_nvdimm_ipl,
 static MYSQL_SYSVAR_STR(nvdimm_home_dir, srv_nvdimm_home_dir,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Path to NVDIMM-aware files.", NULL, NULL, NULL);
+
+static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl_recovery, srv_use_nvdimm_ipl_recovery,
+  PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
+  "Enable NVDIMM IPL recovery mode (disabled by default).",
+  NULL, NULL, FALSE);
+
 #endif
 
 static struct st_mysql_sys_var* innobase_system_variables[]= {
@@ -20481,6 +20487,7 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
 #ifdef UNIV_NVDIMM_IPL
 	MYSQL_SYSVAR(use_nvdimm_ipl),
 	MYSQL_SYSVAR(nvdimm_home_dir),
+	MYSQL_SYSVAR(use_nvdimm_ipl_recovery),
 #endif
 
   NULL

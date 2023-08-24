@@ -343,6 +343,8 @@ extern ulong    srv_io_capacity;
 extern my_bool srv_use_nvdimm_ipl;
 /** NVDIMM-aware file resident directory */
 extern char* srv_nvdimm_home_dir;
+/** IPLized recovery optimization */
+extern my_bool srv_use_nvdimm_ipl_recovery;
 #endif
 
 /* We use this dummy default value at startup for max_io_capacity.

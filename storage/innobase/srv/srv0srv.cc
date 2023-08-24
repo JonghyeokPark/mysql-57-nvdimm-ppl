@@ -247,6 +247,8 @@ with mutex_enter(), which will wait until it gets the mutex. */
 my_bool srv_use_nvdimm_ipl = FALSE;
 /** NVDIMM-aware file resident directory */
 char* srv_nvdimm_home_dir = NULL;
+/** IPLizatio recovery optimization **/
+my_bool srv_use_nvdimm_ipl_recovery = FALSE;
 #endif
 
 /** Requested size in bytes */

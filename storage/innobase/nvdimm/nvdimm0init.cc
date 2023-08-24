@@ -75,7 +75,10 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
   // 추후, nvdimm영역에 nc_redo_buffer가 존재한다면 아래 함수에서 읽어오는 로직 필요
   // 아직은 Caching만해서 Write reduction의 효과만 보자.
   } else {
-  	// TODO(jhpark): recovery process!    
+  	// TODO(jhpark): recovery process!   
+		if (srv_use_nvdimm_ipl_recovery) {\
+			ib::info() << "We use IPLzied recovery mode!";
+		} 
 	}
 	// Force to set NVIMMM
   setenv("PMEM_IS_PMEM_FORCE", "1", 1);
