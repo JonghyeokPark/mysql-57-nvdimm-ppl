@@ -220,16 +220,11 @@ void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 	dipl_size = nvdimm_info->dynamic_ipl_per_page_size - DIPL_HEADER_SIZE;
 
 	//Step 1. Second DIPL, First DIPL, SIPL apply인지 판별
-	if(apply_info->second_dynamic_start_pointer != NULL){
+	if(apply_info->ipl_log_length > nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size){
 		// fprintf(stderr, "SDIPL apply! page_id:(%u, %u) static: %p dynamic: %p second_dynamic:%p\n", apply_info->block->page.id.space(), apply_info->block->page.id.page_no(), apply_info->static_start_pointer, apply_info->dynamic_start_pointer, apply_info->second_dynamic_start_pointer);
 
 		//Step 2. SIPL, First DIPL, Second DIPL 순서로 copy해서 연결
 		sdipl_size = apply_info->ipl_log_length - nvdimm_info->static_ipl_per_page_size - nvdimm_info->dynamic_ipl_per_page_size;
-
-		//Setp 3. 만약, SDIPL 영역을 할당만받고 작성하지 못한 경우(Overflow 발생 시), DIPL apply로 전환
-		if(sdipl_size > nvdimm_info->second_dynamic_ipl_per_page_size){
-			goto dipl_apply;
-		}
 		apply_buffer_size = sipl_size + dipl_size + sdipl_size;
 
 		unsigned char temp_mtr_buffer [apply_buffer_size] = {NULL, };
@@ -243,16 +238,10 @@ void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 		ipl_log_apply(temp_mtr_buffer, temp_mtr_buffer + apply_buffer_size, apply_info, temp_mtr);
 		return;
 	}
-	else if(apply_info->dynamic_start_pointer != NULL){
+	else if(apply_info->ipl_log_length > nvdimm_info->static_ipl_per_page_size){
 		// fprintf(stderr, "DIPL apply! page_id:(%u, %u) static: %p dynamic: %p second_dynamic:%p\n", apply_info->block->page.id.space(), apply_info->block->page.id.page_no(), apply_info->static_start_pointer, apply_info->dynamic_start_pointer, apply_info->second_dynamic_start_pointer);
-dipl_apply:
 		//Step 2. SIPL, First DIPL 순서로 copy해서 연결
 		dipl_size = apply_info->ipl_log_length - nvdimm_info->static_ipl_per_page_size;
-
-		//Setp 3. 만약, DIPL 영역을 할당만받고 작성하지 못한 경우(Overflow 발생 시), SIPL apply로 전환
-		if(dipl_size > nvdimm_info->dynamic_ipl_per_page_size){
-			goto sipl_apply;
-		}
 		apply_buffer_size = sipl_size + dipl_size;
 		
 		unsigned char temp_mtr_buffer [apply_buffer_size] = {NULL, };
@@ -265,7 +254,6 @@ dipl_apply:
 		return;
 	}
 	else{
-sipl_apply:
 		//Step 3. IPL log apply
 		sipl_size = apply_info->ipl_log_length - IPL_LOG_HEADER_SIZE;
 		//Setp 3. 만약, SIPL 영역을 할당만받고 헤더만 작성한 경우, SIPL apply로 전환
@@ -297,10 +285,10 @@ void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info
 		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu, apply_ptr: %p, start_ptr: %p\n",page_id.space(), page_id.page_no(), log_type, body_len, apply_ptr, start_ptr);
 	}
 	//Step 4. IPL apply가 끝난 후 apply_ptr을 기준으로 write_pointer 재설정
-	if(apply_info->second_dynamic_start_pointer != NULL){
+	if(apply_info->ipl_log_length > nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size){
 		apply_info->block->page.ipl_write_pointer = apply_info->second_dynamic_start_pointer + (apply_info->ipl_log_length - nvdimm_info->static_ipl_per_page_size - nvdimm_info->dynamic_ipl_per_page_size);
 	}
-	else if(apply_info->dynamic_start_pointer != NULL){
+	else if(apply_info->ipl_log_length > nvdimm_info->static_ipl_per_page_size){
 		apply_info->block->page.ipl_write_pointer = apply_info->dynamic_start_pointer + (apply_info->ipl_log_length - nvdimm_info->static_ipl_per_page_size);
 	}
 	else{
@@ -478,12 +466,12 @@ ulint get_can_write_size_from_write_pointer(buf_page_t * bpage, uint * type){
 	unsigned char * dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
 	unsigned char * second_dynamic_ipl_pointer = get_second_dynamic_ipl_pointer(bpage);
 	unsigned char * write_pointer = bpage->ipl_write_pointer;
-	ulint return_value;
-	if(dynamic_ipl_pointer == NULL){
+	ulint return_value = 0;
+	if(dynamic_ipl_pointer == NULL || (dynamic_ipl_pointer != NULL && write_pointer < dynamic_ipl_pointer)){ 
 		return_value = nvdimm_info->static_ipl_per_page_size - (write_pointer - static_ipl_pointer);
 		*type = 0;
 	}
-	else if(second_dynamic_ipl_pointer == NULL){
+	else if(second_dynamic_ipl_pointer == NULL || (second_dynamic_ipl_pointer != NULL && write_pointer < second_dynamic_ipl_pointer)){
 		return_value = nvdimm_info->dynamic_ipl_per_page_size - (write_pointer - dynamic_ipl_pointer);
 		*type = 1;
 	}
@@ -500,10 +488,10 @@ ulint get_ipl_length_from_write_pointer(buf_page_t * bpage){
 	unsigned char * dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
 	unsigned char * second_dynamic_ipl_pointer = get_second_dynamic_ipl_pointer(bpage);
 	unsigned char * write_pointer = bpage->ipl_write_pointer;
-	if(dynamic_ipl_pointer == NULL){
+	if(dynamic_ipl_pointer == NULL || (dynamic_ipl_pointer != NULL && write_pointer < dynamic_ipl_pointer)){ 
 		return_value = (write_pointer - static_ipl_pointer);
 	}
-	else if(second_dynamic_ipl_pointer == NULL){
+	else if(second_dynamic_ipl_pointer == NULL || (second_dynamic_ipl_pointer != NULL && write_pointer < second_dynamic_ipl_pointer)){
 		return_value = (write_pointer - dynamic_ipl_pointer) + nvdimm_info->static_ipl_per_page_size;
 	}
 	else{
