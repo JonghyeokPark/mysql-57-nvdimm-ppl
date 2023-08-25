@@ -52,6 +52,7 @@ bool alloc_static_ipl_to_bpage(buf_page_t * bpage){
 
 bool alloc_dynamic_ipl_to_bpage(buf_page_t * bpage){
 	//First DIPL 할당 시도
+	if(get_dynamic_ipl_pointer(bpage) != NULL)	return true;
 	unsigned char * dynamic_address = alloc_dynamic_address_from_indirection_queue(buf_pool_get(bpage->id));
 	if(dynamic_address == NULL)	return false;
 
@@ -60,16 +61,16 @@ bool alloc_dynamic_ipl_to_bpage(buf_page_t * bpage){
 	mach_write_to_4(pointer_to_store_dynamic_address, get_ipl_index_from_addr(nvdimm_info->dynamic_start_pointer, dynamic_address, nvdimm_info->dynamic_ipl_per_page_size));
 	flush_cache(pointer_to_store_dynamic_address, 4);
 
-	//First DIPL에 second DIPL 영역 초기화 (memset으로 0으로 초기화되어있어서 하지 않아도 됨)
-	mach_write_to_4(dynamic_address, 0UL);
-	flush_cache(dynamic_address, 4);
-
 	// fprintf(stderr, "Dynamic region allocated %p to (%u, %u) now_write_pointer: %p\n", dynamic_address, bpage->id.space(), bpage->id.page_no(), bpage->ipl_write_pointer);
 	return true;
 }
 
 bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage){
 	//Second DIPL 할당 시도
+	if(get_second_dynamic_ipl_pointer(bpage) != NULL){
+		set_flag(&(bpage->flags), SECOND_DIPL);
+		return true;
+	}
 	unsigned char * second_dynamic_address = alloc_second_dynamic_address_from_indirection_queue(buf_pool_get(bpage->id));
 	if(second_dynamic_address == NULL)	return false;
 	
