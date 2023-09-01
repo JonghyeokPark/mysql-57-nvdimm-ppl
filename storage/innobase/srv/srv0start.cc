@@ -1832,8 +1832,15 @@ innobase_start_or_create_for_mysql(void)
 			NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
 			assert(nvdimm_ptr);
 		}
+
 		if(make_static_and_dynamic_ipl_region(srv_buf_pool_instances)){
     		NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
+		}
+		
+		// (jhpark): recovery
+		if (nvdimm_recv_running) {
+			recv_ipl_parse_log();
+			recv_ipl_map_print();
 		}
 	}
 #endif

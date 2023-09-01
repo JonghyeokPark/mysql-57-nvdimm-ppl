@@ -2714,7 +2714,15 @@ loop:
 
 					buf_block_dbg_add_level(
 						block, SYNC_NO_ORDER_CHECK);
-
+					
+					// (jhpark): recovery
+					// this is rare cases, somehow pages are fetched in the buffer pool
+					// without applying using IPL log
+					if (nvdimm_recv_running
+							&& recv_check_iplized(block->page.id) != NORMAL){
+						recv_ipl_apply(block);
+					}
+					
 					recv_recover_page(FALSE, block);
 					mtr_commit(&mtr);
 				} else {

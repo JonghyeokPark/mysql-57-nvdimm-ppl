@@ -1,0 +1,106 @@
+#
+# The MySQL database server configuration file.
+#
+[client]
+user = root
+port            = 3306
+socket          = /tmp/mysql.sock
+
+[mysql]
+prompt=\u:\d>\_
+
+# Here is entries for some specific programs
+# The following values assume you have at least 32M ram
+
+# This was formally known as [safe_mysqld]. Both versions are currently parsed.
+[mysqld_safe]
+socket          = /tmp/mysql.sock
+#nice           = 0
+
+[mysqld]
+#
+# * Basic Settings
+#
+user=root
+default-storage-engine = innodb
+skip-grant-tables
+pid-file        = /home/jhpark/test_data/mysql.pid
+socket          = /tmp/mysql.sock
+port            = 3306
+datadir         =/home/jhpark/test_data
+log-error	= /home/jhpark/test_log/mysql_error_nvdimm.log
+
+##################################################
+# Need to Modify
+##################################################
+#Log group path (iblog0, iblog1)
+innodb_log_group_home_dir= /home/jhpark/test_log
+
+#innodb page size
+innodb_page_size=16KB
+
+#
+# * InnoDB
+#
+
+# NVDIMM-IPL settings
+innodb_use_nvdimm_ipl=true
+innodb_nvdimm_home_dir=/mnt/pmem
+#innodb_use_nvdimm_ipl_recovery=true
+
+#file per table ON
+innodb_file_per_table=1
+
+#buffer settings
+innodb_buffer_pool_size=8G
+innodb_buffer_pool_instances=8
+innodb_max_dirty_pages_pct_lwm=0
+
+#etc
+log_error_verbosity=3
+innodb_page_cleaners=3
+
+#transaction log settings
+innodb_log_file_size=2G
+innodb_log_files_in_group=3
+
+# 0:every 1 seconds, 1:fsync on commits, 2:writes on commits
+innodb_flush_log_at_trx_commit=0
+innodb_log_buffer_size=1G
+innodb_flush_neighbors=0
+
+#doublewrite and flush method
+innodb_doublewrite=OFF
+innodb_flush_method=O_DIRECT
+
+#AIO control
+innodb_use_native_aio=true
+innodb_change_buffering=none
+innodb_lru_scan_depth=1024
+
+# etc settings
+# max_connections = 1024
+# open_files_limit = 24000
+
+# io settings
+#innodb_io_capacity = 10000
+#innodb_io_capacity_max = 20000
+#innodb_write_io_threads = 32
+#innodb_read_io_threads = 32
+
+# monitoring settings
+#performance-schema-instrument='wait/synch/mutex/innodb/%=ON'
+#performance-schema-instrument='wait/synch/rwlock/innodb/%=ON'
+#innodb_status_output = ON
+#innodb_status_output_locks = ON
+
+# PMM configuration
+#slow_query_log = ON
+#slow_query_log_file = /var/log/slow_query.log
+#long_query_time = 1
+#log_output = FILE
+#performance_schema=ON
+#innodb_monitor_enable=all
+
+#lc_messages_dir = /home/vldb/git/mysql-57-nvdimm-ipl/bld/share
+#lc_messages = en_US

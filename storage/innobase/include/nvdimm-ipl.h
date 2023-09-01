@@ -98,13 +98,22 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 void nvdimm_free(const uint64_t pool_size);
 
 
-/* space (4) | page_no (4) | First_Dynamic_index (4) | length (4) | LSN (8) | Flag(1) | mtr_log | mtr_log | ... */
+/* space (4) | page_no (4) | First_Dynamic_index (4) | length (4) | LSN (8) | Normalize Flag(1) | mtr_log | mtr_log | ... */
 #define PAGE_NO_OFFSET 4UL
 #define DYNAMIC_ADDRESS_OFFSET 8UL
 #define IPL_LENGTH_OFFSET 12UL
 #define IPL_PAGE_LSN_OFFSET 16UL
 #define IPL_FLAG_OFFSET 24UL
 #define IPL_LOG_HEADER_SIZE 25UL
+
+/* IPL_LOG_HEADER OFFSET */
+#define IPL_HDR_SPACE							0
+#define IPL_HDR_PAGE							4
+#define IPL_HDR_DYNAMIC_INDEX			8
+#define IPL_HDR_LEN								12
+#define IPL_HDR_LSN								16	
+#define IPL_HDR_FLAG							24
+
 
 /* Second_Dynamic_index (4) | mtr_log | ... */
 #define DIPL_HEADER_SIZE 4UL
@@ -220,5 +229,37 @@ recv_parse_or_apply_log_rec_body(
 	mtr_t* mtr);
 #endif
 
+/* recovery */
+extern unsigned char* nvdimm_recv_ptr;
+extern bool nvdimm_recv_running;
+typedef enum {
+  NORMAL = 0,
+	SIPL,
+	DIPL,
+	SDIPL
+} RECV_IPL_PAGE_TYPE;
+
+void recv_ipl_parse_log();
+void recv_ipl_map_print();
+void recv_ipl_apply(buf_block_t* block);
+void recv_ipl_set_len(unsigned char* ipl_ptr, uint32_t diff);
+uint32_t recv_ipl_get_len(unsigned char* ipl_ptr);
+void recv_ipl_set_lsn(unsigned char* ipl_ptr, lsn_t lsn);
+lsn_t recv_ipl_get_lsn(unsigned char* ipl_ptr);
+
+bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info
+																	, mtr_t * temp_mtr
+																	, ulint real_size
+																	, lsn_t page_lsn);
+
+void recv_ipl_log_apply(byte * start_ptr
+											, byte * end_ptr
+											, apply_log_info * apply_info
+											, mtr_t * temp_mtr);
+
+void recv_clean_ipl_map();
+
+RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
+extern std::tr1::unordered_map<page_id_t, uint64_t > ipl_recv_map;
 
 #endif // end-of-header

@@ -17,6 +17,11 @@ unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
 nvdimm_system * nvdimm_info = NULL;
 nc_redo_buf * nc_redo_info = NULL;
+
+/* recovery */
+bool nvdimm_recv_running = false;
+unsigned char* nvdimm_recv_ptr = NULL;
+
 time_t start;
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
@@ -72,13 +77,29 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 		memset(nvdimm_ptr, 0x00, pool_size);
 		NVDIMM_INFO_PRINT("NVDIMM mmaped success!\n");
 
-  // 추후, nvdimm영역에 nc_redo_buffer가 존재한다면 아래 함수에서 읽어오는 로직 필요
-  // 아직은 Caching만해서 Write reduction의 효과만 보자.
   } else {
   	// TODO(jhpark): recovery process!   
 		if (srv_use_nvdimm_ipl_recovery) {\
 			ib::info() << "We use IPLzied recovery mode!";
-		} 
+		}
+		
+		nvdimm_fd = open(path, O_RDWR, 0777);
+
+  if (nvdimm_fd < 0) {
+      NVDIMM_ERROR_PRINT("NVDIMM mmaped file open failed!\n");
+      return NULL;
+    }
+
+    nvdimm_ptr = (unsigned char *) mmap(NULL, pool_size, PROT_READ|PROT_WRITE, MAP_SHARED, nvdimm_fd, 0);
+    if (nvdimm_ptr == MAP_FAILED) {
+      NVDIMM_ERROR_PRINT("NVDIMM mmap is failed!\n");
+      return NULL;
+    }
+
+    // TODO(jhpark): optimize
+    nvdimm_recv_running = true;
+    //recv_ipl_parse_log();
+ 
 	}
 	// Force to set NVIMMM
   setenv("PMEM_IS_PMEM_FORCE", "1", 1);

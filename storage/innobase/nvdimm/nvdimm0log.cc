@@ -538,6 +538,9 @@ uint get_ipl_length_from_ipl_header(buf_page_t * bpage){
 }
 
 void set_page_lsn_in_ipl_header(unsigned char* static_ipl_pointer, lsn_t lsn){
+  // (jhpark): recovery
+  if (nvdimm_recv_running) return;
+
 	mach_write_to_8(static_ipl_pointer + IPL_PAGE_LSN_OFFSET, lsn);
 	flush_cache(static_ipl_pointer + IPL_PAGE_LSN_OFFSET, 8);
 }

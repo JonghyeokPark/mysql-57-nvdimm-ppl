@@ -950,6 +950,9 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len)
 	
 	end_ptr = ptr + log_len;
 
+  // (jhpark): recovery
+  if (nvdimm_recv_running) return;
+
 	if(ptr == end_ptr){
 		return ;
 	}

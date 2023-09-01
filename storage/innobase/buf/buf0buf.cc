@@ -5848,6 +5848,11 @@ corrupt:
 		if (recv_recovery_is_on()) {
 			/* Pages must be uncompressed for crash recovery. */
 			ut_a(uncompressed);
+
+			// (jhpark): recovery
+			if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+				recv_ipl_apply((buf_block_t*)bpage);
+			}
 			recv_recover_page(TRUE, (buf_block_t*) bpage);
 		}
 
@@ -5900,8 +5905,15 @@ corrupt:
 		ut_ad(buf_pool->n_pend_reads > 0);
 		buf_pool->n_pend_reads--;
 		buf_pool->stat.n_pages_read++;
+
+		// (jhpark): recovery
+		if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+			recv_ipl_apply((buf_block_t*)bpage);
+		}
+
 		//nvdimm
-		if (get_flag(&(bpage->flags), IPLIZED)){
+		// (jhpark): recovery
+		if (!nvdimm_recv_running && get_flag(&(bpage->flags), IPLIZED)){
 			buf_pool_mutex_exit(buf_pool);
 			// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",bpage->id.space(), bpage->id.page_no(), bpage);
 			set_apply_info_and_log_apply((buf_block_t*) bpage);
@@ -5927,12 +5939,21 @@ corrupt:
 		/* Write means a flush operation: call the completion
 		routine in the flush system */
 
+		// (jhpark): recovery
+		if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+			recv_ipl_apply((buf_block_t*)bpage);
+		}
+
 		buf_flush_write_complete(bpage);
 		//nvdimm
 		second_dynamic_ipl_pointer = get_second_dynamic_ipl_pointer(bpage);
 		dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
 		static_ipl_pointer = bpage->static_ipl_pointer;
-		return_ipl = check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
+		
+		// (jhpark): recovery
+		if (!nvdimm_recv_running) {
+			return_ipl = check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
+		}
 		//nvdimm
 
 		if (uncompressed) {
@@ -5972,7 +5993,8 @@ corrupt:
 			      bpage->id.space(), bpage->id.page_no()));
 
 	buf_pool_mutex_exit(buf_pool);
-	if(return_ipl){
+	// (jhpark): recovery
+	if(!nvdimm_recv_running && return_ipl){
 		free_second_dynamic_address_to_indirection_queue(buf_pool, second_dynamic_ipl_pointer);
 		free_dynamic_address_to_indirection_queue(buf_pool, dynamic_ipl_pointer);
 		free_static_address_to_indirection_queue(buf_pool, static_ipl_pointer);
