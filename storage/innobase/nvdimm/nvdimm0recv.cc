@@ -89,7 +89,9 @@ void recv_ipl_apply(buf_block_t* block) {
 	if (recv_iter != ipl_recv_map.end()) {
 		uint64_t addr = recv_iter->second;
 		apply_info.static_start_pointer = nvdimm_recv_ptr + addr;
-		real_size = recv_ipl_get_len(nvdimm_recv_ptr + addr);
+		// (jhpark): we neeed the length when the page is flushed
+		//real_size = recv_ipl_get_len(nvdimm_recv_ptr + addr);
+		real_size = recv_ipl_get_wp(nvdimm_recv_ptr + addr);
 		page_lsn = recv_ipl_get_lsn(nvdimm_recv_ptr + addr);
 
 		uint ipl_index = mach_read_from_4(apply_info.static_start_pointer 
@@ -99,6 +101,9 @@ void recv_ipl_apply(buf_block_t* block) {
           << block->page.id.space() << ":" << block->page.id.page_no() ;
 		}
 
+		ib::info() << "real size: " << real_size << " " 
+          << block->page.id.space() << ":" << block->page.id.page_no() ;
+	
 		unsigned char* dynamic_start_pointer = get_addr_from_ipl_index(
 										nvdimm_info->dynamic_start_pointer
 										, ipl_index
@@ -113,7 +118,6 @@ void recv_ipl_apply(buf_block_t* block) {
 								get_addr_from_ipl_index(dynamic_start_pointer
 								, ipl_index, nvdimm_info->dynamic_ipl_per_page_size);
 				
-	}
 
 		apply_info.block = block;
 	
@@ -126,24 +130,13 @@ void recv_ipl_apply(buf_block_t* block) {
 			ib::info() << "IPL apply error " << block->page.id.space() 
 							<< ":" << block->page.id.page_no();
 		} else {
-//#ifdef UNIV_IPL_DEBUG
 			ib::info() << "IPL apply success! " << block->page.id.space() 
 							<< ":" << block->page.id.page_no();
-//#endif 
 		}
 
 		// step3. remove IPL log from recv_ipl_map
 		//ipl_recv_map.erase(block->page.id);
-#ifdef UNIV_IPL_DEBUG
-/*
-		ib::info() << block->page.id.space() << ":" << block->page.id.page_no() 
-							<< " is erased";
-		recv_iter = ipl_recv_map.find(block->page.id);
-		if (recv_iter == ipl_recv_map.end()) {
-			ib::info() << "confirm!";
-		}
-*/
-#endif
+	}
 }
 
 void recv_ipl_set_lsn(unsigned char* ipl_ptr, lsn_t lsn) {
@@ -170,6 +163,14 @@ char recv_ipl_get_flag(unsigned char* ipl_ptr) {
 	return mach_read_from_1(ipl_ptr + IPL_HDR_FLAG);
 }
 
+void recv_ipl_set_wp(unsigned char* ipl_ptr, uint32_t cur_len) {
+	mach_write_to_4(ipl_ptr + IPL_HDR_FLUSH_MARK, cur_len);
+}
+
+ulint recv_ipl_get_wp(unsigned char* ipl_ptr) {
+	return mach_read_from_4(ipl_ptr + IPL_HDR_FLUSH_MARK);
+}
+
 
 bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr, ulint real_size, lsn_t page_lsn) {
 
@@ -179,14 +180,12 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 	if (real_size == 0) return true;
 
 	// LSN check
-	ulint cur_page_lsn = mach_read_from_8(apply_info->block->frame + FIL_PAGE_LSN);
+	uint64_t cur_page_lsn = mach_read_from_8(apply_info->block->frame + FIL_PAGE_LSN);
 	if (cur_page_lsn >= page_lsn) {
-//#ifdef UNIV_NVDIMM_DEBUG
 		fprintf(stderr, "[debug] cur_page_lsn %lu page_lsn %lu (%lu:%lu)\n"
 									, cur_page_lsn, page_lsn
                   , apply_info->block->page.id.space()
                   , apply_info->block->page.id.page_no());
-//#endif
 		return true;
 	}
 
@@ -196,26 +195,39 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 	dipl_size = nvdimm_info->dynamic_ipl_per_page_size - DIPL_HEADER_SIZE;
 
 	// step1. second DIPL, first DIPL, SIPL apply인지 판별
-	if(apply_info->second_dynamic_start_pointer != NULL) {
+	// if(apply_info->second_dynamic_start_pointer != NULL) {
+	if (apply_info->ipl_log_length > 
+			nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size) {
 		// step2. SIPL, first DIPL, second DIPL 순서로 copy 연결
 		sdipl_size = apply_info->ipl_log_length 
 								- nvdimm_info->static_ipl_per_page_size 
 								- nvdimm_info->dynamic_ipl_per_page_size;
 
-		// step3. 만약, SDIPL 영역을 할당만 받고, 작성하지 못한경우 
-		// (overflow 발생시), DIPL apply로 전환
-		if (sdipl_size >  nvdimm_info->second_dynamic_ipl_per_page_size) {
-			goto dipl_apply;
-		}	
 		apply_buffer_size = sipl_size + dipl_size + sdipl_size;
+
+		// (jhpark): this is 2nd DIPL case, but we use only real_size
+		if (real_size > (sipl_size + dipl_size)) {
+			// sipl + dipl + within the 2nd dipl area
+			sdipl_size = real_size;
+		} else if (real_size > sipl_size) {
+			// sipl + within the dipl area
+			dipl_size = real_size;
+		} else if (real_size < sipl_size) {
+			// within the sipl area
+			sipl_size = real_size;
+		} else {
+			ib::info() << "error!";
+		}
 
 		unsigned char temp_mtr_buffer [apply_buffer_size] = {NULL, };
 		memcpy(temp_mtr_buffer, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,sipl_size);
 		offset += sipl_size;
+		
 		memcpy(temp_mtr_buffer + offset
 					, apply_info->dynamic_start_pointer + DIPL_HEADER_SIZE
 					, dipl_size);
 		offset += dipl_size;
+
 		memcpy(temp_mtr_buffer + offset, apply_info->second_dynamic_start_pointer, sdipl_size);
 		
 		// step4. IPL log apply
@@ -224,18 +236,33 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 											, apply_info, temp_mtr);	 	 
 
 		mach_write_to_8(apply_info->block->frame + FIL_PAGE_LSN, page_lsn);
+		fprintf(stderr,"2nd DIPL org: %lu page_lsn: %lu (%lu:%lu)\n", cur_page_lsn, page_lsn
+                  , apply_info->block->page.id.space()
+                  , apply_info->block->page.id.page_no());
+
+
 		return true;
 	
-	} else if (apply_info->dynamic_start_pointer != NULL) {
+	} else if (apply_info->ipl_log_length > nvdimm_info->static_ipl_per_page_size) {
 dipl_apply:	
 		// step2. SIPL, 1st DIPL 순서대로 copy 후 연결
 		dipl_size = apply_info->ipl_log_length - nvdimm_info->static_ipl_per_page_size;
-		
-		// step3. 만약, DIPL영역 할당만 받고, 작성하지 못한 경우 (overflow), SIPL apply 전환
-		if (dipl_size > nvdimm_info->dynamic_ipl_per_page_size) {
-			goto sipl_apply;
-		}
 		apply_buffer_size = sipl_size + dipl_size;
+
+		// (jhpark): this is 2nd DIPL case, but we use only real_size
+		if (real_size > (sipl_size + dipl_size)) {
+			// sipl + dipl + within the 2nd dipl area
+			sdipl_size = real_size;
+		} else if (real_size > sipl_size) {
+			// sipl + within the dipl area
+			dipl_size = real_size;
+		} else if (real_size < sipl_size) {
+			// within the sipl area
+			sipl_size = real_size;
+		} else {
+			ib::info() << "error!";
+		}
+
 
 		unsigned char temp_mtr_buffer [apply_buffer_size] = {NULL, };
 		memcpy(temp_mtr_buffer, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,sipl_size);
@@ -249,6 +276,11 @@ dipl_apply:
 											, temp_mtr_buffer + apply_buffer_size
 											, apply_info, temp_mtr);	 	 
 
+		fprintf(stderr,"DIPL org: %lu page_lsn: %lu (%lu:%lu)\n", cur_page_lsn, page_lsn
+                  , apply_info->block->page.id.space()
+                  , apply_info->block->page.id.page_no());
+
+
 		mach_write_to_8(apply_info->block->frame + FIL_PAGE_LSN, page_lsn);
 		return true;
 
@@ -256,9 +288,28 @@ dipl_apply:
 		// this is SIPL only log apply; very simple one
 sipl_apply:
 		// step 3. IPL log apply
+
 		sipl_size = apply_info->ipl_log_length - IPL_LOG_HEADER_SIZE;
+
+		// (jhpark): this is 2nd DIPL case, but we use only real_size
+		if (real_size > (sipl_size + dipl_size)) {
+			// sipl + dipl + within the 2nd dipl area
+			sdipl_size = real_size;
+		} else if (real_size > sipl_size) {
+			// sipl + within the dipl area
+			dipl_size = real_size;
+		} else if (real_size < sipl_size) {
+			// within the sipl area
+			sipl_size = real_size;
+		} else {
+			ib::info() << "error!";
+		}
+
+
+
 		// 만약, DIPL(?) 영역을 할당만 받고, 헤더만 작성한 경우 SIPL apply로 전환
 		if (dipl_size > nvdimm_info->dynamic_ipl_per_page_size) {
+			fprintf(stderr, "rare case ?!\n");
 			return true;
 		}
 
@@ -269,6 +320,11 @@ sipl_apply:
 	}
 
 	// TODO(jhpark): do we still need this?
+	fprintf(stderr,"SIPL org: %lu page_lsn: %lu (%lu:%lu)\n", cur_page_lsn, page_lsn
+                  , apply_info->block->page.id.space()
+                  , apply_info->block->page.id.page_no());
+
+
 	mach_write_to_8(apply_info->block->frame + FIL_PAGE_LSN, page_lsn);
 	return true;
 }
@@ -279,6 +335,7 @@ void recv_ipl_log_apply(byte * start_ptr, byte * end_ptr
 	byte* apply_ptr = start_ptr;
 	page_id_t page_id = apply_info->block->page.id;
 	while (apply_ptr < end_ptr) {
+
 		// step1. log type 읽기
 		mlog_id_t log_type = mlog_id_t(mach_read_from_1(start_ptr));
     start_ptr += 1;
@@ -299,13 +356,16 @@ void recv_ipl_log_apply(byte * start_ptr, byte * end_ptr
 	}
 
 	// step4. IPL apply 완료 후, apply_ptr 기준으로 write_ptr 재설정
-	if (apply_info->second_dynamic_start_pointer != NULL) {
+	//if (apply_info->second_dynamic_start_pointer != NULL) {
+	if (apply_info->ipl_log_length >
+			nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size) {
 		apply_info->block->page.ipl_write_pointer =
 					apply_info->second_dynamic_start_pointer 
 					+ (apply_info->ipl_log_length 
 							- nvdimm_info->static_ipl_per_page_size
 							- nvdimm_info->dynamic_ipl_per_page_size);
-	} else if (apply_info->dynamic_start_pointer != NULL){
+	} else if (apply_info->ipl_log_length 
+						> nvdimm_info->static_ipl_per_page_size){
 		apply_info->block->page.ipl_write_pointer = 
 					apply_info->dynamic_start_pointer 
 					+ (apply_info->ipl_log_length - nvdimm_info->static_ipl_per_page_size);

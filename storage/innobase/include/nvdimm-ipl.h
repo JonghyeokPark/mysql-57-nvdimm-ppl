@@ -104,7 +104,8 @@ void nvdimm_free(const uint64_t pool_size);
 #define IPL_LENGTH_OFFSET 12UL
 #define IPL_PAGE_LSN_OFFSET 16UL
 #define IPL_FLAG_OFFSET 24UL
-#define IPL_LOG_HEADER_SIZE 25UL
+#define IPL_FLAG_FLUSH_MARK	25UL
+#define IPL_LOG_HEADER_SIZE 29UL
 
 /* IPL_LOG_HEADER OFFSET */
 #define IPL_HDR_SPACE							0
@@ -113,6 +114,7 @@ void nvdimm_free(const uint64_t pool_size);
 #define IPL_HDR_LEN								12
 #define IPL_HDR_LSN								16	
 #define IPL_HDR_FLAG							24
+#define IPL_HDR_FLUSH_MARK				25
 
 
 /* Second_Dynamic_index (4) | mtr_log | ... */
@@ -246,6 +248,8 @@ void recv_ipl_set_len(unsigned char* ipl_ptr, uint32_t diff);
 uint32_t recv_ipl_get_len(unsigned char* ipl_ptr);
 void recv_ipl_set_lsn(unsigned char* ipl_ptr, lsn_t lsn);
 lsn_t recv_ipl_get_lsn(unsigned char* ipl_ptr);
+void recv_ipl_set_wp(unsigned char* ipl_ptr, uint32_t cur_len);
+ulint recv_ipl_get_wp(unsigned char* ipl_ptr);
 
 bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info
 																	, mtr_t * temp_mtr

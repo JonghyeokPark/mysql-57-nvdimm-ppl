@@ -4402,6 +4402,11 @@ buf_flush_ipl_clean_checkpointed_block_low(
 	adds an overhead during flushing. */
 	// fprintf(stderr, "Flush DIPL page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	lsn_t cur_page_lsn = mach_read_from_8(((buf_block_t*)bpage)->frame + FIL_PAGE_LSN);
+
+	// (jhpark): recovery
+	fprintf(stderr, "ipl store write pointer %lu (%u:%u)\n"
+				, get_ipl_length_from_write_pointer(bpage), bpage->id.space(), bpage->id.page_no());
+	recv_ipl_set_wp(bpage->static_ipl_pointer, get_ipl_length_from_write_pointer(bpage));
 	set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, cur_page_lsn); // DIPL page들은 SIPL header에 lsn을 저장해둔다.
 
 	if (!srv_use_doublewrite_buf
