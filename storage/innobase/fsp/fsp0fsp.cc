@@ -788,6 +788,9 @@ fsp_init_file_page(
 	buf_block_t*	block,
 	mtr_t*		mtr)
 {
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)block);
+#endif
 	fsp_init_file_page_low(block);
 
 	ut_d(fsp_space_modify_check(block->page.id.space(), mtr));

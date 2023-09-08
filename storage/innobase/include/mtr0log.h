@@ -249,7 +249,8 @@ mlog_parse_index(
 #ifndef UNIV_HOTBACKUP
 /** Insert, update, and maybe other functions may use this value to define an
 extra mlog buffer size for variable size data */
-#define MLOG_BUF_MARGIN	256
+// #define MLOG_BUF_MARGIN	256
+#define MLOG_BUF_MARGIN	2048 // nvdimm
 #endif /* !UNIV_HOTBACKUP */
 
 #ifndef UNIV_NONINL

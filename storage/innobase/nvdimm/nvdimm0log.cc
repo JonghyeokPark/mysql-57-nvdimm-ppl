@@ -87,14 +87,13 @@ bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage){
 /* Sjmun IPL Log를 쓸때의 핵심*/
 /* SIPL 영역 공간이 부족한 경우는 2개로 나누어서 기존 IPL 영역, 새로운 IPL 영역에 작성하게 됨*/
 /* Log write atomicity를 보장하기 위해서는 두번째 파트를 다 작성하고 Length를 Flush cache*/
-
 void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len){
 	unsigned char write_ipl_log_buffer [len] = {NULL, };
-	uint test;
+	uint test = 0;
 	ulint offset = 0;
 	unsigned char store_type = type;
 	unsigned short log_body_size = len - APPLY_LOG_HDR_SIZE;
-	// fprintf(stderr, "nvdimm_ipl_add(%u, %u) Log type: %d, log_len: %lu now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, log_body_size, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
+	// fprintf(stderr, "nvdimm_ipl_add(%u, %u) Log type: %d, log_len: %lu, full_len:%lu, rest_log_len: %lu, now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, log_body_size, len,rest_log_len, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
 
 	//Step1. Apply log header 작성
 	mach_write_to_1(write_ipl_log_buffer + offset, store_type); // mtr_log type
@@ -125,6 +124,10 @@ fit_size:
 			if(!get_flag(&(bpage->flags), SECOND_DIPL)){
 				bpage->ipl_write_pointer = get_dynamic_ipl_pointer(bpage);
 				bpage->ipl_write_pointer += DIPL_HEADER_SIZE;
+				if(rest_log_len > (nvdimm_info->dynamic_ipl_per_page_size - DIPL_HEADER_SIZE)){
+					memcpy(write_ipl_log_buffer + offset, log, log_body_size);
+					goto write_loop;
+				}
 			}
 			else{ 
 				bpage->ipl_write_pointer = get_second_dynamic_ipl_pointer(bpage);
@@ -133,12 +136,17 @@ fit_size:
 		}
 		//Step 3. Header + Body 붙이기
 		memcpy(write_ipl_log_buffer + offset, log, log_body_size);
-
+		if(get_dynamic_ipl_pointer(bpage) == NULL){
+			rest_log_len = len;
+			first_write_len = 0;
+			goto write_loop;
+		}
 		//Step 4. 남은 IPL 공간에 1차로 작성
+		// fprintf(stderr, "First Write(%u, %u) Log type: %d, write_len: %lu at: %p remain_length: %lu\n", bpage->id.space(), bpage->id.page_no(), type, first_write_len, bpage->ipl_write_pointer, rest_log_len);
+
 		memcpy(bpage->ipl_write_pointer, write_ipl_log_buffer, first_write_len);
 		flush_cache(bpage->ipl_write_pointer, first_write_len);
 		bpage->ipl_write_pointer += first_write_len;
-		
 		//Setp 5. 할당받은 IPL 공간으로 Write pointer 재설정
 		if(!get_flag(&(bpage->flags), SECOND_DIPL)){
 			bpage->ipl_write_pointer = get_dynamic_ipl_pointer(bpage);
@@ -148,12 +156,41 @@ fit_size:
 			bpage->ipl_write_pointer = get_second_dynamic_ipl_pointer(bpage);
 		}
 		
-		// fprintf(stderr, "Second Write(%u, %u) Log type: %d, rest_log_len: %lu now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, rest_log_len, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
-
-		//Step 6. 할당받은 IPL 공간에 2차로 작성
-		memcpy(bpage->ipl_write_pointer, write_ipl_log_buffer + first_write_len, rest_log_len);
-		flush_cache(bpage->ipl_write_pointer, rest_log_len);
-		bpage->ipl_write_pointer += rest_log_len;
+		
+write_loop:
+		//Step 6. 할당받은 IPL 공간에 N차로 작성
+		ulint can_write_size = get_can_write_size_from_write_pointer(bpage, &test);
+		// fprintf(stderr, "(%u, %u): can_write_size: %lu, rest_log_len: %lu\n", bpage->id.space(), bpage->id.page_no(), can_write_size, rest_log_len);
+		if(can_write_size < rest_log_len){
+			// fprintf(stderr, "Second Write(%u, %u) Log type: %d, write_len: %lu at: %p remain_length: %lu\n", bpage->id.space(), bpage->id.page_no(), type, can_write_size, bpage->ipl_write_pointer, rest_log_len - can_write_size);
+			memcpy(bpage->ipl_write_pointer, write_ipl_log_buffer + first_write_len, can_write_size);
+			flush_cache(bpage->ipl_write_pointer, can_write_size);
+			bpage->ipl_write_pointer += can_write_size;
+			first_write_len += can_write_size;
+			rest_log_len -= can_write_size;
+			if(get_dynamic_ipl_pointer(bpage) == NULL){
+				if(!alloc_dynamic_ipl_to_bpage(bpage)){
+					nvdimm_ipl_add_split_merge_map(bpage);
+					return;
+				}
+				bpage->ipl_write_pointer = get_dynamic_ipl_pointer(bpage);
+				bpage->ipl_write_pointer += DIPL_HEADER_SIZE;
+			}
+			else{
+				if(!alloc_second_dynamic_ipl_to_bpage(bpage)){
+					nvdimm_ipl_add_split_merge_map(bpage);
+					return;
+				}
+				bpage->ipl_write_pointer = get_second_dynamic_ipl_pointer(bpage);
+			}
+			goto write_loop;
+		}
+		else{
+			// fprintf(stderr, "Third Write(%u, %u) Log type: %d, write_len: %lu at: %p remain_length: %lu\n", bpage->id.space(), bpage->id.page_no(), type, rest_log_len, bpage->ipl_write_pointer, rest_log_len);
+			memcpy(bpage->ipl_write_pointer, write_ipl_log_buffer + first_write_len, rest_log_len);
+			flush_cache(bpage->ipl_write_pointer, rest_log_len);
+			bpage->ipl_write_pointer += rest_log_len;
+		}
 		set_ipl_length_in_ipl_header(bpage);
 		
 	}
@@ -162,7 +199,14 @@ fit_size:
 
 bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len){
 	//IPL 할당받지 못한 페이지는 IPL 할당 시도
+	if(log_len > 1024){
+		// fprintf(stderr, "Blg log (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+		return false;
+	}
 	if(!get_flag(&(bpage->flags), IPLIZED)){
+		if(log_len > (nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE)){
+			*rest_log_len = log_len - (nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE);
+		}
 		return alloc_static_ipl_to_bpage(bpage);
 	}
 	unsigned char * dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
@@ -313,11 +357,11 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 
 /* TODO Sjmun : 한 번도 Discard되지 않은 페이지들은 사실 IPL을 사용할 필요 없이 Global redo로그로만 복구가능한데..  */
 void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
+	// fprintf(stderr, "Add split_page: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	set_flag(&(bpage->flags), NORMALIZE);
 	/*Step 1. Page가 IPL화 되고 한 번도 Discard도 되진 않은 경우는 바로 Normalize 시도*/
 	if(get_flag(&(bpage->flags), IPLIZED)){
 		set_flag(bpage->static_ipl_pointer + IPL_FLAG_OFFSET, NORMALIZE);
-		// fprintf(stderr, "Add split_page: (%u, %u): flag: %d\n", bpage->id.space(), bpage->id.page_no(), mach_read_from_1(bpage->static_ipl_pointer + IPL_FLAG_OFFSET));
 		if(!get_flag(&(bpage->flags), IN_LOOK_UP)){
 			buf_pool_t * buf_pool = buf_pool_get(bpage->id);
 			free_second_dynamic_address_to_indirection_queue(buf_pool, get_second_dynamic_ipl_pointer(bpage));
