@@ -601,6 +601,22 @@ buf_flush_note_modification(
 	if (block->page.oldest_modification == 0 ) {
 		if(!is_system_or_undo_tablespace(block->page.id.space()) && !get_flag(&(((buf_page_t *)block)->flags), NORMALIZE) && page_is_leaf(block->frame) && buf_page_in_file((buf_page_t *)block) && block->page.id.page_no() > 7){
 			// fprintf(stderr, "Not Insert Flush list oldest_lsn: %lu, observer: %p (%u, %u)\n", ((buf_page_t *)block)->oldest_modification,observer, block->page.id.space(), block->page.id.page_no());
+			
+			fprintf(stderr, "Not Insert Flush list oldest_lsn: %lu, observer: %p (%u, %u) len: %lu\n"
+										, ((buf_page_t *)block)->oldest_modification
+										, ((buf_page_t *)block)->newest_modification
+										, observer
+										, block->page.id.space(), block->page.id.page_no()
+										, get_ipl_length_from_write_pointer(&block->page));
+
+			// (jhpark): need for store oldest_modification ???
+			// flush list 삽입을 막았기 때문에 log_checkpoint() 에서 문제가 될 수 있음 
+			// 예를 들어, LSN 1 - 10 이 해당 페이지 업데이트한 로그이고,  IPL 페이지만 flush list에 들어감. 
+			// 하지만, 운이 나쁘게 log_checkpoint 수행 당시 buffer pool들 사이에서 
+			// oldest_modification이 제일 적은 modification 해당 페이지는 checkpoint되었기 때문에 recovery할때 로그 삭제됨.
+			// 그럼 IPLed page의 IPL 영역이 crash가 발생해서 old page로 부터 복구가 필요한 경우에 대해서는	
+			// 로그 정보가 사라질 수 있음.
+			//block->page.oldest_modification = start_lsn;
 			buf_page_mutex_exit(block);
 			return;
 		}
@@ -616,6 +632,8 @@ buf_flush_note_modification(
 
 	srv_stats.buf_pool_write_requests.inc();
 }
+
+// (jhpark): why??
 UNIV_INLINE
 void
 buf_flush_note_modification_for_ipl_page(
@@ -4404,10 +4422,13 @@ buf_flush_ipl_clean_checkpointed_block_low(
 	lsn_t cur_page_lsn = mach_read_from_8(((buf_block_t*)bpage)->frame + FIL_PAGE_LSN);
 
 	// (jhpark): recovery
-	fprintf(stderr, "ipl store write pointer %lu (%u:%u)\n"
-				, get_ipl_length_from_write_pointer(bpage), bpage->id.space(), bpage->id.page_no());
+	fprintf(stderr, "DIPL ipl store write pointer %lu (%u:%u) cur_lsn: %lu oldset_modificatino: %lu\n"
+				, get_ipl_length_from_write_pointer(bpage)
+				, bpage->id.space(), bpage->id.page_no()
+				, cur_page_lsn, bpage->oldest_modification);
 	recv_ipl_set_wp(bpage->static_ipl_pointer, get_ipl_length_from_write_pointer(bpage));
-	set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, cur_page_lsn); // DIPL page들은 SIPL header에 lsn을 저장해둔다.
+	set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, cur_page_lsn); 
+	// DIPL page들은 SIPL header에 lsn을 저장해둔다.
 
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL

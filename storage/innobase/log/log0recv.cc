@@ -2427,6 +2427,14 @@ recv_recover_page_func(
 
 	recv = UT_LIST_GET_FIRST(recv_addr->rec_list);
 
+	// (jhpark): debug
+	if (block->page.id.space() == 26
+		&& block->page.id.page_no() == 112705) {
+		ib::info() << "this is problem! page_lsn: " << page_lsn 
+			<< " recv_lsn: " << recv->start_lsn; 
+	}
+
+
 	while (recv) {
 		end_lsn = recv->end_lsn;
 

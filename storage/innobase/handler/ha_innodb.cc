@@ -20309,6 +20309,12 @@ static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl_recovery, srv_use_nvdimm_ipl_recovery,
   "Enable NVDIMM IPL recovery mode (disabled by default).",
   NULL, NULL, FALSE);
 
+// redo on nvdimm
+static MYSQL_SYSVAR_BOOL(use_nvdimm_redo, srv_use_nvdimm_redo,
+  PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
+  "Enable NVDIMM redo recovery mode (disabled by default)",
+  NULL, NULL, FALSE);
+
 #endif
 
 static struct st_mysql_sys_var* innobase_system_variables[]= {
@@ -20488,6 +20494,7 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
 	MYSQL_SYSVAR(use_nvdimm_ipl),
 	MYSQL_SYSVAR(nvdimm_home_dir),
 	MYSQL_SYSVAR(use_nvdimm_ipl_recovery),
+	MYSQL_SYSVAR(use_nvdimm_redo),
 #endif
 
   NULL

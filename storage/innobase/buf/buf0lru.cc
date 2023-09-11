@@ -1931,11 +1931,14 @@ func_exit:
 	if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
 		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
 		// (jhpark): recovery
-		fprintf(stderr, "ipl store write pointer %lu (%u:%u)\n"
-			, get_ipl_length_from_write_pointer(bpage), bpage->id.space(), bpage->id.page_no());
+		fprintf(stderr, "SIPL ipl store write pointer %lu (%u:%u) oldset_modificatino: %lu\n"
+			, get_ipl_length_from_write_pointer(bpage)
+			, bpage->id.space(), bpage->id.page_no()
+			, bpage->oldest_modification);
 
 		recv_ipl_set_wp(bpage->static_ipl_pointer, get_ipl_length_from_write_pointer(bpage));
-		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification); // Page가 Discard되기 전에 Page_lsn IPL header에 저장
+		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification); 
+		// Page가 Discard되기 전에 Page_lsn IPL header에 저장
 	}
 	//nvdimm
 

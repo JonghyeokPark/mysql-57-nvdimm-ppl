@@ -249,6 +249,8 @@ my_bool srv_use_nvdimm_ipl = FALSE;
 char* srv_nvdimm_home_dir = NULL;
 /** IPLizatio recovery optimization **/
 my_bool srv_use_nvdimm_ipl_recovery = FALSE;
+/** Redo on NVDIMM optimization */
+my_bool srv_use_nvdimm_redo = FALSE;
 #endif
 
 /** Requested size in bytes */
