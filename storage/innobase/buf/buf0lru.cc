@@ -1433,7 +1433,7 @@ loop:
 	involved (particularly in case of compressed pages). We
 	can do that in a separate patch sometime in future. */
 
-	if (!buf_flush_single_page_from_LRU(buf_pool)) {
+	if (!buf_flush_single_page_from_LRU(buf_pool, n_iterations)) {
 		MONITOR_INC(MONITOR_LRU_SINGLE_FLUSH_FAILURE_COUNT);
 		++flush_failures;
 	}
