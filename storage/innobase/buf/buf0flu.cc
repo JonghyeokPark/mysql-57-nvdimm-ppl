@@ -2330,7 +2330,8 @@ is not fast enough to keep pace with the workload.
 bool
 buf_flush_single_page_from_LRU(
 /*===========================*/
-	buf_pool_t*	buf_pool)	/*!< in/out: buffer pool instance */
+	buf_pool_t*	buf_pool,
+	ulint n_iterations)	/*!< in/out: buffer pool instance */
 {
 	ulint		scanned;
 	buf_page_t*	bpage;
@@ -2376,8 +2377,7 @@ buf_flush_single_page_from_LRU(
 			}
 
 		}
-		else if (buf_flush_ready_for_flush(
-				   bpage, BUF_FLUSH_SINGLE_PAGE)) {
+		else if ((n_iterations > 1) && buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
 			// if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
 			// 	fprintf(stderr, "Single Page Flush(%u, %u), old_lsn: %zu, buf_fix_count: %u, io_fix: %u, flush_type:%d, dynamic: %p\n", bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), bpage->flush_type, get_dynamic_ipl_pointer(bpage));
 			// }

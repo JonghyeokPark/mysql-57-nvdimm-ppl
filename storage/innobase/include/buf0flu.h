@@ -154,7 +154,8 @@ is not fast enough to keep pace with the workload.
 bool
 buf_flush_single_page_from_LRU(
 /*===========================*/
-	buf_pool_t*	buf_pool);	/*!< in/out: buffer pool instance */
+	buf_pool_t*	buf_pool,
+	ulint n_iterations);	/*!< in/out: buffer pool instance */
 /******************************************************************//**
 Waits until a flush batch of the given type ends */
 void

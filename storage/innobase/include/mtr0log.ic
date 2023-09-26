@@ -118,6 +118,7 @@ mlog_close(
 			case MLOG_COMP_REC_UPDATE_IN_PLACE:
 			case MLOG_COMP_REC_DELETE:
 			case MLOG_INIT_FILE_PAGE2:
+			case MLOG_COMP_PAGE_CREATE:
 				my_recv_parse_log_recs(mtr_ipl_start_pointer, ptr - mtr_ipl_start_pointer);
 				break;
 			default:
