@@ -4427,7 +4427,8 @@ buf_flush_ipl_clean_checkpointed_block_low(
 				, bpage->id.space(), bpage->id.page_no()
 				, cur_page_lsn, bpage->oldest_modification);
 	recv_ipl_set_wp(bpage->static_ipl_pointer, get_ipl_length_from_write_pointer(bpage));
-	set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, cur_page_lsn); 
+	set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, cur_page_lsn);
+	set_flag(bpage->static_ipl_pointer + IPL_FLAG_OFFSET, NORMALIZE);
 	// DIPL page들은 SIPL header에 lsn을 저장해둔다.
 
 	if (!srv_use_doublewrite_buf
