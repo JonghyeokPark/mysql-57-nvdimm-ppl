@@ -5850,9 +5850,17 @@ corrupt:
 			ut_a(uncompressed);
 
 			// (jhpark): recovery
-			if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
-				recv_ipl_apply((buf_block_t*)bpage);
-			}
+			//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+			//	recv_ipl_apply((buf_block_t*)bpage);
+			//}
+
+			// (jhpark): in this case, if we apply the IPL log for IPLed page in this step,
+			// we can not recover below scenario (i.e., we can not recvoer step 1 and 2 updates)
+			//	1. update page A (page A is nomral page)
+			//  2. update page A (page A is normal page)
+			//	3. page A become IPLed page
+			//  4. update page A (page A creates IPL log)
+
 			recv_recover_page(TRUE, (buf_block_t*) bpage);
 		}
 
@@ -5907,9 +5915,9 @@ corrupt:
 		buf_pool->stat.n_pages_read++;
 
 		// (jhpark): recovery
-		if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
-			recv_ipl_apply((buf_block_t*)bpage);
-		}
+		//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+		//	recv_ipl_apply((buf_block_t*)bpage);
+		//}
 
 		//nvdimm
 		// (jhpark): recovery
@@ -5940,9 +5948,9 @@ corrupt:
 		routine in the flush system */
 
 		// (jhpark): recovery
-		if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
-			recv_ipl_apply((buf_block_t*)bpage);
-		}
+		//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+		//	recv_ipl_apply((buf_block_t*)bpage);
+		//}
 
 		buf_flush_write_complete(bpage);
 		//nvdimm

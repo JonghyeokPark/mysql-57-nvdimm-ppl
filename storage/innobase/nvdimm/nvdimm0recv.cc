@@ -32,6 +32,17 @@ void recv_ipl_parse_log() {
 		memcpy(hdr, nvdimm_recv_ptr + i, IPL_LOG_HEADER_SIZE);
 		space_no = mach_read_from_4(hdr);
 		page_no = mach_read_from_4(hdr + 4);
+	
+		// skip deleted IPL log
+		// SIPL > DIPL > SDIPL 작성된 IPL 로그가 있는 page가 normalize 된 경우, 
+		// SDIPL > DIPL > SIPL 순으로, 삭제되기 때문에 normalize가 되어도 SDIPL이 있을 수 있다.
+		// 따라서, normalize flag를 확인해서 IPLed 페이지 해제함.
+		if(get_flag(nvdimm_recv_ptr + i + IPL_FLAG_OFFSET, NORMALIZE)) {
+			fprintf(stderr, "(%u,%u) is IPLed but become normailze at crash\n"
+							, space_no, page_no);
+			continue;
+		}
+
 		ipl_recv_map[page_id_t(space_no, page_no)] = i;
 	}
 }
@@ -376,4 +387,18 @@ void recv_clean_ipl_map() {
 		ipl_recv_map.erase(it);
 	}	
 	ib::info() << "IPL mapping region is cleand!";
+}
+
+bool recv_check_normal_flag(buf_block_t* block) {
+	std::tr1::unordered_map<page_id_t, uint64_t >::iterator recv_iter;
+	recv_iter = ipl_recv_map.find(block->page.id);
+	uint64_t addr = recv_iter->second;
+	return get_flag(nvdimm_recv_ptr + addr + IPL_FLAG_OFFSET, NORMALIZE);
+}
+
+lsn_t recv_get_first_ipl_lsn(buf_block_t* block) {
+	std::tr1::unordered_map<page_id_t, uint64_t >::iterator recv_iter;
+	recv_iter = ipl_recv_map.find(block->page.id);
+	uint64_t addr = recv_iter->second;
+	return recv_ipl_get_lsn(nvdimm_recv_ptr + addr);
 }

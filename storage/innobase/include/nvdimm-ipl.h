@@ -262,6 +262,8 @@ void recv_ipl_log_apply(byte * start_ptr
 											, mtr_t * temp_mtr);
 
 void recv_clean_ipl_map();
+lsn_t recv_get_first_ipl_lsn(buf_block_t* block);
+bool recv_check_normal_flag(buf_block_t* block);
 
 RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
 extern std::tr1::unordered_map<page_id_t, uint64_t > ipl_recv_map;

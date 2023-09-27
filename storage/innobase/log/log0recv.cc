@@ -2427,15 +2427,37 @@ recv_recover_page_func(
 
 	recv = UT_LIST_GET_FIRST(recv_addr->rec_list);
 
-	// (jhpark): debug
-	if (block->page.id.space() == 26
-		&& block->page.id.page_no() == 112705) {
-		ib::info() << "this is problem! page_lsn: " << page_lsn 
-			<< " recv_lsn: " << recv->start_lsn; 
-	}
+	// (jhpark): check IPLed page to require to prepare IPL apply 
+  // from WAL redo logs
+  // case1. recv->start_lsn < first IPLed LSN (static IPL lsn)
+  //  - we need to apply WAL redo log to apply IPL log
+  // case2. recv->start_lsn < last IPLed LSN
+  //  - 이런 경우가 있나?
+  // case3. page_lsn > recv->start_lsn  
+  //  - skip wal redo apply 
 
+  bool is_ipl = (recv_check_iplized(block->page.id) != NORMAL);
 
 	while (recv) {
+
+    // (jhpark): ignore IPLed page (case 3)
+		if (is_ipl) {
+			ib::info() << "IPled page apply redo logs! " <<block->page.id.space() << ":"
+								 << block->page.id.page_no() <<  " start_lsn: " 
+								 << recv->start_lsn <<" ipl_lsn: " << recv_get_first_ipl_lsn(block);
+			// ipl_lsn == 0 인경우 의미: IPLed 되어있지만,
+			// ipl page가 flush되는 경우 
+
+			if (
+					/* recv_get_first_ipl_lsn(block) != 0 */
+					recv->start_lsn < recv_get_first_ipl_lsn(block)) {
+				// now, we can apply the IPL log, no need to keep applying WAL log
+				ib::info() << "now, we can skip the WAL redo log!";
+				break;
+			}
+
+		}
+	
 		end_lsn = recv->end_lsn;
 
 		ut_ad(end_lsn
