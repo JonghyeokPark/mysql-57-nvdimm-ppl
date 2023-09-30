@@ -37,11 +37,13 @@ void recv_ipl_parse_log() {
 		// SIPL > DIPL > SDIPL 작성된 IPL 로그가 있는 page가 normalize 된 경우, 
 		// SDIPL > DIPL > SIPL 순으로, 삭제되기 때문에 normalize가 되어도 SDIPL이 있을 수 있다.
 		// 따라서, normalize flag를 확인해서 IPLed 페이지 해제함.
+    /*
 		if(get_flag(nvdimm_recv_ptr + i + IPL_FLAG_OFFSET, NORMALIZE)) {
 			fprintf(stderr, "(%u,%u) is IPLed but become normailze at crash\n"
 							, space_no, page_no);
 			continue;
 		}
+    */
 
 		ipl_recv_map[page_id_t(space_no, page_no)] = i;
 	}

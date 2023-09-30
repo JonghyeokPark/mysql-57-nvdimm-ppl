@@ -2445,12 +2445,15 @@ recv_recover_page_func(
 			ib::info() << "IPled page apply redo logs! " <<block->page.id.space() << ":"
 								 << block->page.id.page_no() <<  " start_lsn: " 
 								 << recv->start_lsn <<" ipl_lsn: " << recv_get_first_ipl_lsn(block);
-			// ipl_lsn == 0 인경우 의미: IPLed 되어있지만,
-			// ipl page가 flush되는 경우 
 
-			if (
-					/* recv_get_first_ipl_lsn(block) != 0 */
-					recv->start_lsn < recv_get_first_ipl_lsn(block)) {
+			// ipl_lsn > WAL log : we can apply using IPL log only;
+			// do not consider WAL log
+			if (recv->start_lsn > recv_get_first_ipl_lsn(block)) {
+				ib::info() << "now, we can skip the WAL redo log; becuase we keep previous log in our IPL region!";
+				break;
+			}
+
+			if (recv->start_lsn < recv_get_first_ipl_lsn(block)) {
 				// now, we can apply the IPL log, no need to keep applying WAL log
 				ib::info() << "now, we can skip the WAL redo log!";
 				break;
