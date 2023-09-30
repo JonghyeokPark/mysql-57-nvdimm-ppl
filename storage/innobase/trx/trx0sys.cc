@@ -524,6 +524,13 @@ trx_sys_init_at_db_start(void)
 			<< " row operations to undo";
 
 		ib::info() << "Trx id counter is " << trx_sys->max_trx_id;
+
+  // (jhpark): active transaction at crash !!!
+  for(trx_t* tx = UT_LIST_GET_FIRST(trx_sys->rw_trx_list);
+        tx != NULL;
+        tx = UT_LIST_GET_NEXT(trx_list, tx)) {
+      ib::info() << "Active trx ids at crash " << tx->id;
+  	}
 	}
 
 	trx_sys_mutex_exit();

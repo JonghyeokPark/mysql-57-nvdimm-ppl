@@ -1196,7 +1196,19 @@ row_undo_mod(
 
 	row_undo_mod_parse_undo_rec(node, dict_locked);
 
-	if (node->table == NULL) {
+  // (jhpark): ipl-undo
+  if (node->pcur.btr_cur.page_cur.block != NULL) {
+    ib::info() << "modify undo " << node->pcur.btr_cur.page_cur.block->page.id.space() 
+              << ":" << node->pcur.btr_cur.page_cur.block->page.id.page_no();
+    if(recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {
+       ib::info() << "this is IPL skip!";
+       return(DB_SUCCESS);
+    }
+  } else {
+    ib::info() << "modify undo, undo record of block is NULL";
+  }
+	
+  if (node->table == NULL) {
 		/* It is already undone, or will be undone by another query
 		thread, or table was dropped */
 

@@ -466,6 +466,20 @@ row_undo_ins(
 
 	row_undo_ins_parse_undo_rec(node, dict_locked);
 
+  // (jhpark): ipl-undonow, we parsed undo records, and we know the 
+  if (node->pcur.btr_cur.page_cur.block != NULL) {
+    ib::info() << "insert undo " << node->pcur.btr_cur.page_cur.block->page.id.space() 
+        << ":" << node->pcur.btr_cur.page_cur.block->page.id.page_no();
+    if(recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {
+			ib::info() << "this is IPL, skip!";
+      return(DB_SUCCESS);
+    }
+  } else {
+    ib::info() << "insert undo, undo record of block is NULL";
+  }
+  //
+
+
 	if (node->table == NULL) {
 		return(DB_SUCCESS);
 	}

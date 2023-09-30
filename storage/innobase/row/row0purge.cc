@@ -639,6 +639,17 @@ row_purge_del_mark(
 {
 	mem_heap_t*	heap;
 
+	// (jhpark): ipl-undo
+	if (node->pcur.btr_cur.page_cur.block != NULL) {
+		ib::info() << "purge undo " << node->pcur.btr_cur.page_cur.block->page.id.space() 
+								<< ":" << node->pcur.btr_cur.page_cur.block->page.id.page_no();
+		if(recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {
+			return true;
+		}
+	} else {
+		ib::info() << "purge undo, undo record of block is NULL";
+	}
+
 	heap = mem_heap_create(1024);
 
 	while (node->index != NULL) {
