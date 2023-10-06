@@ -318,9 +318,9 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 /* TODO Sjmun : 한 번도 Discard되지 않은 페이지들은 사실 IPL을 사용할 필요 없이 Global redo로그로만 복구가능한데..  */
 void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
 	// /*Step 1. Page가 IPL화 되고 한 번도 Discard도 되진 않은 경우는 바로 Normalize 시도*/
-	if(!get_flag(&(bpage->flags), NORMALIZE) && get_flag(&(bpage->flags), IPLIZED)){
+	// if(!get_flag(&(bpage->flags), NORMALIZE) && get_flag(&(bpage->flags), IPLIZED)){
 		// fprintf(stderr, "flag: %d\n",bpage->flags);
-		set_normalize_flag_in_ipl_header(bpage->static_ipl_pointer);
+		// set_normalize_flag_in_ipl_header(bpage->static_ipl_pointer);
 		// if(!get_flag(&(bpage->flags), IN_LOOK_UP)){
 		// 	buf_pool_t * buf_pool = buf_pool_get(bpage->id);
 		// 	free_second_dynamic_address_to_indirection_queue(buf_pool, get_second_dynamic_ipl_pointer(bpage));
@@ -330,7 +330,7 @@ void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
 		// 	bpage->ipl_write_pointer = NULL;
 		// 	bpage->flags = 0; // flag를 전부 초기화 하느냐, normalize flag만 세우냐 그 차이
 		// }
-	}
+	// }
 	set_flag(&(bpage->flags), NORMALIZE);
 }
 
@@ -567,13 +567,4 @@ void unset_flag(unsigned char * flags, ipl_flag flag_type){
 }
 bool get_flag(unsigned char * flags, ipl_flag flag_type){
 	return (*flags) & flag_type;
-}
-
-void test_function(trx_id_t trx_id){
-	int test = 10;
-	int count = 1;
-	for(int i = 1; i < test; i++){
-		count = count * i;
-	}
-	fprintf(stderr, "No TRX ID!!: %lu\n", trx_id);
 }

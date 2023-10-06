@@ -970,9 +970,6 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
 	if(!is_system_or_undo_tablespace(space) && !get_flag(&(buf_page->flags), NORMALIZE)
 		&& page_is_leaf(((buf_block_t *)buf_page)->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
-		if(trx_id == 0){
-			fprintf(stderr, "(%u, %u) trx_id: %zu\n", space, page_no, trx_id);
-		}
 		ulint log_len = (ptr + len) - body + APPLY_LOG_HDR_SIZE;
 		ulint rest_log_len = 0;
 		if(can_write_in_ipl(buf_page, log_len, &rest_log_len)){

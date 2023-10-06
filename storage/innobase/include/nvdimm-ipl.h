@@ -217,7 +217,6 @@ struct nc_redo_buf{
   uint64_t nc_buf_free;
   uint64_t nc_lsn;
 };
-void test_function(trx_id_t trx_id);
 #define REDO_INFO_OFFSET  (512*1024*1024)
 extern nc_redo_buf* nc_redo_info;
 
