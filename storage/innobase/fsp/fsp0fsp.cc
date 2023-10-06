@@ -1675,6 +1675,10 @@ fsp_fill_free_list(
 				mtr_t	ibuf_mtr;
 
 				mtr_start(&ibuf_mtr);
+				// nvdimm add_trx_id
+				// fprintf(stderr, "fsp_fill_free_list mtr: %p, trx_id: %zu\n",&mtr, mtr->get_mtr_ipl_trx_id());
+				(&ibuf_mtr)->set_mtr_ipl_trx_id(mtr->get_mtr_ipl_trx_id());
+				// nvdimm add_trx_id
 				ibuf_mtr.set_named_space(space);
 
 				/* Avoid logging while truncate table
@@ -1698,7 +1702,7 @@ fsp_fill_free_list(
 					&ibuf_mtr);
 
 				buf_block_dbg_add_level(block, SYNC_FSP_PAGE);
-
+				
 				fsp_init_file_page(block, &ibuf_mtr);
 
 				ibuf_bitmap_page_init(block, &ibuf_mtr);

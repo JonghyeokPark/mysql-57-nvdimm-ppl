@@ -98,6 +98,12 @@ row_undo_mod_clust_low(
 	btr_pcur_t*	pcur;
 	btr_cur_t*	btr_cur;
 	dberr_t		err;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_undo_mod_clust_low mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 #ifdef UNIV_DEBUG
 	ibool		success;
 #endif /* UNIV_DEBUG */
@@ -272,6 +278,12 @@ row_undo_mod_clust(
 	index = btr_cur_get_index(btr_pcur_get_btr_cur(pcur));
 
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_undo_mod_clust mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 	mtr.set_named_space(index->space);
 	dict_disable_redo_if_temporary(index->table, &mtr);
 
@@ -303,6 +315,12 @@ row_undo_mod_clust(
 		descent down the index tree */
 
 		mtr_start(&mtr);
+		//nvdimm add_trx_id
+		if(thr != NULL){
+			// fprintf(stderr, "row_undo_mod_clust mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+			(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+		}
+		//nvdimm add_trx_id
 		mtr.set_named_space(index->space);
 		dict_disable_redo_if_temporary(index->table, &mtr);
 
@@ -354,6 +372,12 @@ row_undo_mod_clust(
 	if (err == DB_SUCCESS && node->rec_type == TRX_UNDO_UPD_DEL_REC) {
 
 		mtr_start(&mtr);
+		//nvdimm add_trx_id
+		if(thr != NULL){
+			// fprintf(stderr, "row_undo_mod_clust mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+			(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+		}
+		//nvdimm add_trx_id
 		mtr.set_named_space(index->space);
 		dict_disable_redo_if_temporary(index->table, &mtr);
 
@@ -418,6 +442,12 @@ row_undo_mod_del_mark_or_remove_sec_low(
 
 	log_free_check();
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_undo_mod_del_mark_or_remove_sec_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 	mtr.set_named_space(index->space);
 	dict_disable_redo_if_temporary(index->table, &mtr);
 
@@ -487,6 +517,12 @@ row_undo_mod_del_mark_or_remove_sec_low(
 	we should delete mark the record. */
 
 	mtr_start(&mtr_vers);
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_undo_mod_del_mark_or_remove_sec_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr_vers, thr, thr_get_trx(thr)->id);
+		(&mtr_vers)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	success = btr_pcur_restore_position(BTR_SEARCH_LEAF, &(node->pcur),
 					    &mtr_vers);
@@ -623,6 +659,12 @@ row_undo_mod_del_unmark_sec_and_undo_update(
 try_again:
 	log_free_check();
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_undo_mod_del_unmark_sec_and_undo_update mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 	mtr.set_named_space(index->space);
 	dict_disable_redo_if_temporary(index->table, &mtr);
 

@@ -1397,6 +1397,12 @@ row_explicit_rollback(
 	ulint*		offsets;
 	mem_heap_t*	heap = NULL;
 	dberr_t		err;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_explicit_rollback mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	rec_offs_init(offsets_);
 	flags = BTR_NO_LOCKING_FLAG | BTR_NO_UNDO_LOG_FLAG;
@@ -1615,6 +1621,12 @@ row_insert_for_mysql_using_cursor(
 		node->entry = UT_LIST_GET_FIRST(node->entry_list);
 
 		mtr_start(&mtr);
+		//nvdimm add_trx_id
+		if(thr != NULL){
+			// fprintf(stderr, "row_insert_for_mysql_using_cursor mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+			(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+		}
+		//nvdimm add_trx_id
 		dict_disable_redo_if_temporary(node->table, &mtr);
 
 		for (dict_index_t* index =

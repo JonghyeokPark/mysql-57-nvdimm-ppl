@@ -5897,11 +5897,18 @@ lock_rec_insert_check_and_lock(
 				LOCK_GAP type locks from the successor
 				record */
 {
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "lock_rec_insert_check_and_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 	ut_ad(block->frame == page_align(rec));
 	ut_ad(!dict_index_is_online_ddl(index)
 	      || dict_index_is_clust(index)
 	      || (flags & BTR_CREATE_FLAG));
 	ut_ad(mtr->is_named_space(index->space));
+	
 
 	if (flags & BTR_NO_LOCKING_FLAG) {
 
@@ -6199,6 +6206,12 @@ lock_sec_rec_modify_check_and_lock(
 {
 	dberr_t	err;
 	ulint	heap_no;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "lock_rec_insert_check_and_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	ut_ad(!dict_index_is_clust(index));
 	ut_ad(!dict_index_is_online_ddl(index) || (flags & BTR_CREATE_FLAG));

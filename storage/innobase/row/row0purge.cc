@@ -145,6 +145,10 @@ row_purge_remove_clust_if_poss_low(
 
 	log_free_check();
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	// fprintf(stderr, "row_purge_remove_clust_if_poss_low mtr: %p trx_id: %zu\n",&mtr, node->trx_id);
+	(&mtr)->set_mtr_ipl_trx_id(node->trx_id);
+	//nvdimm add_trx_id
 	mtr.set_named_space(index->space);
 
 	if (!row_purge_reposition_pcur(mode, node, &mtr)) {

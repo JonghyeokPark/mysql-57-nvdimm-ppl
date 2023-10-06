@@ -594,6 +594,11 @@ struct mtr_t {
 		mtr_ipl_before_log_count = count;
 	}
 
+	void set_mtr_ipl_trx_id(trx_id_t trx_id)
+	{
+		mtr_ipl_trx_id = trx_id;
+	}
+
 	uint32_t get_mtr_ipl_before_log_count()
 	{
 		return mtr_ipl_before_log_count;
@@ -601,6 +606,11 @@ struct mtr_t {
 	uint32_t get_log_count()
 	{
 		return m_impl.m_n_log_recs;
+	}
+
+	trx_id_t get_mtr_ipl_trx_id()
+	{
+		return mtr_ipl_trx_id;
 	}
 
 
@@ -642,9 +652,11 @@ private:
 	byte * mtr_ipl_start_ptr;
 	//IPL Log count
 	uint32_t mtr_ipl_before_log_count;
+
+	trx_id_t mtr_ipl_trx_id;
 };
 void
-my_recv_parse_log_recs(byte * start_ptr, ulint log_len);
+my_recv_parse_log_recs(byte * start_ptr, ulint log_len, trx_id_t trx_id);
 
 ulint
 ipl_recv_parse_log_rec(

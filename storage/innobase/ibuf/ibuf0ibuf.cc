@@ -891,6 +891,10 @@ ibuf_set_free_bits_func(
 	}
 
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	// fprintf(stderr, "ibuf_set_free_bits_func mtr: %p, trx_id: %zu\n",&mtr, ((buf_page_t *)block)->trx_id);
+	(&mtr)->set_mtr_ipl_trx_id(((buf_page_t *)block)->trx_id);
+	//nvdimm add_trx_id
 	const fil_space_t* space = mtr.set_named_space(block->page.id.space());
 
 	bitmap_page = ibuf_bitmap_get_map_page(block->page.id,
@@ -3435,6 +3439,12 @@ ibuf_insert_low(
 	}
 
 	ibuf_mtr_start(&mtr);
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "rtr_ins_enlarge_mbr mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	btr_pcur_open(ibuf->index, ibuf_entry, PAGE_CUR_LE, mode, &pcur, &mtr);
 	ut_ad(page_validate(btr_pcur_get_page(&pcur), ibuf->index));

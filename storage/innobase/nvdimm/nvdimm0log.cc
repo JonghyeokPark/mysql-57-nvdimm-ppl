@@ -88,20 +88,20 @@ bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage){
 /* SIPL 영역 공간이 부족한 경우는 2개로 나누어서 기존 IPL 영역, 새로운 IPL 영역에 작성하게 됨*/
 /* Log write atomicity를 보장하기 위해서는 두번째 파트를 다 작성하고 Length를 Flush cache*/
 
-void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len){
+void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len, trx_id_t trx_id){
 	unsigned char write_ipl_log_buffer [len] = {NULL, };
 	uint test;
 	ulint offset = 0;
 	unsigned char store_type = type;
 	unsigned short log_body_size = len - APPLY_LOG_HDR_SIZE;
-	// fprintf(stderr, "nvdimm_ipl_add(%u, %u) Log type: %d, log_len: %lu now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, log_body_size, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
+	// fprintf(stderr, "nvdimm_ipl_add(%u, %u) Log type: %d, log_len: %lu, trx_id: %zu now_write_pointer: %p can_write_size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, log_body_size, trx_id, bpage->ipl_write_pointer, get_can_write_size_from_write_pointer(bpage, &test));
 
 	//Step1. Apply log header 작성
 	mach_write_to_1(write_ipl_log_buffer + offset, store_type); // mtr_log type
 	offset += 1;
 	mach_write_to_2(write_ipl_log_buffer + offset, log_body_size); //mtr_log body
 	offset += 2;
-	mach_write_to_8(write_ipl_log_buffer + offset, 0); // mtr_log trx_id
+	mach_write_to_8(write_ipl_log_buffer + offset, trx_id); // mtr_log trx_id
 	offset += 8;
 
 	//Step2. Header + Body가 한 영역에 다 들어갈 수 있는지 확인
@@ -278,7 +278,7 @@ void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info
 		ulint body_len = mach_read_from_2(apply_ptr);
 		apply_ptr += 2;
 		//Setp 3. Trx id 읽어오기
-		uint64_t trx_id = mach_read_from_8(apply_ptr);
+		trx_id_t trx_id = mach_read_from_8(apply_ptr);
 		apply_ptr += 8;
 		if(log_type == MLOG_COMP_PAGE_CREATE){
 			apply_ptr += body_len;
@@ -320,7 +320,7 @@ void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
 	// /*Step 1. Page가 IPL화 되고 한 번도 Discard도 되진 않은 경우는 바로 Normalize 시도*/
 	if(!get_flag(&(bpage->flags), NORMALIZE) && get_flag(&(bpage->flags), IPLIZED)){
 		// fprintf(stderr, "flag: %d\n",bpage->flags);
-		set_flag(bpage->static_ipl_pointer + IPL_FLAG_OFFSET, NORMALIZE);
+		set_normalize_flag_in_ipl_header(bpage->static_ipl_pointer);
 		// if(!get_flag(&(bpage->flags), IN_LOOK_UP)){
 		// 	buf_pool_t * buf_pool = buf_pool_get(bpage->id);
 		// 	free_second_dynamic_address_to_indirection_queue(buf_pool, get_second_dynamic_ipl_pointer(bpage));
@@ -346,11 +346,17 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	bpage->static_ipl_pointer = NULL;
 	bpage->ipl_write_pointer = NULL;
 	bpage->flags = 0;
+	//nvdimm add_trx_id
+	bpage->trx_id = 0;
+	//nvdimm add_trx_id
 }
 
 
 
 void set_for_ipl_page(buf_page_t* bpage){
+	//nvdimm add_trx_id
+	bpage->trx_id = 0;
+	//nvdimm add_trx_id
 	bpage->static_ipl_pointer = NULL;
 	// fprintf(stderr, "Read page! page_id(%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	bpage->flags = 0;
@@ -434,6 +440,12 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
 	if(get_flag(&(bpage->flags), IPLIZED) == false){
 		// print_flush_type(flush_type, false);
+		//nvdimm add_trx_id
+		bpage->trx_id = 0;
+		bpage->static_ipl_pointer = NULL;
+		bpage->flags = 0;
+		bpage->ipl_write_pointer = NULL;
+		//nvdimm add_trx_id
 		return false;
 	}
 	else{
@@ -538,6 +550,15 @@ lsn_t get_page_lsn_from_ipl_header(unsigned char* static_ipl_pointer){
 	return mach_read_from_8(static_ipl_pointer + IPL_PAGE_LSN_OFFSET);
 }
 
+void set_normalize_flag_in_ipl_header(unsigned char * static_ipl_pointer){
+	set_flag(static_ipl_pointer + IPL_FLAG_OFFSET, NORMALIZE);
+	flush_cache(static_ipl_pointer + IPL_FLAG_OFFSET, 1);
+}
+
+unsigned char * get_flag_in_ipl_header(unsigned char * static_ipl_pointer){
+	return static_ipl_pointer + IPL_FLAG_OFFSET;
+}
+
 void set_flag(unsigned char * flags, ipl_flag flag_type){
 	(*flags) |= flag_type;
 }
@@ -546,4 +567,13 @@ void unset_flag(unsigned char * flags, ipl_flag flag_type){
 }
 bool get_flag(unsigned char * flags, ipl_flag flag_type){
 	return (*flags) & flag_type;
+}
+
+void test_function(trx_id_t trx_id){
+	int test = 10;
+	int count = 1;
+	for(int i = 1; i < test; i++){
+		count = count * i;
+	}
+	fprintf(stderr, "No TRX ID!!: %lu\n", trx_id);
 }

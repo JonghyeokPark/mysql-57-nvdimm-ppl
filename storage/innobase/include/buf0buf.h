@@ -1703,6 +1703,10 @@ public:
 	unsigned char * static_ipl_pointer;
 	unsigned char * ipl_write_pointer;
 	unsigned char flags; // first bit: iplized_flag, second bit: normalize_flag, third bit: dirtifed_flag
+
+	//nvdimm add_trx_id
+	trx_id_t trx_id;
+	//nvdimm add_trx_id
 };
 
 /** The buffer control block structure */
@@ -1711,6 +1715,8 @@ struct buf_block_t{
 
 	/** @name General fields */
 	/* @{ */
+
+
 
 	buf_page_t	page;		/*!< page information; this must
 					be the first field, so that
