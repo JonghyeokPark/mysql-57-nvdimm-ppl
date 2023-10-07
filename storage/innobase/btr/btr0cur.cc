@@ -317,10 +317,10 @@ btr_cur_latch_leaves(
 
 #ifdef UNIV_BTR_DEBUG
 		/* Sanity check only after both the blocks are latched. */
-		if (latch_leaves.blocks[0] != NULL) {
+		// ipl-undo
+		if (latch_leaves.blocks[0] != NULL && !nvdimm_recv_running) {
 			ut_a(page_is_comp(latch_leaves.blocks[0]->frame)
 				== page_is_comp(page));
-
 			// fprintf(stderr, "btr_page_get_next: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_next(latch_leaves.blocks[0]->frame, mtr));
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
 			ut_a(btr_page_get_next(
@@ -350,13 +350,15 @@ btr_cur_latch_leaves(
 			latch_leaves.blocks[2] = get_block;
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(get_block->frame), page_get_page_no(get_block->frame));
 #ifdef UNIV_BTR_DEBUG
+			// ipl-undo
+			if (!nvdimm_recv_running) {
 			ut_a(page_is_comp(get_block->frame)
 			     == page_is_comp(page));
 			// fprintf(stderr, "btr_page_get_prev: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_prev(get_block->frame, mtr));
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
 			ut_a(btr_page_get_prev(get_block->frame, mtr)
 			     == page_get_page_no(page));
-			
+			}
 #endif /* UNIV_BTR_DEBUG */
 			if (spatial) {
 				cursor->rtr_info->tree_blocks[
@@ -385,10 +387,13 @@ btr_cur_latch_leaves(
 #ifdef UNIV_BTR_DEBUG
 			// fprintf(stderr, "btr_page_get_next: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_next(get_block->frame, mtr));
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
+
+			if (!nvdimm_recv_running) {
 			ut_a(page_is_comp(get_block->frame)
 			     == page_is_comp(page));
 			ut_a(btr_page_get_next(get_block->frame, mtr)
 			     == page_get_page_no(page));
+			}
 #endif /* UNIV_BTR_DEBUG */
 		}
 
@@ -1306,8 +1311,13 @@ retry_page_get:
 	}
 
 	if (height == 0) {
-		if (rw_latch == RW_NO_LATCH) {
 
+    if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
+      ib::info() << "we skip traveersing because it is a IPLed page";
+      return;
+    }
+
+		if (rw_latch == RW_NO_LATCH) {
 			latch_leaves = btr_cur_latch_leaves(
 				block, page_id, page_size, latch_mode,
 				cursor, mtr);
@@ -1438,6 +1448,12 @@ retry_page_get:
 		}
 	} else if (height == 0 && btr_search_enabled
 		   && !dict_index_is_spatial(index)) {
+	  
+    // (jhpark): ipl-undo
+    if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
+      ib::info() << "we skip traveersing because it is a IPLed page";
+    } else {
+    	
 		/* The adaptive hash index is only used when searching
 		for leaf pages (height==0), but not in r-trees.
 		We only need the byte prefix comparison for the purpose
@@ -1445,13 +1461,21 @@ retry_page_get:
 		page_cur_search_with_match_bytes(
 			block, index, tuple, page_mode, &up_match, &up_bytes,
 			&low_match, &low_bytes, page_cursor);
+    }
+
 	} else {
 		/* Search for complete index fields. */
+    // (jhpark): ipl-undo
+    if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
+      ib::info() << "we skip traveersing because it is a IPLed page";
+    } else {
+ 
 		up_bytes = low_bytes = 0;
 		page_cur_search_with_match(
 			block, index, tuple, page_mode, &up_match,
 			&low_match, page_cursor,
 			need_path ? cursor->rtr_info : NULL);
+    }
 	}
 
 	if (estimate) {
@@ -5417,7 +5441,8 @@ return_after_reservations:
 				"number being\n" << page_get_page_no(page) <<
 				"Index name\n" << index->name;
 			ut_ad(false);
-		} else if (do_merge) {
+		// (jhpark): we avoid merge b-tree due to IPLed pages in recvoery process
+		} else if (do_merge && !nvdimm_recv_running) {
 
 			ret = btr_cur_compress_if_useful(cursor, FALSE, mtr);
 		}

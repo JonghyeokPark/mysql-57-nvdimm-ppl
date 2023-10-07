@@ -2712,6 +2712,7 @@ files_checked:
 	os_thread_create(buf_resize_thread, NULL, NULL);
 
 	srv_was_started = TRUE;
+
 	return(DB_SUCCESS);
 }
 

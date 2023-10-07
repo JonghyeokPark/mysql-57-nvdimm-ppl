@@ -872,9 +872,13 @@ DECLARE_THREAD(trx_rollback_or_clean_all_recovered)(
 	/* We count the number of threads in os_thread_exit(). A created
 	thread should always use that to exit and not use return() to exit. */
 
+	//(jhpark): end ipl recovery
+	nvdimm_recv_running = false;
+	
 	os_thread_exit();
 
 	OS_THREAD_DUMMY_RETURN;
+	
 }
 
 /***********************************************************************//**
