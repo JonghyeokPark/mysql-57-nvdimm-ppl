@@ -3336,6 +3336,11 @@ fail_err:
 
 	*big_rec = big_rec_vec;
 
+	/* lbh */
+	if( leaf&& (dict_index_get_space(cursor->index) ==llt_space_id))
+		//ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(*rec, index), mtr); //rec_get_trx_id(*rec, index)
+	/* end */
+
 	return(DB_SUCCESS);
 }
 
@@ -3716,6 +3721,15 @@ btr_cur_parse_update_in_place(
 func_exit:
 	mem_heap_free(heap);
 
+	/* lbh */
+	if(page!=NULL){
+		if( page_is_leaf(page)&& (dict_index_get_space(index) ==llt_space_id)){
+			mtr_t* mtr;
+			ipl_page_set_max_trx_id(page, page_zip, trx_id, mtr); //rec_get_trx_id(*rec, index)
+		/* end */
+		}
+	}
+
 	return(ptr);
 }
 
@@ -3955,6 +3969,13 @@ func_exit:
 		/* Update the free bits in the insert buffer. */
 		ibuf_update_free_bits_zip(block, mtr);
 	}
+
+	/* lbh */
+	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(block->frame)){ // check iplized or not
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
+		//fprintf(stderr, "update max_trx_id for update in place\n");
+	}
+	/* end */
 
 	return(err);
 }
@@ -4217,6 +4238,12 @@ any_extern:
 	ut_ad(err == DB_SUCCESS);
 
 func_exit:
+
+	/* lbh */
+	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(page))
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
+	/* end */
+
 	if (!(flags & BTR_KEEP_IBUF_BITMAP)
 	    && !dict_index_is_clust(index)
 	    && !dict_table_is_temporary(index->table)) {
@@ -4712,6 +4739,10 @@ return_after_reservations:
 	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
 #endif
 
+	/* lbh */
+	if( page_is_leaf(page)&& (dict_index_get_space(cursor->index) ==llt_space_id))
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
+	/* end */
 
 	return(err);
 }
@@ -5248,6 +5279,13 @@ btr_cur_optimistic_delete_func(
 	if (UNIV_LIKELY_NULL(heap)) {
 		mem_heap_free(heap);
 	}
+
+	/* lbh */
+	page_t*		page	= buf_block_get_frame(block);
+	if(page_is_leaf(page) && (dict_index_get_space(cursor->index) ==llt_space_id)){
+		//ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), rec_get_trx_id(rec, cursor->index), mtr);
+	}		
+	/* end */
 
 	return(no_compress_needed);
 }

@@ -396,6 +396,12 @@ extern unsigned long long	srv_stats_persistent_sample_pages;
 extern my_bool			srv_stats_auto_recalc;
 extern my_bool			srv_stats_include_delete_marked;
 
+
+/* lbh */
+extern ulint	llt_space_id;
+/* end */
+
+
 extern ibool	srv_use_doublewrite_buf;
 extern ulong	srv_doublewrite_batch_size;
 extern ulong	srv_checksum_algorithm;

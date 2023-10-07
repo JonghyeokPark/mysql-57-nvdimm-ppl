@@ -992,6 +992,62 @@ page_parse_delete_rec_list(
 	return(ptr);
 }
 
+/* lbh */
+/**********************************************************//**
+Parses a log record of a record list end or start deletion.
+@return end of log record or NULL */
+byte*
+ipl_page_parse_delete_rec_list(
+/*=======================*/
+	mlog_id_t	type,	/*!< in: MLOG_LIST_END_DELETE,
+				MLOG_LIST_START_DELETE,
+				MLOG_COMP_LIST_END_DELETE or
+				MLOG_COMP_LIST_START_DELETE */
+	byte*		ptr,	/*!< in: buffer */
+	byte*		end_ptr,/*!< in: buffer end */
+	page_t* page,	/*!< in/out: buffer block or NULL */
+	dict_index_t*	index,	/*!< in: record descriptor */
+	mtr_t*		mtr)	/*!< in: mtr or NULL */
+{
+	ulint	offset;
+
+	ut_ad(type == MLOG_LIST_END_DELETE
+	      || type == MLOG_LIST_START_DELETE
+	      || type == MLOG_COMP_LIST_END_DELETE
+	      || type == MLOG_COMP_LIST_START_DELETE);
+
+	/* Read the record offset as a 2-byte ulint */
+
+	if (end_ptr < ptr + 2) {
+
+		return(NULL);
+	}
+
+	offset = mach_read_from_2(ptr);
+	ptr += 2;
+
+	if (!page) {
+
+		return(ptr);
+	}
+
+	ut_ad(!!page_is_comp(page) == dict_table_is_comp(index->table));
+
+	buf_block_t* block = NULL;
+
+	if (type == MLOG_LIST_END_DELETE
+	    || type == MLOG_COMP_LIST_END_DELETE) {
+		page_delete_rec_list_end(page + offset, block, index,
+					 ULINT_UNDEFINED, ULINT_UNDEFINED,
+					 mtr);
+	} else {
+		page_delete_rec_list_start(page + offset, block, index, mtr);
+	}
+
+	return(ptr);
+}
+/* end */
+
 /*************************************************************//**
 Deletes records from a page from a given record onward, including that record.
 The infimum and supremum records are not deleted. */
@@ -1840,12 +1896,14 @@ page_header_print(
 		"--------------------------------\n"
 		"PAGE HEADER INFO\n"
 		"Page id: (%lu, %lu)\n"
+		"Page MAX_TRX_ID: %lu\n" // added by lbh
 		"Page address %p, n records %lu (%s)\n"
 		"n dir slots %lu, heap top %lu\n"
 		"Page n heap %lu, free %lu, garbage %lu\n"
 		"Page last insert %lu, direction %lu, n direction %lu\n"
 		"\n",
-		read_space_id, read_page_no,
+		read_space_id, read_page_no, 
+		page_get_max_trx_id(page), // added by lbh
 		page, (ulong) page_header_get_field(page, PAGE_N_RECS),
 		page_is_comp(page) ? "compact format" : "original format",
 		(ulong) page_header_get_field(page, PAGE_N_DIR_SLOTS),
@@ -1857,6 +1915,38 @@ page_header_print(
 		(ulong) page_header_get_field(page, PAGE_DIRECTION),
 		(ulong) page_header_get_field(page, PAGE_N_DIRECTION));
 }
+
+
+/*************************************************************//**
+Sets the max trx id field value in IPL page*/
+void
+ipl_page_set_max_trx_id(
+/*================*/
+	page_t*	page,	/*!< in/out: page */
+	page_zip_des_t*	page_zip,/*!< in/out: compressed page, or NULL */
+	trx_id_t	trx_id,	/*!< in: transaction id */
+	mtr_t*		mtr)	/*!< in/out: mini-transaction, or NULL */
+{
+
+	/* It is not necessary to write this change to the redo log, as
+	during a database recovery we assume that the max trx id of every
+	page is the maximum trx id assigned before the crash. */
+
+	if (page_zip) {
+		mach_write_to_8(page + (PAGE_HEADER + PAGE_MAX_TRX_ID), trx_id);
+		page_zip_write_header(page_zip,
+				      page + (PAGE_HEADER + PAGE_MAX_TRX_ID),
+				      8, mtr);
+	} else if (mtr) {
+		mlog_write_ull(page + (PAGE_HEADER + PAGE_MAX_TRX_ID),
+			       trx_id, mtr);
+	} else {
+		mach_write_to_8(page + (PAGE_HEADER + PAGE_MAX_TRX_ID), trx_id);
+	}
+
+	//fprintf(stderr,"changed max_trx_id page: %lu rec_trx_id:%lu\n", page, trx_id );
+}
+
 
 /***************************************************************//**
 This is used to print the contents of the page for

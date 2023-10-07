@@ -18,6 +18,8 @@
 #include "buf0buf.h"
 #include <queue>
 #include <time.h>
+/* lbh */
+#include "read0types.h"
 
 // TDOO(jhpark): make this variable configurable
 
@@ -150,7 +152,7 @@ typedef struct NVDIMM_SYSTEM
   uint64_t second_dynamic_ipl_size;
   uint64_t second_dynamic_ipl_per_page_size;
   uint64_t second_dynamic_ipl_page_number_per_buf_pool;
-
+  byte* old_page;
   unsigned char * nc_redo_start_pointer;
 }nvdimm_system;
 
@@ -267,5 +269,30 @@ void recv_clean_ipl_map();
 
 RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
 extern std::tr1::unordered_map<page_id_t, uint64_t > ipl_recv_map;
+
+/* lbh */
+dberr_t
+nvdimm_build_prev_vers_with_redo(
+	const rec_t*	rec,		/*!< in: record in a clustered index */
+	mtr_t*		mtr,
+	dict_index_t*	clust_index,	/*!< in: clustered index */
+	ulint**		offsets,	/*!< in/out: offsets returned by
+					rec_get_offsets(rec, clust_index) */
+	ReadView*	read_view,	/*!< in: read view */
+	mem_heap_t**	offset_heap,	/*!< in/out: memory heap from which
+					the offsets are allocated */
+	mem_heap_t*	in_heap,/*!< in: memory heap from which the memory for
+				*old_vers is allocated; memory for possible
+				intermediate versions is allocated and freed
+				locally within the function */
+	rec_t**		old_vers,	/*!< out: old version, or NULL if the
+					record does not exist in the view:
+					i.e., it was freshly inserted
+					afterwards */
+	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
+					column data */
+	buf_page_t* bpage );
+
+/* end */
 
 #endif // end-of-header
