@@ -104,6 +104,7 @@ mlog_close(
 	byte * mtr_ipl_start_pointer = mtr->get_mtr_ipl_start_pointer();
 	if(mtr_ipl_start_pointer != NULL && (mtr->get_mtr_ipl_before_log_count() + 1) == mtr->get_log_count()){
 		mlog_id_t type = (mlog_id_t) *mtr_ipl_start_pointer;
+		trx_id_t trx_id = mtr->get_mtr_ipl_trx_id();
 		// ulint		space;
 		// ulint		page_no;
 		// ipl_parse_initial_log_record(mtr_ipl_start_pointer, ptr, &type, &space, &page_no);
@@ -119,7 +120,7 @@ mlog_close(
 			case MLOG_COMP_REC_DELETE:
 			case MLOG_INIT_FILE_PAGE2:
 			case MLOG_COMP_PAGE_CREATE:
-				my_recv_parse_log_recs(mtr_ipl_start_pointer, ptr - mtr_ipl_start_pointer);
+				my_recv_parse_log_recs(mtr_ipl_start_pointer, ptr - mtr_ipl_start_pointer, trx_id);
 				break;
 			default:
 				break;

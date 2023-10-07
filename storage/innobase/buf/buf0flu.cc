@@ -602,12 +602,12 @@ buf_flush_note_modification(
 		if(!is_system_or_undo_tablespace(block->page.id.space()) && !get_flag(&(((buf_page_t *)block)->flags), NORMALIZE) && page_is_leaf(block->frame) && buf_page_in_file((buf_page_t *)block) && block->page.id.page_no() > 7){
 			// fprintf(stderr, "Not Insert Flush list oldest_lsn: %lu, observer: %p (%u, %u)\n", ((buf_page_t *)block)->oldest_modification,observer, block->page.id.space(), block->page.id.page_no());
 			
-			fprintf(stderr, "Not Insert Flush list oldest_lsn: %lu, observer: %p (%u, %u) len: %lu\n"
-										, ((buf_page_t *)block)->oldest_modification
-										, ((buf_page_t *)block)->newest_modification
-										, observer
-										, block->page.id.space(), block->page.id.page_no()
-										, get_ipl_length_from_write_pointer(&block->page));
+			// fprintf(stderr, "Not Insert Flush list oldest_lsn: %lu, observer: %p (%u, %u) len: %lu\n"
+			// 							, ((buf_page_t *)block)->oldest_modification
+			// 							, ((buf_page_t *)block)->newest_modification
+			// 							, observer
+			// 							, block->page.id.space(), block->page.id.page_no()
+			// 							, get_ipl_length_from_write_pointer(&block->page));
 
 			// (jhpark): need for store oldest_modification ???
 			// flush list 삽입을 막았기 때문에 log_checkpoint() 에서 문제가 될 수 있음 
@@ -4422,13 +4422,12 @@ buf_flush_ipl_clean_checkpointed_block_low(
 	lsn_t cur_page_lsn = mach_read_from_8(((buf_block_t*)bpage)->frame + FIL_PAGE_LSN);
 
 	// (jhpark): recovery
-	fprintf(stderr, "DIPL ipl store write pointer %lu (%u:%u) cur_lsn: %lu oldset_modificatino: %lu\n"
-				, get_ipl_length_from_write_pointer(bpage)
-				, bpage->id.space(), bpage->id.page_no()
-				, cur_page_lsn, bpage->oldest_modification);
+	// fprintf(stderr, "DIPL ipl store write pointer %lu (%u:%u) cur_lsn: %lu oldset_modificatino: %lu\n"
+	// 			, get_ipl_length_from_write_pointer(bpage)
+	// 			, bpage->id.space(), bpage->id.page_no()
+	// 			, cur_page_lsn, bpage->oldest_modification);
 	recv_ipl_set_wp(bpage->static_ipl_pointer, get_ipl_length_from_write_pointer(bpage));
 	set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, cur_page_lsn);
-	set_flag(bpage->static_ipl_pointer + IPL_FLAG_OFFSET, NORMALIZE);
 	// DIPL page들은 SIPL header에 lsn을 저장해둔다.
 
 	if (!srv_use_doublewrite_buf

@@ -176,7 +176,7 @@ bool alloc_dynamic_ipl_to_bpage(buf_page_t * bpage);
 bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage);
 
 //IPL Log 추가 관련 함수들
-void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len);
+void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len, trx_id_t trx_id);
 bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len);
 
 //page ipl log apply 관련 함수들
@@ -204,6 +204,8 @@ void set_ipl_length_in_ipl_header(buf_page_t * bpage);
 uint get_ipl_length_from_ipl_header(buf_page_t * bpage);
 void set_page_lsn_in_ipl_header(unsigned char* static_ipl_pointer, lsn_t lsn);
 lsn_t get_page_lsn_from_ipl_header(unsigned char* static_ipl_pointer);
+void set_normalize_flag_in_ipl_header(unsigned char * static_ipl_pointer);
+unsigned char * get_flag_in_ipl_header(unsigned char * static_ipl_pointer);
 
 //page IPL flag 관련 함수
 void set_flag(unsigned char * flags, ipl_flag flag);

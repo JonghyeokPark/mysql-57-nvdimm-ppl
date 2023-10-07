@@ -252,6 +252,12 @@ row_ins_sec_index_entry_by_modify(
 	upd_t*		update;
 	rec_t*		rec;
 	dberr_t		err;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_ins_sec_index_entry_by_modify mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	rec = btr_cur_get_rec(cursor);
 
@@ -350,6 +356,12 @@ row_ins_clust_index_entry_by_modify(
 	btr_cur_t*	cursor	= btr_pcur_get_btr_cur(pcur);
 	TABLE*		mysql_table = NULL;
 	ut_ad(dict_index_is_clust(cursor->index));
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_ins_clust_index_entry_by_modify mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	rec = btr_cur_get_rec(cursor);
 
@@ -1075,6 +1087,12 @@ row_ins_foreign_check_on_constraint(
 	mem_heap_t*	tmp_heap	= NULL;
 	doc_id_t	doc_id = FTS_NULL_DOC_ID;
 	ibool		fts_col_affacted = FALSE;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_ins_foreign_check_on_constraint mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	DBUG_ENTER("row_ins_foreign_check_on_constraint");
 	ut_a(thr);
@@ -1664,6 +1682,12 @@ row_ins_check_foreign_constraint(
 	}
 
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_ins_check_foreign_constraint mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	/* Store old value on n_fields_cmp */
 
@@ -2045,7 +2069,12 @@ row_ins_scan_sec_index_for_duplicate(
 	ulint		allow_duplicates;
 	ulint*		offsets		= NULL;
 	DBUG_ENTER("row_ins_scan_sec_index_for_duplicate");
-
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_ins_scan_sec_index_for_duplicate mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	ut_ad(s_latch == rw_lock_own_flagged(
 			&index->lock, RW_LOCK_FLAG_S | RW_LOCK_FLAG_SX));
@@ -2267,6 +2296,12 @@ row_ins_duplicate_error_in_clust(
 	mem_heap_t*heap		= NULL;
 	ulint	offsets_[REC_OFFS_NORMAL_SIZE];
 	ulint*	offsets		= offsets_;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_ins_duplicate_error_in_clust mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 	rec_offs_init(offsets_);
 
 	UT_NOT_USED(mtr);
@@ -2475,6 +2510,12 @@ row_ins_clust_index_entry_low(
 	ut_ad(!thr_get_trx(thr)->in_rollback);
 
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_ins_clust_index_entry_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 	mtr.set_named_space(index->space);
 
 	if (dict_table_is_temporary(index->table)) {
@@ -2706,6 +2747,12 @@ row_ins_sorted_clust_index_entry(
 	btr_cur_t	cursor;
 	cursor.thr = thr;
 	mtr = &index->last_ins_cur->mtr;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_ins_sorted_clust_index_entry mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	/* Search for position if tree needs to be split or if last position
 	is not cached. */
@@ -2717,6 +2764,12 @@ row_ins_sorted_clust_index_entry(
 		index->last_ins_cur->release();
 
 		mtr_start(mtr);
+		//nvdimm add_trx_id
+		if(thr != NULL){
+			// fprintf(stderr, "row_ins_sorted_clust_index_entry mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+			mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+		}
+		//nvdimm add_trx_id
 		mtr_set_log_mode(mtr, MTR_LOG_NO_REDO);
 
 		btr_cur_search_to_nth_level_with_no_latch(
@@ -2903,6 +2956,12 @@ row_ins_sec_index_entry_low(
 	      || dict_table_is_intrinsic(index->table));
 
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_ins_sec_index_entry_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 	mtr.set_named_space(index->space);
 
 	if (dict_table_is_temporary(index->table)) {
@@ -2969,6 +3028,12 @@ row_ins_sec_index_entry_low(
 					  index, false);
 			rtr_info_update_btr(&cursor, &rtr_info);
 			mtr_start(&mtr);
+			//nvdimm add_trx_id
+			if(thr != NULL){
+				// fprintf(stderr, "row_ins_sec_index_entry_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+				(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+			}
+			//nvdimm add_trx_id
 			mtr.set_named_space(index->space);
 			search_mode &= ~BTR_MODIFY_LEAF;
 			search_mode |= BTR_MODIFY_TREE;
@@ -3642,7 +3707,7 @@ row_ins_alloc_row_id_step(
 
 	/* Fill in row id value to row */
 
-	row_id = dict_sys_get_new_row_id();
+	row_id = dict_sys_get_new_row_id(node->trx_id);
 
 	dict_sys_write_row_id(node->row_id_buf, row_id);
 }

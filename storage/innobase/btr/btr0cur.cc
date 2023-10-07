@@ -2970,6 +2970,13 @@ btr_cur_ins_lock_and_undo(
 	rec_t*		rec;
 	roll_ptr_t	roll_ptr;
 
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_ins_lock_and mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
+
 	/* Check if we have to wait for a lock: enqueue an explicit lock
 	request if yes */
 
@@ -3108,6 +3115,12 @@ btr_cur_optimistic_insert(
 	ibool		inherit = TRUE;
 	ulint		rec_size;
 	dberr_t		err;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_optimistic_insert mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	*big_rec = NULL;
 
@@ -3335,6 +3348,10 @@ fail_err:
 		} else {
 			/* Decrement the bits in a separate
 			mini-transaction. */
+			//nvdimm add_trx_id
+			// fprintf(stderr, "btr_cur_optimistic_insert mtr: %p, trx_id: %zu\n",mtr, thr_get_trx(thr)->id);
+			((buf_page_t *) block)->trx_id = thr_get_trx(thr)->id;
+			//nvdimm add_trx_id
 			ibuf_update_free_bits_if_full(
 				block, max_size,
 				rec_size + PAGE_DIR_SLOT_SIZE);
@@ -3382,6 +3399,12 @@ btr_cur_pessimistic_insert(
 	ibool		inherit = FALSE;
 	bool		success;
 	ulint		n_reserved	= 0;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_pessimistic_insert mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	ut_ad(dtuple_check_typed(entry));
 
@@ -3537,6 +3560,13 @@ btr_cur_upd_lock_and_undo(
 	dict_index_t*	index;
 	const rec_t*	rec;
 	dberr_t		err;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_upd_lock_and_undo mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
+
 
 	ut_ad(thr != NULL || (flags & BTR_NO_LOCKING_FLAG));
 
@@ -3831,6 +3861,12 @@ btr_cur_update_in_place(
 	roll_ptr_t	roll_ptr	= 0;
 	ulint		was_delete_marked;
 	ibool		is_hashed;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_update_in_place mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	rec = btr_cur_get_rec(cursor);
 	index = cursor->index;
@@ -3994,6 +4030,12 @@ btr_cur_optimistic_update(
 	roll_ptr_t	roll_ptr;
 	ulint		i;
 	ulint		n_ext;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_optimistic_update mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	block = btr_cur_get_block(cursor);
 	page = buf_block_get_frame(block);
@@ -4313,6 +4355,12 @@ btr_cur_pessimistic_update(
 	ulint		n_reserved	= 0;
 	ulint		n_ext;
 	ulint		max_ins_size	= 0;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_pessimistic_update mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	*offsets = NULL;
 	*big_rec = NULL;
@@ -4840,6 +4888,12 @@ btr_cur_del_mark_set_clust_rec(
 	dberr_t		err;
 	page_zip_des_t*	page_zip;
 	trx_t*		trx;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_del_mark_set_clust_rec mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	ut_ad(dict_index_is_clust(index));
 	ut_ad(rec_offs_validate(rec, index, offsets));
@@ -5001,6 +5055,12 @@ btr_cur_del_mark_set_sec_rec(
 	buf_block_t*	block;
 	rec_t*		rec;
 	dberr_t		err;
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_del_mark_set_sec_rec mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	block = btr_cur_get_block(cursor);
 	rec = btr_cur_get_rec(cursor);
@@ -5191,7 +5251,6 @@ btr_cur_optimistic_delete_func(
 			const ulint	max_ins
 				= page_get_max_insert_size_after_reorganize(
 					page, 1);
-
 			page_cur_delete_rec(btr_cur_get_page_cur(cursor),
 					    cursor->index, offsets, mtr);
 

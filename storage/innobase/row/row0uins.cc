@@ -80,6 +80,10 @@ row_undo_ins_remove_clust_rec(
 	ut_ad(node->trx->in_rollback);
 
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	// fprintf(stderr, "row_undo_ins_remove_clust_rec mtr: %p, trx_id: %zu\n",&mtr, node->trx->id);
+	(&mtr)->set_mtr_ipl_trx_id(node->trx->id);
+	//nvdimm add_trx_id
 	mtr.set_named_space(index->space);
 	dict_disable_redo_if_temporary(index->table, &mtr);
 
@@ -131,6 +135,10 @@ row_undo_ins_remove_clust_rec(
 		mtr_commit(&mtr);
 
 		mtr_start(&mtr);
+		//nvdimm add_trx_id
+		// fprintf(stderr, "row_undo_ins_remove_clust_rec mtr: %p, trx_id: %zu\n",&mtr, node->trx->id);
+		(&mtr)->set_mtr_ipl_trx_id(node->trx->id);
+		//nvdimm add_trx_id
 
 		success = btr_pcur_restore_position(
 			BTR_MODIFY_LEAF, &node->pcur, &mtr);
@@ -146,6 +154,10 @@ row_undo_ins_remove_clust_rec(
 retry:
 	/* If did not succeed, try pessimistic descent to tree */
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	// fprintf(stderr, "row_undo_ins_remove_clust_rec mtr: %p, trx_id: %zu\n",&mtr, node->trx->id);
+	(&mtr)->set_mtr_ipl_trx_id(node->trx->id);
+	//nvdimm add_trx_id
 	mtr.set_named_space(index->space);
 	dict_disable_redo_if_temporary(index->table, &mtr);
 
@@ -202,6 +214,12 @@ row_undo_ins_remove_sec_low(
 	log_free_check();
 
 	mtr_start(&mtr);
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "row_undo_ins_remove_sec_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 	mtr.set_named_space(index->space);
 	dict_disable_redo_if_temporary(index->table, &mtr);
 

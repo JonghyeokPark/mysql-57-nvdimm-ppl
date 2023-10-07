@@ -564,6 +564,8 @@ mtr_t::start(bool sync, bool read_only)
 	m_commit_lsn = 0;
 	//nvdimm
 	mtr_ipl_start_ptr = NULL;
+	// mtr_ipl_before_log_count = 0;
+	mtr_ipl_trx_id = 0;
 	//nvdimm
 
 	new(&m_impl.m_log) mtr_buf_t();
@@ -939,7 +941,7 @@ mtr_t::Command::prepare_write_nvm()
 /* Parse the sequential log to single mtr_log
    Get idea from log0recv.cc:recv_parse_log_recs() */
 void
-my_recv_parse_log_recs(byte * ptr, ulint log_len)
+my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 {
 	byte*		end_ptr;
 	ulint		len;
@@ -971,7 +973,7 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len)
 		ulint log_len = (ptr + len) - body + APPLY_LOG_HDR_SIZE;
 		ulint rest_log_len = 0;
 		if(can_write_in_ipl(buf_page, log_len, &rest_log_len)){
-			nvdimm_ipl_add(body, log_len, type, buf_page, rest_log_len);
+			nvdimm_ipl_add(body, log_len, type, buf_page, rest_log_len, trx_id);
 		}
 		else{
 			nvdimm_ipl_add_split_merge_map(buf_page);

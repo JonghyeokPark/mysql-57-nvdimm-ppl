@@ -473,6 +473,12 @@ lock_prdt_insert_check_and_lock(
 				Rectangle */
 {
 	ut_ad(block->frame == page_align(rec));
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "lock_rec_insert_check_and_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 
 	if (flags & BTR_NO_LOCKING_FLAG) {
 
@@ -808,6 +814,12 @@ lock_prdt_lock(
 				(can be NULL if BTR_NO_LOCKING_FLAG) */
 	mtr_t*		mtr)	/*!< in/out: mini-transaction */
 {
+	//nvdimm add_trx_id
+	if(thr != NULL){
+		// fprintf(stderr, "lock_rec_insert_check_and_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+	//nvdimm add_trx_id
 	trx_t*		trx = thr_get_trx(thr);
 	dberr_t		err = DB_SUCCESS;
 	lock_rec_req_status	status = LOCK_REC_SUCCESS;

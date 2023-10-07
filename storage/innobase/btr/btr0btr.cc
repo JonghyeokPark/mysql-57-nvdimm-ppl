@@ -2488,8 +2488,16 @@ btr_insert_into_right_sibling(
 		insert buffer bitmap. */
 
 		if (next_block->page.size.is_compressed()) {
+			// nvdimm add_trx_id
+			// fprintf(stderr, "btr_insert_into_right_sibling mtr: %p, trx_id: %zu\n",&mtr, mtr->get_mtr_ipl_trx_id());
+			((buf_page_t *) next_block)->trx_id = mtr->get_mtr_ipl_trx_id();
+			// nvdimm add_trx_id
 			ibuf_update_free_bits_zip(next_block, mtr);
 		} else {
+			// nvdimm add_trx_id
+			// fprintf(stderr, "btr_insert_into_right_sibling mtr: %p, trx_id: %zu\n",&mtr, mtr->get_mtr_ipl_trx_id());
+			((buf_page_t *) next_block)->trx_id = mtr->get_mtr_ipl_trx_id();
+			// nvdimm add_trx_id
 			ibuf_update_free_bits_if_full(
 				next_block, max_size,
 				rec_offs_size(*offsets) + PAGE_DIR_SLOT_SIZE);
@@ -3759,6 +3767,10 @@ retry:
 			never increase here.  Thus, it is safe to
 			write the bits accurately in a separate
 			mini-transaction. */
+			// nvdimm add_trx_id
+			// fprintf(stderr, "btr_compress mtr: %p, trx_id: %zu\n",&mtr, mtr->get_mtr_ipl_trx_id());
+			((buf_page_t *) merge_block)->trx_id = mtr->get_mtr_ipl_trx_id();
+			// nvdimm add_trx_id
 			ibuf_update_free_bits_if_full(merge_block,
 						      UNIV_PAGE_SIZE,
 						      ULINT_UNDEFINED);
