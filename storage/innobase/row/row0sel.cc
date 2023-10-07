@@ -3574,7 +3574,7 @@ row_sel_build_prev_vers_for_mysql(
 	}
 
 
-	bool undo_buffer_miss = row_check_undo_page_buffer_miss(clust_index, rec, offsets);
+//	bool undo_buffer_miss = row_check_undo_page_buffer_miss(clust_index, rec, offsets);
 
 	buf_block_t* block = buf_page_get_block(bpage);
 
