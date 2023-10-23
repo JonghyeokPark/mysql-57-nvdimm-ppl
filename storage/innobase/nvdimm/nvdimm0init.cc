@@ -11,6 +11,12 @@
 #include <errno.h>
 #include <stddef.h>
 
+// (jhpark): ipl-undo
+bool nvdimm_recv_ipl_undo = false;
+std::tr1::unordered_map<uint64_t, uint64_t > ipl_active_trx_ids;
+uint64_t ipl_skip_apply_cnt = 0;
+uint64_t ipl_org_apply_cnt = 0;
+
 std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map;
 
 unsigned char* nvdimm_ptr = NULL;
@@ -22,7 +28,6 @@ nc_redo_buf * nc_redo_info = NULL;
 bool nvdimm_recv_running = false;
 unsigned char* nvdimm_recv_ptr = NULL;
 
-time_t start;
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -50,11 +55,13 @@ bool make_static_and_dynamic_ipl_region(ulint number_of_buf_pool){ //여기서 s
   nvdimm_info->dynamic_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_size;
   nvdimm_info->second_dynamic_start_pointer = nvdimm_info->dynamic_start_pointer + nvdimm_info->dynamic_ipl_size;
   nvdimm_info->nc_redo_start_pointer = nvdimm_info->second_dynamic_start_pointer + (2 * 1024 * 1024 * 1024UL);
+/*
   fprintf(stderr, "static start pointer : %p, dynamic start pointer : %p, second dynamic start pointer: %p, nc_redo: %p\n", nvdimm_info->static_start_pointer, nvdimm_info->dynamic_start_pointer, nvdimm_info->second_dynamic_start_pointer, nvdimm_info->nc_redo_start_pointer);
   fprintf(stderr, "static IPL size per buf_pool : %u\n", nvdimm_info->static_ipl_page_number_per_buf_pool);
   fprintf(stderr, "Dynamic IPL size per buf_pool : %u\n", nvdimm_info->dynamic_ipl_page_number_per_buf_pool);
   fprintf(stderr, "Second Dynamic IPL size per buf_pool : %u\n", nvdimm_info->second_dynamic_ipl_page_number_per_buf_pool);
-  start = time(NULL);
+  //start = time(NULL);
+*/
   return true;
 }
 

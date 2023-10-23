@@ -39,7 +39,7 @@ void recv_ipl_parse_log() {
 		// 따라서, normalize flag를 확인해서 IPLed 페이지 해제함.
     /*
 		if(get_flag(nvdimm_recv_ptr + i + IPL_FLAG_OFFSET, NORMALIZE)) {
-			fprintf(stderr, "(%u,%u) is IPLed but become normailze at crash\n"
+			fprintf(stderr, "(%u,%u) is ipled but become normailze at crash\n"
 							, space_no, page_no);
 			continue;
 		}

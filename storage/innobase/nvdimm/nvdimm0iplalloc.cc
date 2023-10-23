@@ -17,7 +17,7 @@ void make_static_indirection_queue(buf_pool_t * buf_pool){
     buf_pool->static_ipl_allocator->push(i);
   }
   mutex_exit(&buf_pool->static_allocator_mutex);
-  fprintf(stderr, "buf_pool %lu static allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->static_ipl_allocator->size(), buf_pool->static_ipl_allocator->back(), buf_pool->static_ipl_allocator->front());
+  //fprintf(stderr, "buf_pool %lu static allocator_size: %d allocator_start: %u, allocator_end: %u\n", buf_pool->instance_no, buf_pool->static_ipl_allocator->size(), buf_pool->static_ipl_allocator->back(), buf_pool->static_ipl_allocator->front());
 }
 
 unsigned char * alloc_static_address_from_indirection_queue(buf_pool_t * buf_pool){

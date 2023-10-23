@@ -2438,28 +2438,35 @@ recv_recover_page_func(
 
   bool is_ipl = (recv_check_iplized(block->page.id) != NORMAL);
 
+	// (jhpark): calculate skipped apply count for IPL
+	//uint64_t tmp_cnt = 0;
+	//uint64_t total_len = UT_LIST_GET_LEN(recv_addr->rec_list);
+	//ipl_org_apply_cnt += total_len;
+	
 	while (recv) {
 
     // (jhpark): ignore IPLed page (case 3)
 		if (is_ipl) {
-			ib::info() << "IPled page apply redo logs! " <<block->page.id.space() << ":"
-								 << block->page.id.page_no() <<  " start_lsn: " 
-								 << recv->start_lsn <<" ipl_lsn: " << recv_get_first_ipl_lsn(block);
+			//ib::info() << "IPled page apply redo logs! " <<block->page.id.space() << ":"
+			//					 << block->page.id.page_no() <<  " start_lsn: " 
+			//					 << recv->start_lsn <<" ipl_lsn: " << recv_get_first_ipl_lsn(block);
 
 			// ipl_lsn > WAL log : we can apply using IPL log only;
 			// do not consider WAL log
 			if (recv->start_lsn > recv_get_first_ipl_lsn(block)) {
-				ib::info() << "now, we can skip the WAL redo log; becuase we keep previous log in our IPL region!";
+				//ib::info() << "now, we can skip the WAL redo log; becuase we keep previous log in our IPL region!";
+				//ipl_skip_apply_cnt += (total_len - tmp_cnt);
 				break;
 			}
 
 			if (recv->start_lsn < recv_get_first_ipl_lsn(block)) {
 				// now, we can apply the IPL log, no need to keep applying WAL log
-				ib::info() << "now, we can skip the WAL redo log!";
+				//ib::info() << "now, we can skip the WAL redo log!";
+				//ipl_skip_apply_cnt += (total_len - tmp_cnt);
 				break;
 			}
-
 		}
+		//tmp_cnt++;
 	
 		end_lsn = recv->end_lsn;
 

@@ -1313,7 +1313,7 @@ retry_page_get:
 	if (height == 0) {
 
     if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
-      ib::info() << "we skip traveersing because it is a IPLed page";
+      //ib::info() << "we skip traveersing because it is a IPLed page";
       return;
     }
 
@@ -1451,7 +1451,7 @@ retry_page_get:
 	  
     // (jhpark): ipl-undo
     if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
-      ib::info() << "we skip traveersing because it is a IPLed page";
+      //ib::info() << "we skip traveersing because it is a IPLed page";
     } else {
     	
 		/* The adaptive hash index is only used when searching
@@ -1467,7 +1467,7 @@ retry_page_get:
 		/* Search for complete index fields. */
     // (jhpark): ipl-undo
     if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
-      ib::info() << "we skip traveersing because it is a IPLed page";
+      //ib::info() << "we skip traveersing because it is a IPLed page";
     } else {
  
 		up_bytes = low_bytes = 0;

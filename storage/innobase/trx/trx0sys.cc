@@ -530,6 +530,7 @@ trx_sys_init_at_db_start(void)
         tx != NULL;
         tx = UT_LIST_GET_NEXT(trx_list, tx)) {
       ib::info() << "Active trx ids at crash " << tx->id;
+			ipl_active_trx_ids.insert(std::pair<uint64_t, uint64_t>(tx->id, 0));
   	}
 	}
 

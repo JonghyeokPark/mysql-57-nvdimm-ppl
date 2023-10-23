@@ -108,6 +108,10 @@ Created 2/16/1996 Heikki Tuuri
 #include "nvdimm-ipl.h"
 extern unsigned char* nvdimm_ptr;
 pfs_os_file_t nvdimm_dwb_file;
+
+#include <time.h>
+#include <sys/time.h>
+struct timeval start, end;
 #endif
 
 #ifdef HAVE_LZO1X
@@ -1463,6 +1467,9 @@ innobase_start_or_create_for_mysql(void)
 	size_t		dirnamelen;
 	unsigned	i = 0;
 
+	// (jhpark): recovery
+	gettimeofday(&start, NULL);
+
 	/* Reset the start state. */
 	srv_start_state = SRV_START_STATE_NONE;
 
@@ -1840,7 +1847,7 @@ innobase_start_or_create_for_mysql(void)
 		// (jhpark): recovery
 		if (nvdimm_recv_running) {
 			recv_ipl_parse_log();
-			recv_ipl_map_print();
+			//recv_ipl_map_print();
 		}
 	}
 #endif
@@ -2264,6 +2271,12 @@ files_checked:
 
 		err = recv_recovery_from_checkpoint_start(flushed_lsn);
 
+    gettimeofday(&end, NULL);
+    fprintf(stderr, "scan_time: %f seconds\n",
+         (double) (end.tv_usec - start.tv_usec) / 1000000 +
+                  (double) (end.tv_sec - start.tv_sec));
+    gettimeofday(&start, NULL);
+
 		recv_sys->dblwr.pages.clear();
 
 		if (err == DB_SUCCESS) {
@@ -2295,6 +2308,13 @@ files_checked:
 
 			recv_apply_hashed_log_recs(TRUE);
 			DBUG_PRINT("ib_log", ("apply completed"));
+
+		  gettimeofday(&end, NULL);
+    	fprintf(stderr, "redo_time: %f seconds\n",
+         (double) (end.tv_usec - start.tv_usec) / 1000000 +
+                  (double) (end.tv_sec - start.tv_sec));
+    	gettimeofday(&start, NULL);
+
 
 			if (recv_needed_recovery) {
 				trx_sys_print_mysql_binlog_offset();

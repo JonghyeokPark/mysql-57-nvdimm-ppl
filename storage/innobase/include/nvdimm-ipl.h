@@ -18,8 +18,15 @@
 #include "buf0buf.h"
 #include <queue>
 #include <time.h>
+#include <vector>
 
 // TDOO(jhpark): make this variable configurable
+
+#ifdef UNIV_NVDIMM_IPL
+#include <time.h>
+#include <sys/time.h>
+extern struct timeval start, end;
+#endif
 
 #define NVDIMM_MMAP_FILE_NAME         			"nvdimm_mmap_file"
 #define NVDIMM_MMAP_MAX_FILE_NAME_LENGTH    10000
@@ -124,7 +131,6 @@ void nvdimm_free(const uint64_t pool_size);
 /* mtr_log_type(1) | mtr_body_len (2) | trx_id (8) | mtr_log_body(1 ~ 110) | */
 #define APPLY_LOG_HDR_SIZE 11UL
 
-extern time_t start;
 
 enum ipl_flag {
   IPLIZED = 1,
@@ -269,5 +275,11 @@ bool recv_check_normal_flag(buf_block_t* block);
 
 RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
 extern std::tr1::unordered_map<page_id_t, uint64_t > ipl_recv_map;
+
+// (jhpark): for IPL-undo
+extern std::tr1::unordered_map<uint64_t, uint64_t > ipl_active_trx_ids;
+extern bool nvdimm_recv_ipl_undo;
+extern uint64_t ipl_skip_apply_cnt;
+extern uint64_t ipl_org_apply_cnt;
 
 #endif // end-of-header

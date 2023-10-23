@@ -285,10 +285,25 @@ void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info
 			continue;
 		}
 
-		recv_parse_or_apply_log_rec_body(log_type, apply_ptr, apply_ptr + body_len, page_id.space(), page_id.page_no(), apply_info->block, temp_mtr);
-		apply_ptr += body_len;
+		// (jhpark): ipl-undo 
+		//					 check trx-id and skip
+		if (nvdimm_recv_ipl_undo 
+				&& ipl_active_trx_ids.find(trx_id) != ipl_active_trx_ids.end()) {
+			// pass	
+			ib::info() << "skip undo because this is created from trx which is active at the crash!";	
+		} else {
+
+			//ib::info() << "ipl apply!";	
+
+			recv_parse_or_apply_log_rec_body(
+										log_type, apply_ptr
+										, apply_ptr + body_len, page_id.space()
+										, page_id.page_no(), apply_info->block, temp_mtr);
+			apply_ptr += body_len;
+		}
 		// fprintf(stderr, "log apply! (%u, %u) Type : %d len: %lu, apply_ptr: %p, start_ptr: %p\n",page_id.space(), page_id.page_no(), log_type, body_len, apply_ptr, start_ptr);
-	}
+	} // end-of-while
+
 	//Step 4. IPL apply가 끝난 후 apply_ptr을 기준으로 write_pointer 재설정
 	if(apply_info->ipl_log_length > nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size){
 		apply_info->block->page.ipl_write_pointer = apply_info->second_dynamic_start_pointer + (apply_info->ipl_log_length - nvdimm_info->static_ipl_per_page_size - nvdimm_info->dynamic_ipl_per_page_size);

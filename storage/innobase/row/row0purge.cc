@@ -153,13 +153,13 @@ row_purge_remove_clust_if_poss_low(
 
 	// (jhpark): ipl-undo
 	if (node->pcur.btr_cur.page_cur.block != NULL) {
-		ib::info() << "purge undo " << node->pcur.btr_cur.page_cur.block->page.id.space()
-							 << ":" << node->pcur.btr_cur.page_cur.block->page.id.page_no();
+		//ib::info() << "purge undo " << node->pcur.btr_cur.page_cur.block->page.id.space()
+		//					 << ":" << node->pcur.btr_cur.page_cur.block->page.id.page_no();
 		if( nvdimm_recv_running && recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {
 				goto func_exit;
 		}
 	} else {
-		ib::info() << "purge undo, undo record of block is NULL";
+		//ib::info() << "purge undo, undo record of block is NULL";
 	}
 
 	if (!row_purge_reposition_pcur(mode, node, &mtr)) {
