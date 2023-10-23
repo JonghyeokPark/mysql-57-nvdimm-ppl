@@ -1706,6 +1706,7 @@ public:
 
 	//nvdimm add_trx_id
 	trx_id_t trx_id;
+	unsigned int normalize_type;
 	//nvdimm add_trx_id
 };
 

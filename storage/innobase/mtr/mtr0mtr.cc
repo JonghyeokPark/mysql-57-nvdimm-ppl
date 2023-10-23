@@ -976,7 +976,7 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 			nvdimm_ipl_add(body, log_len, type, buf_page, rest_log_len, trx_id);
 		}
 		else{
-			nvdimm_ipl_add_split_merge_map(buf_page);
+			nvdimm_ipl_add_split_merge_map(buf_page, MAXIMIZE);
 		}
 	}
 }

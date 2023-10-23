@@ -134,6 +134,17 @@ enum ipl_flag {
   SECOND_DIPL = 16
 };
 
+enum normalization_type {
+  INTER_PAGE_UPDATE = 1,
+  SPLIT_MERGE = 2,
+  STATIC_LEAK = 4,
+  DYNAMIC_LEAK = 8,
+  SECOND_DYNAMIC_LEAK = 16,
+  MAXIMIZE = 32,
+  BATCH_DYNAMIC = 64,
+  ORDER_LINE = 128
+};
+
 typedef struct NVDIMM_SYSTEM
 {
   unsigned char* static_start_pointer;
@@ -188,7 +199,7 @@ void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info
 
 //page Normalize, lookup table 함수들
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage);
-void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage);
+void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage, unsigned int normalize_type);
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);

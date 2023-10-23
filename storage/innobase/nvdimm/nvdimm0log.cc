@@ -30,7 +30,12 @@
 bool alloc_static_ipl_to_bpage(buf_page_t * bpage){
 	unsigned char * static_ipl_pointer = alloc_static_address_from_indirection_queue(buf_pool_get(bpage->id));
 	unsigned char temp_buf[8] = {NULL, };
-	if(static_ipl_pointer == NULL) return false;
+	if(static_ipl_pointer == NULL) {
+		if(bpage->normalize_type == 0){
+			bpage->normalize_type = STATIC_LEAK;
+		}
+		return false;
+	}
 	ulint offset = 0;
 	mach_write_to_4(((unsigned char *)temp_buf) + offset, bpage->id.space()); // Store Space id
 	offset += 4;
@@ -54,7 +59,12 @@ bool alloc_dynamic_ipl_to_bpage(buf_page_t * bpage){
 	//First DIPL 할당 시도
 	if(get_dynamic_ipl_pointer(bpage) != NULL)	return true;
 	unsigned char * dynamic_address = alloc_dynamic_address_from_indirection_queue(buf_pool_get(bpage->id));
-	if(dynamic_address == NULL)	return false;
+	if(dynamic_address == NULL)	{
+		if(bpage->normalize_type == 0){
+			bpage->normalize_type = DYNAMIC_LEAK;
+		}
+		return false;
+	}
 
 	//Static 영역에 First DIPL index 저장
 	unsigned char * pointer_to_store_dynamic_address = bpage->static_ipl_pointer + DYNAMIC_ADDRESS_OFFSET;
@@ -72,7 +82,12 @@ bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage){
 		return true;
 	}
 	unsigned char * second_dynamic_address = alloc_second_dynamic_address_from_indirection_queue(buf_pool_get(bpage->id));
-	if(second_dynamic_address == NULL)	return false;
+	if(second_dynamic_address == NULL)	{
+		if(bpage->normalize_type == 0){
+			bpage->normalize_type = SECOND_DYNAMIC_LEAK;
+		}
+		return false;
+	}
 	
 	//First DIPL 영역에 Second DIPL Index 저장
 	unsigned char * pointer_to_store_dynamic_address = get_dynamic_ipl_pointer(bpage);
@@ -162,6 +177,12 @@ fit_size:
 
 bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len){
 	//IPL 할당받지 못한 페이지는 IPL 할당 시도
+	if(bpage->id.space() == 30){
+		if(bpage->normalize_type == 0){
+			bpage->normalize_type = ORDER_LINE;
+		}
+		return false;
+	}
 	if(!get_flag(&(bpage->flags), IPLIZED)){
 		return alloc_static_ipl_to_bpage(bpage);
 	}
@@ -316,7 +337,7 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 }
 
 /* TODO Sjmun : 한 번도 Discard되지 않은 페이지들은 사실 IPL을 사용할 필요 없이 Global redo로그로만 복구가능한데..  */
-void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
+void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage, unsigned int normalize_type){
 	// /*Step 1. Page가 IPL화 되고 한 번도 Discard도 되진 않은 경우는 바로 Normalize 시도*/
 	// if(!get_flag(&(bpage->flags), NORMALIZE) && get_flag(&(bpage->flags), IPLIZED)){
 		// fprintf(stderr, "flag: %d\n",bpage->flags);
@@ -331,6 +352,9 @@ void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage){
 		// 	bpage->flags = 0; // flag를 전부 초기화 하느냐, normalize flag만 세우냐 그 차이
 		// }
 	// }
+	if(bpage->normalize_type == 0){
+		bpage->normalize_type = normalize_type;
+	}
 	set_flag(&(bpage->flags), NORMALIZE);
 }
 
@@ -348,6 +372,7 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	bpage->flags = 0;
 	//nvdimm add_trx_id
 	bpage->trx_id = 0;
+	bpage->normalize_type = 0;
 	//nvdimm add_trx_id
 }
 
@@ -356,6 +381,7 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 void set_for_ipl_page(buf_page_t* bpage){
 	//nvdimm add_trx_id
 	bpage->trx_id = 0;
+	bpage->normalize_type = 0;
 	//nvdimm add_trx_id
 	bpage->static_ipl_pointer = NULL;
 	// fprintf(stderr, "Read page! page_id(%u, %u)\n", bpage->id.space(), bpage->id.page_no());
@@ -441,6 +467,10 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 	if(get_flag(&(bpage->flags), IPLIZED) == false){
 		// print_flush_type(flush_type, false);
 		//nvdimm add_trx_id
+		if(bpage->normalize_type == STATIC_LEAK){
+			fprintf(stderr, "Static_leak,%f,%u\n", (double)(time(NULL) - start), STATIC_LEAK);
+		}
+		bpage->normalize_type = 0;
 		bpage->trx_id = 0;
 		bpage->static_ipl_pointer = NULL;
 		bpage->flags = 0;
@@ -451,6 +481,7 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
 			// print_flush_type(flush_type, false);
+			fprintf(stderr, "Normalize,%f,%u\n", (double)(time(NULL) - start), bpage->normalize_type);
 			normalize_ipl_page(bpage, bpage->id);
 			return true;
 		}
@@ -465,6 +496,10 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 			}
 			else{
 				// print_flush_type(flush_type, false);
+				if(bpage->normalize_type == 0){
+					bpage->normalize_type = BATCH_DYNAMIC;
+				}
+				fprintf(stderr, "Normalize,%f,%u\n", (double)(time(NULL) - start), bpage->normalize_type);
 				normalize_ipl_page(bpage, bpage->id);
 				return true;
 				

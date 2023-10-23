@@ -1432,7 +1432,7 @@ func_exit:
 				mtr, page, index, type,
 				page_zip ? 1 : 0);
 
-		nvdimm_ipl_add_split_merge_map((buf_page_t *) block);
+		nvdimm_ipl_add_split_merge_map((buf_page_t *) block, INTER_PAGE_UPDATE);
 
 		/* For compressed pages write the compression level. */
 		if (log_ptr && page_zip) {
@@ -1665,7 +1665,7 @@ btr_root_raise_and_insert(
 
 	/* Copy the records from root to the new page one by one. */
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block,SPLIT_MERGE);
 #endif
 
 	if (0
@@ -2648,8 +2648,8 @@ func_start:
 	btr_page_create(new_block, new_page_zip, cursor->index,
 			btr_page_get_level(page, mtr), mtr);
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block);
-	nvdimm_ipl_add_split_merge_map((buf_page_t *)block);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block,SPLIT_MERGE);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)block,SPLIT_MERGE);
 	// if (nvdimm_ipl_lookup(block->page.id)) {
 	// 	nvdimm_ipl_erase(block->page.id);
 	// }

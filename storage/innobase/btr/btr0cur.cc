@@ -3507,7 +3507,7 @@ btr_cur_pessimistic_insert(
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)),SPLIT_MERGE);
 #endif
 
 	return(DB_SUCCESS);
@@ -4709,7 +4709,7 @@ return_after_reservations:
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)),SPLIT_MERGE);
 #endif
 
 
@@ -5499,7 +5499,7 @@ return_after_reservations:
 
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)),SPLIT_MERGE);
 #endif
 
 
