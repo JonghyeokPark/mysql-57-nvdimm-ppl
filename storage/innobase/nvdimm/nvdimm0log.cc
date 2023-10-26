@@ -177,12 +177,6 @@ fit_size:
 
 bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len){
 	//IPL 할당받지 못한 페이지는 IPL 할당 시도
-	if(bpage->id.space() == 30){
-		if(bpage->normalize_type == 0){
-			bpage->normalize_type = ORDER_LINE;
-		}
-		return false;
-	}
 	if(!get_flag(&(bpage->flags), IPLIZED)){
 		return alloc_static_ipl_to_bpage(bpage);
 	}
