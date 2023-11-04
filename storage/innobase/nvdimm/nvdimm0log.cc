@@ -269,6 +269,7 @@ void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr){
 void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info, mtr_t * temp_mtr){
 	// fprintf(stderr,"Apply! (%u, %u) start_ptr: %p, end_ptr: %p\n", apply_info->block->page.id.space(), apply_info->block->page.id.page_no(), start_ptr, end_ptr);
 	byte * apply_ptr = start_ptr;
+	trx_id_t trx_id;
 	page_id_t page_id = apply_info->block->page.id;
 	while (apply_ptr < end_ptr) {
 		// Step 1. Log type 읽어오기
@@ -278,7 +279,7 @@ void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info
 		ulint body_len = mach_read_from_2(apply_ptr);
 		apply_ptr += 2;
 		//Setp 3. Trx id 읽어오기
-		trx_id_t trx_id = mach_read_from_8(apply_ptr);
+		trx_id = mach_read_from_8(apply_ptr);
 		apply_ptr += 8;
 		if(log_type == MLOG_COMP_PAGE_CREATE){
 			apply_ptr += body_len;
@@ -299,6 +300,10 @@ void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info
 	else{
 		apply_info->block->page.ipl_write_pointer = apply_info->static_start_pointer + apply_info->ipl_log_length;
 	}
+	
+	buf_block_t* tmp_block = apply_info->block;
+	page_t* tmp_page = tmp_block->frame;
+	mach_write_to_8(tmp_page + (PAGE_HEADER + PAGE_MAX_TRX_ID), trx_id);
 	temp_mtr->discard_modifications();
 	mtr_commit(temp_mtr);
 }
@@ -465,6 +470,9 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 			}
 			else{
 				// print_flush_type(flush_type, false);
+				/* lbh */
+				add_prebuilt_page(bpage);
+				/* end */
 				normalize_ipl_page(bpage, bpage->id);
 				return true;
 				
@@ -657,15 +665,25 @@ nvdimm_build_prev_vers_with_redo(
 
 
 	if(nvdimm_info->old_page==NULL){
-		nvdimm_info->old_page = (byte *)calloc(16384, sizeof(char));
+		nvdimm_info->old_page = (byte *)calloc(UNIV_PAGE_SIZE, sizeof(char));
 		buf_frame_copy(nvdimm_info->old_page, page);
 	}
 
+
+	// same page built right before -> reuse it
 	if(page_get_page_no(nvdimm_info->old_page)==page_get_page_no(page) && temp_old_page_ptr!=NULL){
 		resuse_prev_built_page = true;
 		goto get_rec_offset;
 	}
 
+	// check prebuilt page list
+	buf_page_t* temp_bpage = find_prebuilt_page_from_list(bpage, prebuilt_page_list);
+	if(temp_bpage!=NULL){
+		memcpy(bpage, temp_bpage, UNIV_PAGE_SIZE);
+		remove_prebuilt_page_from_list(temp_bpage, prebuilt_page_list);
+		fprintf(stderr, "prebuilt page list size: %d\n", prebuilt_page_list.size());
+	}
+	
 	/* 1. Copy IPL region to memory */
 
 	byte * apply_log_buffer;

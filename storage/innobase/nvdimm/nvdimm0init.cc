@@ -107,6 +107,10 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
       We force to set the environment variable PMEM_IS_PMEM_FORCE \n \
       We call mync() instead of mfense()\n");
   /*Make NVDIMM structure*/
+
+  /* lbh */
+  init_prebuilt_page_cache(prebuilt_page_list);
+  /* end */
   
   return nvdimm_ptr;
 }

@@ -75,6 +75,7 @@ static inline void memcpy_persist
   mfence();
 }
 
+
 extern unsigned char* nvdimm_ptr;
 extern int nvdimm_fd;
 
@@ -165,6 +166,16 @@ typedef struct APPLY_LOG_INFO
   buf_block_t * block;
 
 }apply_log_info;
+
+
+std::vector<buf_page_t*> prebuilt_page_list;
+extern buf_page_t * prebuilt_page_start_ptr;
+
+//for mvcc prebuilt page upon ppl normalization
+void init_prebuilt_page_cache(std::vector<buf_page_t*> prebuilt_page_list);
+buf_page_t* add_prebuilt_page(buf_page_t* bpage);
+void remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*> prebuilt_page_list);
+buf_page_t* find_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>prebuilt_page_list);
 
 
 // extern std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map; // (page_id , ipl_static_address)
