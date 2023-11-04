@@ -168,7 +168,7 @@ typedef struct APPLY_LOG_INFO
 }apply_log_info;
 
 
-std::vector<buf_page_t*> prebuilt_page_list;
+extern std::vector<buf_page_t*> prebuilt_page_list;
 extern buf_page_t * prebuilt_page_start_ptr;
 
 //for mvcc prebuilt page upon ppl normalization
