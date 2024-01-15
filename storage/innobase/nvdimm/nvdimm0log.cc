@@ -30,7 +30,11 @@
 bool alloc_static_ipl_to_bpage(buf_page_t * bpage){
 	unsigned char * static_ipl_pointer = alloc_static_address_from_indirection_queue(buf_pool_get(bpage->id));
 	unsigned char temp_buf[8] = {NULL, };
-	if(static_ipl_pointer == NULL) return false;
+	if(static_ipl_pointer == NULL) 
+	{
+		if(bpage->normalize_cause == 0)	bpage->normalize_cause = NO_STATIC;
+		return false;
+	}
 	ulint offset = 0;
 	mach_write_to_4(((unsigned char *)temp_buf) + offset, bpage->id.space()); // Store Space id
 	offset += 4;
@@ -54,7 +58,11 @@ bool alloc_dynamic_ipl_to_bpage(buf_page_t * bpage){
 	//First DIPL 할당 시도
 	if(get_dynamic_ipl_pointer(bpage) != NULL)	return true;
 	unsigned char * dynamic_address = alloc_dynamic_address_from_indirection_queue(buf_pool_get(bpage->id));
-	if(dynamic_address == NULL)	return false;
+	if(dynamic_address == NULL)	
+	{
+		if(bpage->normalize_cause == 0)	bpage->normalize_cause = NO_DYNAMIC;
+		return false;
+	}
 
 	//Static 영역에 First DIPL index 저장
 	unsigned char * pointer_to_store_dynamic_address = bpage->static_ipl_pointer + DYNAMIC_ADDRESS_OFFSET;
@@ -72,7 +80,10 @@ bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage){
 		return true;
 	}
 	unsigned char * second_dynamic_address = alloc_second_dynamic_address_from_indirection_queue(buf_pool_get(bpage->id));
-	if(second_dynamic_address == NULL)	return false;
+	if(second_dynamic_address == NULL){
+		if(bpage->normalize_cause == 0)	bpage->normalize_cause = NO_SEC_DYNAMIC;
+		return false;
+	}
 	
 	//First DIPL 영역에 Second DIPL Index 저장
 	unsigned char * pointer_to_store_dynamic_address = get_dynamic_ipl_pointer(bpage);
@@ -185,6 +196,9 @@ bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len){
 		break;
 	default:
 		break;
+	}
+	if(type == 2 && log_len > can_write_size){
+		if(bpage->normalize_cause == 0)	bpage->normalize_cause = FULL_ALL_PPL;
 	}
 	return log_len <= can_write_size;
 }
@@ -363,6 +377,7 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	bpage->flags = 0;
 	//nvdimm add_trx_id
 	bpage->trx_id = 0;
+	bpage->normalize_cause = 0;
 	//nvdimm add_trx_id
 }
 
@@ -371,6 +386,7 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 void set_for_ipl_page(buf_page_t* bpage){
 	//nvdimm add_trx_id
 	bpage->trx_id = 0;
+	bpage->normalize_cause = 0;
 	//nvdimm add_trx_id
 	bpage->static_ipl_pointer = NULL;
 	// fprintf(stderr, "Read page! page_id(%u, %u)\n", bpage->id.space(), bpage->id.page_no());
@@ -423,39 +439,55 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 	}
 	return false;
 }
-// static inline void print_flush_type(buf_flush_t flush_type, bool iplized){
-// 	if(iplized){
-// 		switch(flush_type){
-// 			case BUF_FLUSH_LIST:
-// 				fprintf(stderr, "%f,ipl_checkpoint_flush\n",(double)(time(NULL) - start));
-// 				break;
-// 			case BUF_FLUSH_SINGLE_PAGE:
-// 				fprintf(stderr, "%f,ipl_single_page_flush\n",(double)(time(NULL) - start));
-// 				break;
-// 			case BUF_FLUSH_LRU:
-// 				fprintf(stderr, "%f,ipl_lru_flush\n",(double)(time(NULL) - start));
-// 				break;
-// 		}
-// 	}
-// 	else{
-// 		switch(flush_type){
-// 			case BUF_FLUSH_LIST:
-// 				fprintf(stderr, "%f,normal_checkpoint_flush\n",(double)(time(NULL) - start));
-// 				break;
-// 			case BUF_FLUSH_SINGLE_PAGE:
-// 				fprintf(stderr, "%f,normal_single_page_flush\n",(double)(time(NULL) - start));
-// 				break;
-// 			case BUF_FLUSH_LRU:
-// 				fprintf(stderr, "%f,normal_lru_flush\n",(double)(time(NULL) - start));
-// 				break;
-// 		}
-// 	}
-// }
+static inline void print_flush_type(buf_page_t * bpage, buf_flush_t flush_type, bool iplized){
+	if(iplized){
+		if(!get_flag(&(bpage->flags), NORMALIZE) && get_flag(&(bpage->flags), DIRTIFIED)){
+			switch(flush_type){
+				case BUF_FLUSH_LIST:
+					fprintf(stderr, "%f,Dynamic_checkpoint_flush\n",(double)(time(NULL) - my_start));
+					break;
+				case BUF_FLUSH_SINGLE_PAGE:
+					fprintf(stderr, "%f,Dynamic_single_page_flush\n",(double)(time(NULL) - my_start));
+					break;
+				case BUF_FLUSH_LRU:
+					fprintf(stderr, "%f,Dynamic_lru_flush\n",(double)(time(NULL) - my_start));
+					break;
+			}
+		}
+		else{
+			switch(flush_type){
+				case BUF_FLUSH_LIST:
+					fprintf(stderr, "%f,normalize_checkpoint_flush\n",(double)(time(NULL) - my_start));
+					break;
+				case BUF_FLUSH_SINGLE_PAGE:
+					fprintf(stderr, "%f,normalize_single_page_flush\n",(double)(time(NULL) - my_start));
+					break;
+				case BUF_FLUSH_LRU:
+					fprintf(stderr, "%f,normalize_lru_flush\n",(double)(time(NULL) - my_start));
+					break;
+			}
+		}
+	}
+	else{
+		switch(flush_type){
+			case BUF_FLUSH_LIST:
+				fprintf(stderr, "%f,normal_checkpoint_flush\n",(double)(time(NULL) - my_start));
+				break;
+			case BUF_FLUSH_SINGLE_PAGE:
+				fprintf(stderr, "%f,normal_single_page_flush\n",(double)(time(NULL) - my_start));
+				break;
+			case BUF_FLUSH_LRU:
+				fprintf(stderr, "%f,normal_lru_flush\n",(double)(time(NULL) - my_start));
+				break;
+		}
+	}
+}
 
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
 	if(get_flag(&(bpage->flags), IPLIZED) == false){
-		// print_flush_type(flush_type, false);
+		// print_flush_type(bpage, flush_type, false);
 		//nvdimm add_trx_id
+		bpage->normalize_cause = 0;
 		bpage->trx_id = 0;
 		bpage->static_ipl_pointer = NULL;
 		bpage->flags = 0;
@@ -465,21 +497,21 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
-			// print_flush_type(flush_type, false);
+			// print_flush_type(bpage, flush_type, true);
 			normalize_ipl_page(bpage, bpage->id);
 			return true;
 		}
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
-			// print_flush_type(flush_type, true);
+			// print_flush_type(bpage, flush_type, true);
 			return false;
 		}
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
-				// print_flush_type(flush_type, true);
+				// print_flush_type(bpage, flush_type, true);
 				return false;
 			}
 			else{
-				// print_flush_type(flush_type, false);
+				// print_flush_type(bpage, flush_type, true);
 				normalize_ipl_page(bpage, bpage->id);
 				return true;
 				

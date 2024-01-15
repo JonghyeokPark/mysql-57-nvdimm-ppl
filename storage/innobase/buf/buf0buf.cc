@@ -5901,6 +5901,16 @@ corrupt:
 	buf_page_monitor(bpage, io_type);
 	unsigned char *static_ipl_pointer, *dynamic_ipl_pointer, *second_dynamic_ipl_pointer;
 	bool return_ipl = false;
+	if(bpage->normalize_cause == 0 && get_flag(&(bpage->flags), DIRTIFIED)){
+		
+		if(get_flag(&(bpage->flags), SECOND_DIPL)){
+			bpage->normalize_cause = SEC_DYNAMIC_FLUSH;
+		}
+		else{
+			bpage->normalize_cause = DYNAMIC_FLUSH;
+		}
+	}
+	int normalize_cause = bpage->normalize_cause;
 	
 	
 
@@ -5963,6 +5973,15 @@ corrupt:
 			return_ipl = check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
 		}
 		//nvdimm
+		// if(normalize_cause != 0){
+		// 	fprintf(stderr,"normalize_ppl,%f,%lu,%d,%d,%d,%d\n",
+		// 								(double)(time(NULL) - my_start),
+		// 								bpage->id.space(), 
+		// 								normalize_cause,
+		// 								(static_ipl_pointer != NULL), 
+		// 								(dynamic_ipl_pointer != NULL), 
+		// 								(second_dynamic_ipl_pointer != NULL));
+		// }
 
 		if (uncompressed) {
 			rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,

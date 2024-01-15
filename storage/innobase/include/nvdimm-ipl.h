@@ -82,6 +82,7 @@ static inline void memcpy_persist
 
 extern unsigned char* nvdimm_ptr;
 extern int nvdimm_fd;
+extern time_t my_start;
 
 /*IPL allocation*/
 void make_static_indirection_queue(buf_pool_t * buf_pool);
@@ -100,7 +101,14 @@ unsigned char * get_addr_from_ipl_index(unsigned char * start_ptr, uint index, u
 uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr, uint64_t ipl_per_page_size);
 
 /* IPL mapping */
-bool make_static_and_dynamic_ipl_region(ulint number_of_buf_pool);
+bool make_static_and_dynamic_ipl_region
+        ( ulint number_of_buf_pool, 
+          ulint srv_nvdimm_static_size, 
+          ulint srv_nvdimm_dynamic_size,
+          ulint srv_nvdimm_sec_dynamic_size,
+          ulint srv_nvdimm_static_entry_size,
+          ulint srv_nvdimm_dynamic_entry_size,
+          ulint srv_nvdimm_sec_dynamic_entry_size);
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size);
 void nvdimm_free(const uint64_t pool_size);
 

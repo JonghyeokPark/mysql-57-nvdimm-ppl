@@ -1433,6 +1433,7 @@ func_exit:
 				page_zip ? 1 : 0);
 
 		nvdimm_ipl_add_split_merge_map((buf_page_t *) block);
+		if(((buf_page_t *)block)->normalize_cause == 0)	((buf_page_t *)block)->normalize_cause = REORGANIZE;
 
 		/* For compressed pages write the compression level. */
 		if (log_ptr && page_zip) {
@@ -1666,6 +1667,7 @@ btr_root_raise_and_insert(
 	/* Copy the records from root to the new page one by one. */
 #ifdef UNIV_NVDIMM_IPL
 	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block);
+	if(((buf_page_t *)new_block)->normalize_cause == 0)		((buf_page_t *)new_block)->normalize_cause = SPLIT_OR_MERGE;
 #endif
 
 	if (0
@@ -2650,6 +2652,8 @@ func_start:
 #ifdef UNIV_NVDIMM_IPL
 	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block);
 	nvdimm_ipl_add_split_merge_map((buf_page_t *)block);
+	if(((buf_page_t *)new_block)->normalize_cause == 0)	 ((buf_page_t *)new_block)->normalize_cause = SPLIT_OR_MERGE;
+	if(((buf_page_t *)block)->normalize_cause == 0)	 ((buf_page_t *)block)->normalize_cause = SPLIT_OR_MERGE;
 	// if (nvdimm_ipl_lookup(block->page.id)) {
 	// 	nvdimm_ipl_erase(block->page.id);
 	// }

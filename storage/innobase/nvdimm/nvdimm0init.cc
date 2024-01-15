@@ -27,7 +27,7 @@ nc_redo_buf * nc_redo_info = NULL;
 /* recovery */
 bool nvdimm_recv_running = false;
 unsigned char* nvdimm_recv_ptr = NULL;
-
+time_t my_start = 0;
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -37,15 +37,23 @@ unsigned char* nvdimm_recv_ptr = NULL;
 */
 
 
-bool make_static_and_dynamic_ipl_region(ulint number_of_buf_pool){ //여기서 static 크기 바꿔주면 STATIC_MAX_SIZE 바꿔줘야함.
-  nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
-  nvdimm_info->static_ipl_size = (1024 + 824) * 1024UL * 1024UL; // static ipl size : 1,8GB
-  nvdimm_info->dynamic_ipl_size = (100) * 1024 * 1024; // dynamic ipl size : 0.2GB
-  nvdimm_info->second_dynamic_ipl_size = (100) * 1024 * 1024; // dynamic ipl size : 0.2GB
+bool make_static_and_dynamic_ipl_region
+  ( ulint number_of_buf_pool, 
+    ulint srv_nvdimm_static_size, 
+    ulint srv_nvdimm_dynamic_size,
+    ulint srv_nvdimm_sec_dynamic_size,
+    ulint srv_nvdimm_static_entry_size,
+    ulint srv_nvdimm_dynamic_entry_size,
+    ulint srv_nvdimm_sec_dynamic_entry_size){ //여기서 static 크기 바꿔주면 STATIC_MAX_SIZE 바꿔줘야함.
 
-  nvdimm_info->static_ipl_per_page_size = 256; // per page static size : 1KB
-  nvdimm_info->dynamic_ipl_per_page_size = 256; // per page dynamic size : 8KB
-  nvdimm_info->second_dynamic_ipl_per_page_size = 1024 * 2;
+  nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
+  nvdimm_info->static_ipl_size = srv_nvdimm_static_size; // static ipl size : 1,8GB
+  nvdimm_info->dynamic_ipl_size = srv_nvdimm_dynamic_size; // dynamic ipl size : 0.2GB
+  nvdimm_info->second_dynamic_ipl_size = srv_nvdimm_sec_dynamic_size; // dynamic ipl size : 0.2GB
+
+  nvdimm_info->static_ipl_per_page_size = srv_nvdimm_static_entry_size; // per page static size : 1KB
+  nvdimm_info->dynamic_ipl_per_page_size = srv_nvdimm_dynamic_entry_size; // per page dynamic size : 8KB
+  nvdimm_info->second_dynamic_ipl_per_page_size = srv_nvdimm_sec_dynamic_entry_size;
 
   nvdimm_info->static_ipl_page_number_per_buf_pool = (nvdimm_info->static_ipl_size / nvdimm_info->static_ipl_per_page_size) / number_of_buf_pool; // 
   nvdimm_info->dynamic_ipl_page_number_per_buf_pool = (nvdimm_info->dynamic_ipl_size / nvdimm_info->dynamic_ipl_per_page_size) / number_of_buf_pool; // dynamic ipl max page count : 1M
@@ -55,13 +63,16 @@ bool make_static_and_dynamic_ipl_region(ulint number_of_buf_pool){ //여기서 s
   nvdimm_info->dynamic_start_pointer = nvdimm_ptr + nvdimm_info->static_ipl_size;
   nvdimm_info->second_dynamic_start_pointer = nvdimm_info->dynamic_start_pointer + nvdimm_info->dynamic_ipl_size;
   nvdimm_info->nc_redo_start_pointer = nvdimm_info->second_dynamic_start_pointer + (2 * 1024 * 1024 * 1024UL);
+  fprintf(stderr, "Static PPL Size : %luM, Dynamic PPL Size : %luM, Second Dynamic PPL Size : %luM\n", nvdimm_info->static_ipl_size / 1024 / 1024, nvdimm_info->dynamic_ipl_size / 1024 / 1024, nvdimm_info->second_dynamic_ipl_size / 1024 / 1024);
+  fprintf(stderr, "Static PPL entry Size : %lu, Dynamic PPL entry Size : %lu, Second Dynamic PPL entry Size : %lu\n", nvdimm_info->static_ipl_per_page_size, nvdimm_info->dynamic_ipl_per_page_size, nvdimm_info->second_dynamic_ipl_per_page_size);
 /*
   fprintf(stderr, "static start pointer : %p, dynamic start pointer : %p, second dynamic start pointer: %p, nc_redo: %p\n", nvdimm_info->static_start_pointer, nvdimm_info->dynamic_start_pointer, nvdimm_info->second_dynamic_start_pointer, nvdimm_info->nc_redo_start_pointer);
   fprintf(stderr, "static IPL size per buf_pool : %u\n", nvdimm_info->static_ipl_page_number_per_buf_pool);
   fprintf(stderr, "Dynamic IPL size per buf_pool : %u\n", nvdimm_info->dynamic_ipl_page_number_per_buf_pool);
   fprintf(stderr, "Second Dynamic IPL size per buf_pool : %u\n", nvdimm_info->second_dynamic_ipl_page_number_per_buf_pool);
-  //start = time(NULL);
+  start = time(NULL);
 */
+  my_start = time(NULL);
   return true;
 }
 

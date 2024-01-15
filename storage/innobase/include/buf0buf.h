@@ -1703,10 +1703,22 @@ public:
 	unsigned char * static_ipl_pointer;
 	unsigned char * ipl_write_pointer;
 	unsigned char flags; // first bit: iplized_flag, second bit: normalize_flag, third bit: dirtifed_flag
-
+	int normalize_cause;
 	//nvdimm add_trx_id
 	trx_id_t trx_id;
 	//nvdimm add_trx_id
+};
+
+enum normalize_cause_flag{
+	REORGANIZE = 1,
+	SPLIT_OR_MERGE = 2,
+	NO_STATIC= 4,
+	NO_DYNAMIC = 8,
+	NO_SEC_DYNAMIC = 16,
+	FULL_ALL_PPL = 32,
+	COPY_RECORD = 64,
+	DYNAMIC_FLUSH = 128,
+	SEC_DYNAMIC_FLUSH = 256
 };
 
 /** The buffer control block structure */

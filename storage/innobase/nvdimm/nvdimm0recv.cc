@@ -45,6 +45,26 @@ void recv_ipl_parse_log() {
 		}
     */
 
+		// // PPL Page 출력해보기
+		// uint64_t space, page_no, ppl_length, page_lsn;
+		// unsigned char * dynamic_pointer, * second_dynamic_pointer;
+		// dynamic_pointer = NULL;
+		// second_dynamic_pointer = NULL;
+		// space = mach_read_from_4(hdr);
+		// page_no = mach_read_from_4(hdr + PAGE_NO_OFFSET);
+		// page_lsn = get_page_lsn_from_ipl_header(hdr);
+		// dynamic_pointer = get_addr_from_ipl_index(nvdimm_info->dynamic_start_pointer, 
+		// 											mach_read_from_4(hdr + DYNAMIC_ADDRESS_OFFSET), 
+		// 											nvdimm_info->dynamic_ipl_per_page_size);
+		// if(dynamic_pointer != NULL) {
+		// 	second_dynamic_pointer = get_addr_from_ipl_index(nvdimm_info->second_dynamic_start_pointer, 
+		// 											mach_read_from_4(dynamic_pointer), 
+		// 											nvdimm_info->second_dynamic_ipl_per_page_size);
+		// }
+		// ppl_length = mach_read_from_4(hdr+IPL_LENGTH_OFFSET);
+		// fprintf(stderr,"PPL_INFO,%lu,%lu,%d,%d,%zu\n", space, ppl_length, (dynamic_pointer != NULL), (second_dynamic_pointer != NULL), page_lsn);
+
+// 
 		ipl_recv_map[page_id_t(space_no, page_no)] = i;
 	}
 }

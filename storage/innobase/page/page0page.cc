@@ -642,6 +642,8 @@ page_copy_rec_list_end(
 #ifdef UNIV_NVDIMM_IPL
 	nvdimm_ipl_add_split_merge_map((buf_page_t *)block);
 	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block);
+	if(((buf_page_t *)block)->normalize_cause == 0)	((buf_page_t *)block)->normalize_cause = COPY_RECORD;
+	if(((buf_page_t *)new_block)->normalize_cause == 0)	((buf_page_t *)new_block)->normalize_cause = COPY_RECORD;
 #endif
 
 	if (new_page_zip) {
