@@ -421,12 +421,12 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 			return false;
 		}
 		if(get_dynamic_ipl_pointer(bpage)== NULL){
-			fprintf(stderr, "[Not Flush]Only Static ipl page: (%u, %u) flush_type %u, old_lsn: %zu, buf_fix_count: %u, io_fix: %u, frmae: %p\n", bpage->id.space(), bpage->id.page_no(), flush_type, bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), ((buf_block_t *)bpage)->frame);
+			// fprintf(stderr, "[Not Flush]Only Static ipl page: (%u, %u) flush_type %u, old_lsn: %zu, buf_fix_count: %u, io_fix: %u, frmae: %p\n", bpage->id.space(), bpage->id.page_no(), flush_type, bpage->oldest_modification, bpage->buf_fix_count, buf_page_get_io_fix(bpage), ((buf_block_t *)bpage)->frame);
 			return true;
 		}
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
-				fprintf(stderr, "[Not Flush]Checkpoint ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
+				// fprintf(stderr, "[Not Flush]Checkpoint ipl page: (%u, %u) flush_type %u\n", bpage->id.space(), bpage->id.page_no(), flush_type);
 				return true;
 			}
 			else{
@@ -483,9 +483,81 @@ static inline void print_flush_type(buf_page_t * bpage, buf_flush_t flush_type, 
 	}
 }
 
+static inline void print_normalize_cause(buf_page_t * bpage){
+	if(get_flag(&(bpage->flags), IPLIZED)){
+		switch(bpage->normalize_cause){
+			case 0:
+				fprintf(stderr, "Normalize_Not_ppled\n");
+				break;
+			case REORGANIZE:
+				fprintf(stderr, "Normalize_Reorganize\n");
+				break;
+			case SPLIT_OR_MERGE:
+				fprintf(stderr, "Normalize_Split_or_merge\n");
+				break;
+			case NO_STATIC:
+				fprintf(stderr, "Normalize_No_static\n");
+				break;
+			case NO_DYNAMIC:
+				fprintf(stderr, "Normalize_No_dynamic\n");
+				break;
+			case NO_SEC_DYNAMIC:
+				fprintf(stderr, "Normalize_No_sec_dynamic\n");
+				break;
+			case FULL_ALL_PPL:
+				fprintf(stderr, "Normalize_Full_all_ppl\n");
+				break;
+			case COPY_RECORD:
+				fprintf(stderr, "Normalize_Copy_record\n");
+				break;
+			case DYNAMIC_FLUSH:
+				fprintf(stderr, "Normalize_Normalize_dynamic\n");
+				break;
+			case SEC_DYNAMIC_FLUSH:
+				fprintf(stderr, "Normalize_Normalize_second_dynamic\n");
+				break;
+		}
+	}
+	else{
+		switch(bpage->normalize_cause){
+			case 0:
+				fprintf(stderr, "Not_ppled_Normal\n");
+				break;
+			case REORGANIZE:
+				fprintf(stderr, "Not_ppled_Reorganize\n");
+				break;
+			case SPLIT_OR_MERGE:
+				fprintf(stderr, "Not_ppled_Split_or_merge\n");
+				break;
+			case NO_STATIC:
+				fprintf(stderr, "Not_ppled_No_static\n");
+				break;
+			case NO_DYNAMIC:
+				fprintf(stderr, "Not_ppled_No_dynamic\n");
+				break;
+			case NO_SEC_DYNAMIC:
+				fprintf(stderr, "Not_ppled_No_sec_dynamic\n");
+				break;
+			case FULL_ALL_PPL:
+				fprintf(stderr, "Not_ppled_Full_all_ppl\n");
+				break;
+			case COPY_RECORD:
+				fprintf(stderr, "Not_ppled_Copy_record\n");
+				break;
+			case DYNAMIC_FLUSH:
+				fprintf(stderr, "Not_ppled_Normalize_dynamic\n");
+				break;
+			case SEC_DYNAMIC_FLUSH:
+				fprintf(stderr, "Not_ppled_Normalize_second_dynamic\n");
+				break;
+		}
+	}
+}
+
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
 	if(get_flag(&(bpage->flags), IPLIZED) == false){
 		// print_flush_type(bpage, flush_type, false);
+		print_normalize_cause(bpage);
 		//nvdimm add_trx_id
 		bpage->normalize_cause = 0;
 		bpage->trx_id = 0;
@@ -493,26 +565,44 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 		bpage->flags = 0;
 		bpage->ipl_write_pointer = NULL;
 		//nvdimm add_trx_id
+		fprintf(stderr,"Normal_flush\n");
 		return false;
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
 			// print_flush_type(bpage, flush_type, true);
+			print_normalize_cause(bpage);
 			normalize_ipl_page(bpage, bpage->id);
+			fprintf(stderr,"Normalize_flush\n");
 			return true;
 		}
 		if(get_dynamic_ipl_pointer(bpage) == NULL){
 			// print_flush_type(bpage, flush_type, true);
+			fprintf(stderr,"Skip_static\n");
 			return false;
 		}
 		else{
 			if(flush_type == BUF_FLUSH_LIST){
 				// print_flush_type(bpage, flush_type, true);
+				if(get_flag(&(bpage->flags), SECOND_DIPL))	fprintf(stderr,"Skip_second_dynamic\n");
+				else	fprintf(stderr,"Skip_first_dynamic\n");
 				return false;
 			}
 			else{
 				// print_flush_type(bpage, flush_type, true);
+				if(bpage->normalize_cause == 0){
+					if(get_flag(&(bpage->flags), SECOND_DIPL)){
+						bpage->normalize_cause = SEC_DYNAMIC_FLUSH;
+					}
+					else{
+						bpage->normalize_cause = DYNAMIC_FLUSH;
+					}
+				}
+				print_normalize_cause(bpage);
+				if(get_flag(&(bpage->flags), SECOND_DIPL))	fprintf(stderr,"Second_dynamic_flush,\n");
+				else	fprintf(stderr,"Dynamic_flush,\n");
 				normalize_ipl_page(bpage, bpage->id);
+
 				return true;
 				
 			}

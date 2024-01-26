@@ -1021,16 +1021,7 @@ buf_LRU_free_from_unzip_LRU_list(
 		ut_ad(block->in_unzip_LRU_list);
 		ut_ad(block->page.in_LRU_list);
 		buf_page_t * bpage = (buf_page_t *) block;
-		if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){
-			goto scan_end;
-		}
 		freed = buf_LRU_free_page(&block->page, false);
-		if(freed){
-			//nvdimm
-			// fprintf(stderr, "buf_LRU_free_page block after: page_id:(%u, %u) oldest_lsn: %lu frame: %p\n",bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, ((buf_block_t*)bpage)->frame);
-			//nvdimm
-		}
-scan_end:
 		block = prev_block;
 	}
 
@@ -1081,9 +1072,6 @@ buf_LRU_free_from_common_LRU_list(
 		unsigned	accessed = buf_page_is_accessed(bpage);
 
 		if (buf_flush_ready_for_replace(bpage)) {
-			if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){
-				goto dynamic_end;
-			}
 			mutex_exit(mutex);
 			// fprintf(stderr, "buf_LRU_free_page block before: page_id:(%u, %u) oldest_lsn: %lu, frame: %p\n",bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, ((buf_block_t*)bpage)->frame);
 			freed = buf_LRU_free_page(bpage, true);
@@ -1928,18 +1916,18 @@ func_exit:
 	ut_ad(!bpage->in_flush_list == !bpage->oldest_modification);
 
 	//nvdimm
-	if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
-		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
-		// (jhpark): recovery
-		// fprintf(stderr, "SIPL ipl store write pointer %lu (%u:%u) oldset_modificatino: %lu\n"
-		// 	, get_ipl_length_from_write_pointer(bpage)
-		// 	, bpage->id.space(), bpage->id.page_no()
-		// 	, bpage->oldest_modification);
+	// if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+	// 	if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
+	// 	// (jhpark): recovery
+	// 	// fprintf(stderr, "SIPL ipl store write pointer %lu (%u:%u) oldset_modificatino: %lu\n"
+	// 	// 	, get_ipl_length_from_write_pointer(bpage)
+	// 	// 	, bpage->id.space(), bpage->id.page_no()
+	// 	// 	, bpage->oldest_modification);
 
-		recv_ipl_set_wp(bpage->static_ipl_pointer, get_ipl_length_from_write_pointer(bpage));
-		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification); 
-		// Page가 Discard되기 전에 Page_lsn IPL header에 저장
-	}
+	// 	recv_ipl_set_wp(bpage->static_ipl_pointer, get_ipl_length_from_write_pointer(bpage));
+	// 	set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification); 
+	// 	// Page가 Discard되기 전에 Page_lsn IPL header에 저장
+	// }
 	//nvdimm
 
 	DBUG_PRINT("ib_buf", ("free page " UINT32PF ":" UINT32PF,

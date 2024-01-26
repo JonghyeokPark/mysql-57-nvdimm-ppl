@@ -5901,16 +5901,16 @@ corrupt:
 	buf_page_monitor(bpage, io_type);
 	unsigned char *static_ipl_pointer, *dynamic_ipl_pointer, *second_dynamic_ipl_pointer;
 	bool return_ipl = false;
-	if(bpage->normalize_cause == 0 && get_flag(&(bpage->flags), DIRTIFIED)){
+	// if(bpage->normalize_cause == 0 && get_flag(&(bpage->flags), DIRTIFIED)){
 		
-		if(get_flag(&(bpage->flags), SECOND_DIPL)){
-			bpage->normalize_cause = SEC_DYNAMIC_FLUSH;
-		}
-		else{
-			bpage->normalize_cause = DYNAMIC_FLUSH;
-		}
-	}
-	int normalize_cause = bpage->normalize_cause;
+	// 	if(get_flag(&(bpage->flags), SECOND_DIPL)){
+	// 		bpage->normalize_cause = SEC_DYNAMIC_FLUSH;
+	// 	}
+	// 	else{
+	// 		bpage->normalize_cause = DYNAMIC_FLUSH;
+	// 	}
+	// }
+	// int normalize_cause = bpage->normalize_cause;
 	
 	
 
