@@ -1823,7 +1823,7 @@ innobase_start_or_create_for_mysql(void)
 		char nvdimm_file_path[NVDIMM_MMAP_MAX_FILE_NAME_LENGTH];
 		sprintf(nvdimm_file_path, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
 		//const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";
-		size_t srv_nvdimm_pool_size = 8 * 1024;
+		size_t srv_nvdimm_pool_size = 12 * 1024;
 		uint64_t pool_size = srv_nvdimm_pool_size * 1024 * 1024UL;
 
 		nvdimm_ptr = nvdimm_create_or_initialize(nvdimm_file_path, pool_size);
@@ -1832,7 +1832,14 @@ innobase_start_or_create_for_mysql(void)
 			NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
 			assert(nvdimm_ptr);
 		}
-		if(make_static_and_dynamic_ipl_region(srv_buf_pool_instances)){
+		if(make_static_and_dynamic_ipl_region
+			(	srv_buf_pool_instances,
+				srv_nvdimm_static_size,
+				srv_nvdimm_dynamic_size,
+				srv_nvdimm_sec_dynamic_size,
+				srv_nvdimm_static_entry_size,
+				srv_nvdimm_dynamic_entry_size,
+				srv_nvdimm_sec_dynamic_entry_size)){
     		NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
 		}
 	}

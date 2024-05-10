@@ -343,6 +343,19 @@ extern ulong    srv_io_capacity;
 extern my_bool srv_use_nvdimm_ipl;
 /** NVDIMM-aware file resident directory */
 extern char* srv_nvdimm_home_dir;
+
+/** Static PPL Overall Size*/
+extern ulint srv_nvdimm_static_size;
+/** Dynamic PPL Overall Size*/
+extern ulint srv_nvdimm_dynamic_size;
+/** Second Dynamic PPL Overall Size*/
+extern ulint srv_nvdimm_sec_dynamic_size;
+/** Static PPL Entry Size */
+extern ulong srv_nvdimm_static_entry_size;
+/** Dynamic PPL Entry Size */
+extern ulong srv_nvdimm_dynamic_entry_size;
+/** Second Dynamic PPL Entry Size */
+extern ulong srv_nvdimm_sec_dynamic_entry_size;
 #endif
 
 /* We use this dummy default value at startup for max_io_capacity.

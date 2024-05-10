@@ -474,11 +474,13 @@ bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type){
 bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type){
 	if(get_flag(&(bpage->flags), IPLIZED) == false){
 		// print_flush_type(flush_type, false);
+		// fprintf(stderr,"Write_count,%lu,%lu\n",bpage->id.space(),bpage->id.page_no());
 		return false;
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
 			// print_flush_type(flush_type, false);
+			// fprintf(stderr,"Write_count,%lu,%lu\n",bpage->id.space(),bpage->id.page_no());
 			normalize_ipl_page(bpage, bpage->id);
 			return true;
 		}
@@ -493,6 +495,7 @@ bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t 
 			}
 			else{
 				// print_flush_type(flush_type, false);
+				// fprintf(stderr,"Write_count,%lu,%lu\n",bpage->id.space(),bpage->id.page_no());
 				normalize_ipl_page(bpage, bpage->id);
 				return true;
 				

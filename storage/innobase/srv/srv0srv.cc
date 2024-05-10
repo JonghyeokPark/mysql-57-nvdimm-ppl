@@ -247,6 +247,20 @@ with mutex_enter(), which will wait until it gets the mutex. */
 my_bool srv_use_nvdimm_ipl = FALSE;
 /** NVDIMM-aware file resident directory */
 char* srv_nvdimm_home_dir = NULL;
+
+/** Static PPL Overall Size*/
+ulint srv_nvdimm_static_size = 0;
+/** Dynamic PPL Overall Size*/
+ulint srv_nvdimm_dynamic_size = 0;
+/** Second Dynamic PPL Overall Size*/
+ulint srv_nvdimm_sec_dynamic_size = 0;
+/** Static PPL Entry Size */
+ulong srv_nvdimm_static_entry_size = 0;
+/** Dynamic PPL Entry Size */
+ulong srv_nvdimm_dynamic_entry_size = 0;
+/** Second Dynamic PPL Entry Size */
+ulong srv_nvdimm_sec_dynamic_entry_size = 0;
+
 #endif
 
 /** Requested size in bytes */
