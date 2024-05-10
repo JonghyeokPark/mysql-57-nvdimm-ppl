@@ -1,7 +1,7 @@
 #!/bin/bash
 
 pmem_dir=/dev/pmem0
-pmem_mount_dir=/dram_simulate
+pmem_mount_dir=/pmem
 
 sudo mkfs.ext4 $pmem_dir
 sudo mount -o dax $pmem_dir $pmem_mount_dir

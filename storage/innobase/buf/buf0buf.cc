@@ -1852,6 +1852,24 @@ buf_pool_init_instance(
 	/* Initialize the iterator for single page scan search */
 	new(&buf_pool->single_scan_itr) LRUItr(buf_pool, &buf_pool->mutex);
 
+#ifdef UNIV_NVDIMM_IPL
+	buf_pool->ipl_look_up_table = new std::tr1::unordered_map<page_id_t, unsigned char*>;
+	buf_pool->ipl_look_up_table->clear();
+	rw_lock_create(ipl_map_mutex_key, &buf_pool->lookup_table_lock, SYNC_IPL_MAP_MUTEX);
+
+	buf_pool->static_ipl_allocator = new std::queue<uint>;
+	mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->static_allocator_mutex);
+	make_static_indirection_queue(buf_pool);
+
+	buf_pool->dynamic_ipl_allocator = new std::queue<uint>;
+	mutex_create(LATCH_ID_DYNAMIC_REGION, &buf_pool->dynamic_allocator_mutex);
+	make_dynamic_indirection_queue(buf_pool);
+
+	buf_pool->second_dynamic_ipl_allocator = new std::queue<uint>;
+	mutex_create(LATCH_ID_SECOND_DYNAMIC_REGION, &buf_pool->second_dynamic_allocator_mutex);
+	make_second_dynamic_indirection_queue(buf_pool);
+#endif
+
 	buf_pool_mutex_exit(buf_pool);
 
 	return(DB_SUCCESS);
@@ -1923,6 +1941,17 @@ buf_pool_free_instance(
 	hash_table_free(buf_pool->page_hash);
 	hash_table_free(buf_pool->zip_hash);
 
+#ifdef UNIV_NVDIMM_IPL
+	free(buf_pool->ipl_look_up_table);
+	rw_lock_free(&buf_pool->lookup_table_lock);
+	free(buf_pool->static_ipl_allocator);
+	free(buf_pool->dynamic_ipl_allocator);
+	free(buf_pool->second_dynamic_ipl_allocator);
+	mutex_free(&buf_pool->static_allocator_mutex);
+	mutex_free(&buf_pool->dynamic_allocator_mutex);
+	mutex_free(&buf_pool->second_dynamic_allocator_mutex);
+#endif
+
 	buf_pool->allocator.~ut_allocator();
 }
 
@@ -1964,7 +1993,6 @@ buf_pool_init(
 			return(DB_ERROR);
 		}
 	}
-
 	buf_chunk_map_ref = buf_chunk_map_reg;
 
 	buf_pool_set_sizes();
@@ -4647,7 +4675,7 @@ got_block:
 		fix_type = MTR_MEMO_PAGE_X_FIX;
 		break;
 	}
-
+	// fprintf(stderr, "buf_page_get_gen fix_type: %d, fix_block: (%u, %u)\n", fix_type, fix_block->page.id.space(),fix_block->page.id.page_no());
 	mtr_memo_push(mtr, fix_block, fix_type);
 
 	if (mode != BUF_PEEK_IF_IN_POOL && !access_time) {
@@ -4754,7 +4782,7 @@ buf_page_optimistic_get(
 
 		return(FALSE);
 	}
-
+	// fprintf(stderr, "buf_page_optimistic_get fix_type: %d, fix_block: (%u, %u)\n", fix_type, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(mtr, block, fix_type);
 
 #if defined UNIV_DEBUG || defined UNIV_BUF_DEBUG
@@ -4862,7 +4890,7 @@ buf_page_get_known_nowait(
 
 		return(FALSE);
 	}
-
+	// fprintf(stderr, "buf_page_get_known_nowait fix_type: %d, fix_block: (%u, %u)\n", fix_type, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(mtr, block, fix_type);
 
 #if defined UNIV_DEBUG || defined UNIV_BUF_DEBUG
@@ -4959,7 +4987,7 @@ buf_page_try_get_func(
 
 		return(NULL);
 	}
-
+	// fprintf(stderr, "buf_page_try_get_func fix_type: %d, fix_block: (%u, %u)\n", fix_type, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(mtr, block, fix_type);
 
 #if defined UNIV_DEBUG || defined UNIV_BUF_DEBUG
@@ -5002,8 +5030,9 @@ buf_page_init_low(
 	bpage->oldest_modification = 0;
 	HASH_INVALIDATE(bpage, hash);
 
-//nvdimm
+#ifdef UNIV_NVDIMM_IPL
 	set_for_ipl_page(bpage);
+#endif
 
 	ut_d(bpage->file_page_was_freed = FALSE);
 }
@@ -5445,7 +5474,7 @@ buf_page_create(
 	}
 
 	buf_pool_mutex_exit(buf_pool);
-
+	// fprintf(stderr, "buf_page_create fix_type: %d, fix_block: (%u, %u)\n", MTR_MEMO_BUF_FIX, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(mtr, block, MTR_MEMO_BUF_FIX);
 
 	buf_page_set_accessed(&block->page);
@@ -5814,6 +5843,19 @@ corrupt:
 		if (recv_recovery_is_on()) {
 			/* Pages must be uncompressed for crash recovery. */
 			ut_a(uncompressed);
+
+			// (jhpark): recovery
+			//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+			//	recv_ipl_apply((buf_block_t*)bpage);
+			//}
+
+			// (jhpark): in this case, if we apply the IPL log for IPLed page in this step,
+			// we can not recover below scenario (i.e., we can not recvoer step 1 and 2 updates)
+			//	1. update page A (page A is nomral page)
+			//  2. update page A (page A is normal page)
+			//	3. page A become IPLed page
+			//  4. update page A (page A creates IPL log)
+
 			recv_recover_page(TRUE, (buf_block_t*) bpage);
 		}
 
@@ -5853,6 +5895,12 @@ corrupt:
 	buf_page_set_io_fix(bpage, BUF_IO_NONE);
 	buf_page_monitor(bpage, io_type);
 
+#ifdef UNIV_NVDIMM_IPL
+	unsigned char *static_ipl_pointer, *dynamic_ipl_pointer, *second_dynamic_ipl_pointer;
+	bool return_ipl = false;
+#endif
+	
+
 	switch (io_type) {
 	case BUF_IO_READ:
 		/* NOTE that the call to ibuf may have moved the ownership of
@@ -5862,16 +5910,26 @@ corrupt:
 		ut_ad(buf_pool->n_pend_reads > 0);
 		buf_pool->n_pend_reads--;
 		buf_pool->stat.n_pages_read++;
-		if (get_flag(&(bpage->flags), IPLIZED)){
-			//page를 완전히 가져오고 실행해보기
-			// fprintf(stderr, "Read ipl bpage: (%u, %u) %p\n",bpage->id.space(), bpage->id.page_no(), bpage);
-			mtr_t temp_mtr;
-			mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-			mtr_start(&temp_mtr);
-			set_apply_info_and_log_apply((buf_block_t*) bpage);
-			mtr_commit(&temp_mtr);
-		}
 
+#ifdef UNIV_NVDIMM_IPL
+		// (jhpark): recovery
+		//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+		//	recv_ipl_apply((buf_block_t*)bpage);
+		//}
+
+		// (jhpark): recovery
+		if (!nvdimm_recv_running && get_flag(&(bpage->flags), IPLIZED)){
+			buf_pool_mutex_exit(buf_pool);
+			set_apply_info_and_log_apply((buf_block_t*) bpage);
+			if (uncompressed) {
+				rw_lock_x_unlock_gen(&((buf_block_t*) bpage)->lock,
+							BUF_IO_READ);
+			}
+
+			mutex_exit(buf_page_get_mutex(bpage));
+			return(true);
+		}
+#endif
 		if (uncompressed) {
 			rw_lock_x_unlock_gen(&((buf_block_t*) bpage)->lock,
 					     BUF_IO_READ);
@@ -5885,10 +5943,22 @@ corrupt:
 		/* Write means a flush operation: call the completion
 		routine in the flush system */
 
-		buf_flush_write_complete(bpage);
-		//여기서 normalize page 실행
-		check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
+		// (jhpark): recovery
+		//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+		//	recv_ipl_apply((buf_block_t*)bpage);
+		//}
 
+		buf_flush_write_complete(bpage);
+#ifdef UNIV_NVDIMM_IPL
+		second_dynamic_ipl_pointer = get_second_dynamic_ipl_pointer(bpage);
+		dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
+		static_ipl_pointer = bpage->static_ipl_pointer;
+		
+		// (jhpark): recovery
+		if (!nvdimm_recv_running) {
+			return_ipl = check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
+		}
+#endif
 		if (uncompressed) {
 			rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
 					      BUF_IO_WRITE);
@@ -5926,6 +5996,13 @@ corrupt:
 			      bpage->id.space(), bpage->id.page_no()));
 
 	buf_pool_mutex_exit(buf_pool);
+#ifdef UNIV_NVDIMM_IPL
+	if(!nvdimm_recv_running && return_ipl){
+		free_second_dynamic_address_to_indirection_queue(buf_pool, second_dynamic_ipl_pointer);
+		free_dynamic_address_to_indirection_queue(buf_pool, dynamic_ipl_pointer);
+		free_static_address_to_indirection_queue(buf_pool, static_ipl_pointer);
+	}
+#endif
 
 	return(true);
 }

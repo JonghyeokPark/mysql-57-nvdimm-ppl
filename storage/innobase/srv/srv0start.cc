@@ -106,8 +106,13 @@ Created 2/16/1996 Heikki Tuuri
 
 #ifdef UNIV_NVDIMM_IPL
 #include "nvdimm-ipl.h"
-//extern unsigned char* nvdimm_ptr;
+extern unsigned char* nvdimm_ptr;
+pfs_os_file_t nvdimm_dwb_file;
 #endif
+
+#include <time.h>
+#include <sys/time.h>
+struct timeval start, end;
 
 #ifdef HAVE_LZO1X
 #include <lzo/lzo1x.h>
@@ -1462,6 +1467,9 @@ innobase_start_or_create_for_mysql(void)
 	size_t		dirnamelen;
 	unsigned	i = 0;
 
+	// (jhpark): recovery
+	gettimeofday(&start, NULL);
+
 	/* Reset the start state. */
 	srv_start_state = SRV_START_STATE_NONE;
 
@@ -1815,6 +1823,43 @@ innobase_start_or_create_for_mysql(void)
 		unit = 'M';
 	}
 
+#ifdef UNIV_NVDIMM_IPL
+	// TODO(jhpark): add configuration variable
+	// 앞으로 옮긴 이유는, Buf_pool instance에 대한 allocator를 할당하기 위해서는 먼저 nvdimm_info가 생성 필요
+	if (srv_use_nvdimm_ipl) {
+		char nvdimm_file_path[NVDIMM_MMAP_MAX_FILE_NAME_LENGTH];
+		sprintf(nvdimm_file_path, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
+		//const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";
+		size_t srv_nvdimm_pool_size = 12 * 1024;
+		uint64_t pool_size = srv_nvdimm_pool_size * 1024 * 1024UL;
+
+		nvdimm_ptr = nvdimm_create_or_initialize(nvdimm_file_path, pool_size);
+
+		if (!nvdimm_ptr) {
+			NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
+			assert(nvdimm_ptr);
+		}
+
+		if(make_static_and_dynamic_ipl_region
+			(	srv_buf_pool_instances,
+				srv_nvdimm_static_size,
+				srv_nvdimm_dynamic_size,
+				srv_nvdimm_sec_dynamic_size,
+				srv_nvdimm_static_entry_size,
+				srv_nvdimm_dynamic_entry_size,
+				srv_nvdimm_sec_dynamic_entry_size)){
+    		NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
+		}
+		
+		// (jhpark): recovery
+		if (nvdimm_recv_running) {
+			recv_ipl_parse_log();
+			//recv_ipl_map_print();
+		}
+	}
+#endif
+	
+
 	double	chunk_size;
 	char	chunk_unit;
 
@@ -1852,24 +1897,6 @@ innobase_start_or_create_for_mysql(void)
 			<< " deadlock if the buffer pool fills up.";
 	}
 #endif /* UNIV_DEBUG */
-
-#ifdef UNIV_NVDIMM_IPL
-	// TODO(jhpark): add configuration variable 
-	if (srv_use_nvdimm_ipl) {
-		char nvdimm_file_path[NVDIMM_MMAP_MAX_FILE_NAME_LENGTH];
-		sprintf(nvdimm_file_path, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
-		//const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";
-		size_t srv_nvdimm_pool_size = 2 * 1024;
-		uint64_t pool_size = srv_nvdimm_pool_size * 1024 * 1024UL;
-
-		nvdimm_ptr = nvdimm_create_or_initialize(nvdimm_file_path, pool_size);
-
-		if (!nvdimm_ptr) {
-			NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
-			assert(nvdimm_ptr);
-		}
-	}
-#endif
 
 	fsp_init();
 	log_init();
@@ -2251,6 +2278,12 @@ files_checked:
 
 		err = recv_recovery_from_checkpoint_start(flushed_lsn);
 
+    gettimeofday(&end, NULL);
+    fprintf(stderr, "scan_time: %f seconds\n",
+         (double) (end.tv_usec - start.tv_usec) / 1000000 +
+                  (double) (end.tv_sec - start.tv_sec));
+    gettimeofday(&start, NULL);
+
 		recv_sys->dblwr.pages.clear();
 
 		if (err == DB_SUCCESS) {
@@ -2282,6 +2315,13 @@ files_checked:
 
 			recv_apply_hashed_log_recs(TRUE);
 			DBUG_PRINT("ib_log", ("apply completed"));
+
+		  gettimeofday(&end, NULL);
+    	fprintf(stderr, "redo_time: %f seconds\n",
+         (double) (end.tv_usec - start.tv_usec) / 1000000 +
+                  (double) (end.tv_sec - start.tv_sec));
+    	gettimeofday(&start, NULL);
+
 
 			if (recv_needed_recovery) {
 				trx_sys_print_mysql_binlog_offset();
@@ -2699,6 +2739,7 @@ files_checked:
 	os_thread_create(buf_resize_thread, NULL, NULL);
 
 	srv_was_started = TRUE;
+
 	return(DB_SUCCESS);
 }
 

@@ -80,6 +80,10 @@ row_undo_ins_remove_clust_rec(
 	ut_ad(node->trx->in_rollback);
 
 	mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+	// fprintf(stderr, "row_undo_ins_remove_clust_rec mtr: %p, trx_id: %zu\n",&mtr, node->trx->id);
+	(&mtr)->set_mtr_ipl_trx_id(node->trx->id);
+#endif
 	mtr.set_named_space(index->space);
 	dict_disable_redo_if_temporary(index->table, &mtr);
 
@@ -131,6 +135,10 @@ row_undo_ins_remove_clust_rec(
 		mtr_commit(&mtr);
 
 		mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+		// fprintf(stderr, "row_undo_ins_remove_clust_rec mtr: %p, trx_id: %zu\n",&mtr, node->trx->id);
+		(&mtr)->set_mtr_ipl_trx_id(node->trx->id);
+#endif
 
 		success = btr_pcur_restore_position(
 			BTR_MODIFY_LEAF, &node->pcur, &mtr);
@@ -146,6 +154,10 @@ row_undo_ins_remove_clust_rec(
 retry:
 	/* If did not succeed, try pessimistic descent to tree */
 	mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+	// fprintf(stderr, "row_undo_ins_remove_clust_rec mtr: %p, trx_id: %zu\n",&mtr, node->trx->id);
+	(&mtr)->set_mtr_ipl_trx_id(node->trx->id);
+#endif
 	mtr.set_named_space(index->space);
 	dict_disable_redo_if_temporary(index->table, &mtr);
 
@@ -202,6 +214,12 @@ row_undo_ins_remove_sec_low(
 	log_free_check();
 
 	mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "row_undo_ins_remove_sec_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 	mtr.set_named_space(index->space);
 	dict_disable_redo_if_temporary(index->table, &mtr);
 
@@ -465,6 +483,15 @@ row_undo_ins(
 	dict_locked = node->trx->dict_operation_lock_mode == RW_X_LATCH;
 
 	row_undo_ins_parse_undo_rec(node, dict_locked);
+#ifdef UNIV_NVDIMM_IPL
+  // (jhpark): ipl-undonow, we parsed undo records, and we know the 
+  if (node->pcur.btr_cur.page_cur.block != NULL) {
+    if(recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {
+      return(DB_SUCCESS);
+    }
+  }   
+#endif // UNIV_NVDIMM_IPL
+
 
 	if (node->table == NULL) {
 		return(DB_SUCCESS);

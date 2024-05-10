@@ -2196,6 +2196,10 @@ trx_commit(
 	if (trx_is_rseg_updated(trx)) {
 		mtr = &local_mtr;
 		mtr_start_sync(mtr);
+#ifdef UNIV_NVDIMM_IPL
+		// fprintf(stderr, "trx_commit mtr: %p, trx_id: %zu\n",mtr, trx->id);
+		mtr->set_mtr_ipl_trx_id(trx->id);
+#endif
 	} else {
 
 		mtr = NULL;

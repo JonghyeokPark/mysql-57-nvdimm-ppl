@@ -63,14 +63,16 @@ dict_hdr_get_new_id(
 Writes the current value of the row id counter to the dictionary header file
 page. */
 void
-dict_hdr_flush_row_id(void);
+dict_hdr_flush_row_id(
+	trx_id_t trx_id);	/*!< in: node */
 /*=======================*/
 /**********************************************************************//**
 Returns a new row id.
 @return the new id */
 UNIV_INLINE
 row_id_t
-dict_sys_get_new_row_id(void);
+dict_sys_get_new_row_id(
+	trx_id_t trx_id);	/*!< in: node */
 /*=========================*/
 /**********************************************************************//**
 Reads a row id from a record or other 6-byte stored form.

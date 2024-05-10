@@ -27,6 +27,10 @@ Created 3/26/1996 Heikki Tuuri
 
 #include "trx0roll.h"
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
+
 #ifdef UNIV_NONINL
 #include "trx0roll.ic"
 #endif
@@ -839,6 +843,16 @@ trx_rollback_or_clean_recovered(
 		ib::info() << "Rollback of non-prepared transactions"
 			" completed";
 	}
+
+	// jhpark
+#ifdef UNIV_NVDIMM_IPL
+	gettimeofday(&end, NULL);
+  fprintf(stderr, "undo_time: %f seconds\n",
+    	(double) (end.tv_usec - start.tv_usec) / 1000000 +
+      (double) (end.tv_sec - start.tv_sec));
+	fprintf(stderr, "org apply_cnt: %lu ipl_skip_cnt: %lu\n",
+			ipl_org_apply_cnt, ipl_skip_apply_cnt);
+#endif
 }
 
 /*******************************************************************//**
@@ -872,9 +886,15 @@ DECLARE_THREAD(trx_rollback_or_clean_all_recovered)(
 	/* We count the number of threads in os_thread_exit(). A created
 	thread should always use that to exit and not use return() to exit. */
 
+	//(jhpark): end ipl recovery
+#ifdef UNIV_NVDIMM_IPL
+	fprintf(stderr, "[INFO] IPL recovery is finished!\n");
+	nvdimm_recv_running = false;
+#endif
 	os_thread_exit();
 
 	OS_THREAD_DUMMY_RETURN;
+	
 }
 
 /***********************************************************************//**

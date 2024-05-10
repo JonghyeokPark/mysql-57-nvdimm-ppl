@@ -788,6 +788,9 @@ fsp_init_file_page(
 	buf_block_t*	block,
 	mtr_t*		mtr)
 {
+#ifdef UNIV_NVDIMM_IPL
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)block);
+#endif
 	fsp_init_file_page_low(block);
 
 	ut_d(fsp_space_modify_check(block->page.id.space(), mtr));
@@ -1675,6 +1678,9 @@ fsp_fill_free_list(
 				mtr_t	ibuf_mtr;
 
 				mtr_start(&ibuf_mtr);
+#ifdef UNIV_NVDIMM_IPL
+				(&ibuf_mtr)->set_mtr_ipl_trx_id(mtr->get_mtr_ipl_trx_id());
+#endif
 				ibuf_mtr.set_named_space(space);
 
 				/* Avoid logging while truncate table
@@ -1698,7 +1704,7 @@ fsp_fill_free_list(
 					&ibuf_mtr);
 
 				buf_block_dbg_add_level(block, SYNC_FSP_PAGE);
-
+				
 				fsp_init_file_page(block, &ibuf_mtr);
 
 				ibuf_bitmap_page_init(block, &ibuf_mtr);
@@ -1881,6 +1887,7 @@ fsp_page_create(
 	buf_block_buf_fix_inc(block, __FILE__, __LINE__);
 
 	mutex_exit(&block->mutex);
+	// fprintf(stderr, "fsp_page_create fix_type: %d, fix_block: (%u, %u)\n", MTR_MEMO_PAGE_X_FIX, block->page.id.space(),block->page.id.page_no());
 	mtr_memo_push(init_mtr, block, rw_latch == RW_X_LATCH
 		      ? MTR_MEMO_PAGE_X_FIX : MTR_MEMO_PAGE_SX_FIX);
 

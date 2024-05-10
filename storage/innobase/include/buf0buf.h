@@ -40,6 +40,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "log0log.h"
 #include "srv0srv.h"
 #include <ostream>
+#include <tr1/unordered_map>
 
 
 // Forward declaration
@@ -1698,10 +1699,12 @@ public:
 # endif /* UNIV_DEBUG */
 #endif /* !UNIV_HOTBACKUP */
 
-/*UNIV_NVDIMM_IPL*/
+#ifdef UNIV_NVDIMM_IPL
 	unsigned char * static_ipl_pointer;
 	unsigned char * ipl_write_pointer;
 	unsigned char flags; // first bit: iplized_flag, second bit: normalize_flag, third bit: dirtifed_flag
+	trx_id_t trx_id;
+#endif
 };
 
 /** The buffer control block structure */
@@ -1710,6 +1713,8 @@ struct buf_block_t{
 
 	/** @name General fields */
 	/* @{ */
+
+
 
 	buf_page_t	page;		/*!< page information; this must
 					be the first field, so that
@@ -2075,11 +2080,40 @@ struct buf_buddy_stat_t {
 
 NOTE! The definition appears here only for other modules of this
 directory (buf) to see it. Do not use from outside! */
+#ifdef UNIV_NVDIMM_IPL
+namespace std {
+    namespace tr1 {
+        template <>
+        struct hash<page_id_t> {
+            size_t operator()(const page_id_t& key) const {
+                // space와 page_no를 해싱하여 해시 값을 반환합니다.
+                // 해싱 로직을 구현합니다.
+                size_t spaceHash = std::tr1::hash<ib_uint32_t>()(key.space());
+                size_t pageHash = std::tr1::hash<ib_uint32_t>()(key.page_no());
+
+                return spaceHash ^ pageHash;
+            }
+        };
+    }
+}
+#endif
 
 struct buf_pool_t{
 
 	/** @name General fields */
 	/* @{ */
+
+#ifdef UNIV_NVDIMM_IPL
+	std::tr1::unordered_map<page_id_t, unsigned char *> * ipl_look_up_table;
+	rw_lock_t lookup_table_lock;
+	std::queue<uint> * static_ipl_allocator;
+	std::queue<uint> * dynamic_ipl_allocator;
+	std::queue<uint> * second_dynamic_ipl_allocator;
+	ib_mutex_t static_allocator_mutex;
+ 	ib_mutex_t dynamic_allocator_mutex;
+	ib_mutex_t second_dynamic_allocator_mutex;
+#endif
+
 	BufPoolMutex	mutex;		/*!< Buffer pool mutex of this
 					instance */
 	BufPoolZipMutex	zip_mutex;	/*!< Zip mutex of this buffer

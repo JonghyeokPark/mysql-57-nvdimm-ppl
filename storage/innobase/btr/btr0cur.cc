@@ -317,16 +317,18 @@ btr_cur_latch_leaves(
 
 #ifdef UNIV_BTR_DEBUG
 		/* Sanity check only after both the blocks are latched. */
-		if (latch_leaves.blocks[0] != NULL) {
+		// ipl-undo
+	#ifdef UNIV_NVDIMM_IPL
+		if (latch_leaves.blocks[0] != NULL && !nvdimm_recv_running) {
 			ut_a(page_is_comp(latch_leaves.blocks[0]->frame)
 				== page_is_comp(page));
-
 			// fprintf(stderr, "btr_page_get_next: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_next(latch_leaves.blocks[0]->frame, mtr));
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
 			ut_a(btr_page_get_next(
 				latch_leaves.blocks[0]->frame, mtr)
 				== page_get_page_no(page));
 		}
+	#endif /* UNIV_NVDIMM_IPL */
 		ut_a(page_is_comp(get_block->frame) == page_is_comp(page));
 #endif /* UNIV_BTR_DEBUG */
 
@@ -350,12 +352,22 @@ btr_cur_latch_leaves(
 			latch_leaves.blocks[2] = get_block;
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(get_block->frame), page_get_page_no(get_block->frame));
 #ifdef UNIV_BTR_DEBUG
+			// ipl-undo
+	#ifdef UNIV_NVDIMM_IPL
+			if (!nvdimm_recv_running) {
+				ut_a(page_is_comp(get_block->frame)
+					== page_is_comp(page));
+				// fprintf(stderr, "btr_page_get_prev: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_prev(get_block->frame, mtr));
+				// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
+				ut_a(btr_page_get_prev(get_block->frame, mtr)
+					== page_get_page_no(page));
+			}
+	#else
 			ut_a(page_is_comp(get_block->frame)
 			     == page_is_comp(page));
-			// fprintf(stderr, "btr_page_get_prev: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_prev(get_block->frame, mtr));
-			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
 			ut_a(btr_page_get_prev(get_block->frame, mtr)
 			     == page_get_page_no(page));
+	#endif
 			
 #endif /* UNIV_BTR_DEBUG */
 			if (spatial) {
@@ -383,12 +395,19 @@ btr_cur_latch_leaves(
 			cursor->left_block = get_block;
 			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(get_block->frame), page_get_page_no(get_block->frame));
 #ifdef UNIV_BTR_DEBUG
-			// fprintf(stderr, "btr_page_get_next: (%lu, %lu)\n", page_get_space_id(get_block->frame), btr_page_get_next(get_block->frame, mtr));
-			// fprintf(stderr, "page_get_page_no: (%lu, %lu)\n",page_get_space_id(page), page_get_page_no(page));
+	#ifdef UNIV_NVDIMM_IPL
+			if (!nvdimm_recv_running) {
+				ut_a(page_is_comp(get_block->frame)
+					== page_is_comp(page));
+				ut_a(btr_page_get_next(get_block->frame, mtr)
+					== page_get_page_no(page));
+			}
+	#else
 			ut_a(page_is_comp(get_block->frame)
-			     == page_is_comp(page));
+				== page_is_comp(page));
 			ut_a(btr_page_get_next(get_block->frame, mtr)
-			     == page_get_page_no(page));
+				== page_get_page_no(page));
+	#endif
 #endif /* UNIV_BTR_DEBUG */
 		}
 
@@ -1306,8 +1325,14 @@ retry_page_get:
 	}
 
 	if (height == 0) {
-		if (rw_latch == RW_NO_LATCH) {
+#ifdef UNIV_NVDIMM_IPL
+    if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
+      //ib::info() << "we skip traveersing because it is a IPLed page";
+      return;
+    }
+#endif
 
+		if (rw_latch == RW_NO_LATCH) {
 			latch_leaves = btr_cur_latch_leaves(
 				block, page_id, page_size, latch_mode,
 				cursor, mtr);
@@ -1438,20 +1463,48 @@ retry_page_get:
 		}
 	} else if (height == 0 && btr_search_enabled
 		   && !dict_index_is_spatial(index)) {
-		/* The adaptive hash index is only used when searching
-		for leaf pages (height==0), but not in r-trees.
-		We only need the byte prefix comparison for the purpose
-		of updating the adaptive hash index. */
+	  
+#ifdef UNIV_NVDIMM_IPL
+		// (jhpark): ipl-undo
+		if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
+		//ib::info() << "we skip traveersing because it is a IPLed page";
+		} else {
+			
+			/* The adaptive hash index is only used when searching
+			for leaf pages (height==0), but not in r-trees.
+			We only need the byte prefix comparison for the purpose
+			of updating the adaptive hash index. */
+			page_cur_search_with_match_bytes(
+				block, index, tuple, page_mode, &up_match, &up_bytes,
+				&low_match, &low_bytes, page_cursor);
+		}
+#else
 		page_cur_search_with_match_bytes(
 			block, index, tuple, page_mode, &up_match, &up_bytes,
 			&low_match, &low_bytes, page_cursor);
+#endif
+
 	} else {
 		/* Search for complete index fields. */
+#ifdef UNIV_NVDIMM_IPL
+    	// (jhpark): ipl-undo
+		if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
+		//ib::info() << "we skip traveersing because it is a IPLed page";
+		} else {
+	
+			up_bytes = low_bytes = 0;
+			page_cur_search_with_match(
+				block, index, tuple, page_mode, &up_match,
+				&low_match, page_cursor,
+				need_path ? cursor->rtr_info : NULL);
+		}
+#else
 		up_bytes = low_bytes = 0;
 		page_cur_search_with_match(
 			block, index, tuple, page_mode, &up_match,
 			&low_match, page_cursor,
 			need_path ? cursor->rtr_info : NULL);
+#endif
 	}
 
 	if (estimate) {
@@ -2946,6 +2999,13 @@ btr_cur_ins_lock_and_undo(
 	rec_t*		rec;
 	roll_ptr_t	roll_ptr;
 
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_ins_lock_and mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
+
 	/* Check if we have to wait for a lock: enqueue an explicit lock
 	request if yes */
 
@@ -3084,6 +3144,12 @@ btr_cur_optimistic_insert(
 	ibool		inherit = TRUE;
 	ulint		rec_size;
 	dberr_t		err;
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_optimistic_insert mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 
 	*big_rec = NULL;
 
@@ -3311,6 +3377,10 @@ fail_err:
 		} else {
 			/* Decrement the bits in a separate
 			mini-transaction. */
+#ifdef UNIV_NVDIMM_IPL
+			// fprintf(stderr, "btr_cur_optimistic_insert mtr: %p, trx_id: %zu\n",mtr, thr_get_trx(thr)->id);
+			((buf_page_t *) block)->trx_id = thr_get_trx(thr)->id;
+#endif
 			ibuf_update_free_bits_if_full(
 				block, max_size,
 				rec_size + PAGE_DIR_SLOT_SIZE);
@@ -3358,6 +3428,12 @@ btr_cur_pessimistic_insert(
 	ibool		inherit = FALSE;
 	bool		success;
 	ulint		n_reserved	= 0;
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_pessimistic_insert mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 
 	ut_ad(dtuple_check_typed(entry));
 
@@ -3484,7 +3560,7 @@ btr_cur_pessimistic_insert(
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
 #endif
 
 	return(DB_SUCCESS);
@@ -3513,6 +3589,13 @@ btr_cur_upd_lock_and_undo(
 	dict_index_t*	index;
 	const rec_t*	rec;
 	dberr_t		err;
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_upd_lock_and_undo mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
+
 
 	ut_ad(thr != NULL || (flags & BTR_NO_LOCKING_FLAG));
 
@@ -3807,6 +3890,12 @@ btr_cur_update_in_place(
 	roll_ptr_t	roll_ptr	= 0;
 	ulint		was_delete_marked;
 	ibool		is_hashed;
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_update_in_place mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 
 	rec = btr_cur_get_rec(cursor);
 	index = cursor->index;
@@ -3970,6 +4059,12 @@ btr_cur_optimistic_update(
 	roll_ptr_t	roll_ptr;
 	ulint		i;
 	ulint		n_ext;
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_optimistic_update mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 
 	block = btr_cur_get_block(cursor);
 	page = buf_block_get_frame(block);
@@ -4289,6 +4384,12 @@ btr_cur_pessimistic_update(
 	ulint		n_reserved	= 0;
 	ulint		n_ext;
 	ulint		max_ins_size	= 0;
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_pessimistic_update mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 
 	*offsets = NULL;
 	*big_rec = NULL;
@@ -4661,13 +4762,7 @@ return_after_reservations:
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
-  // (jhpark): skip split/merge page from IPLization path
-//   nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
-//   if (nvdimm_ipl_lookup(btr_cur_get_block(cursor)->page.id)) {
-// 	fprintf(stderr, "splited update Page: (%lu, %lu)\n", btr_cur_get_block(cursor)->page.id.space(), btr_cur_get_block(cursor)->page.id.page_no());
-//     // nvdimm_ipl_erase(btr_cur_get_block(cursor)->page.id);
-//   }
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
 #endif
 
 
@@ -4822,6 +4917,12 @@ btr_cur_del_mark_set_clust_rec(
 	dberr_t		err;
 	page_zip_des_t*	page_zip;
 	trx_t*		trx;
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_del_mark_set_clust_rec mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 
 	ut_ad(dict_index_is_clust(index));
 	ut_ad(rec_offs_validate(rec, index, offsets));
@@ -4983,6 +5084,12 @@ btr_cur_del_mark_set_sec_rec(
 	buf_block_t*	block;
 	rec_t*		rec;
 	dberr_t		err;
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "btr_cur_del_mark_set_sec_rec mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 
 	block = btr_cur_get_block(cursor);
 	rec = btr_cur_get_rec(cursor);
@@ -5173,7 +5280,6 @@ btr_cur_optimistic_delete_func(
 			const ulint	max_ins
 				= page_get_max_insert_size_after_reorganize(
 					page, 1);
-
 			page_cur_delete_rec(btr_cur_get_page_cur(cursor),
 					    cursor->index, offsets, mtr);
 
@@ -5412,7 +5518,24 @@ return_after_reservations:
 	*err = DB_SUCCESS;
 
 	mem_heap_free(heap);
+#ifdef UNIV_NVDIMM_IPL
+	if(!ret) {
+		bool do_merge = btr_cur_compress_recommendation(cursor,mtr);
+		/* We are not allowed do merge because appropriate locks
+		are not taken while positioning the cursor. */
+		if (!allow_merge && do_merge) {
+			ib::info() << "Ignoring merge recommendation for page"
+				"as we could not predict it early .Page"
+				"number being\n" << page_get_page_no(page) <<
+				"Index name\n" << index->name;
+			ut_ad(false);
+		// (jhpark): we avoid merge b-tree due to IPLed pages in recvoery process
+		} else if (do_merge && !nvdimm_recv_running) {
 
+			ret = btr_cur_compress_if_useful(cursor, FALSE, mtr);
+		}
+	}
+#else
 	if(!ret) {
 		bool do_merge = btr_cur_compress_recommendation(cursor,mtr);
 		/* We are not allowed do merge because appropriate locks
@@ -5428,6 +5551,7 @@ return_after_reservations:
 			ret = btr_cur_compress_if_useful(cursor, FALSE, mtr);
 		}
 	}
+#endif
 
 	if (!srv_read_only_mode
 	    && page_is_leaf(page)
@@ -5446,7 +5570,7 @@ return_after_reservations:
 
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map(btr_cur_get_block(cursor)->page.id);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)(btr_cur_get_block(cursor)));
 #endif
 
 

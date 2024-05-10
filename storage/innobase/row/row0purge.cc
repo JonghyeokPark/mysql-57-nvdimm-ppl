@@ -145,7 +145,24 @@ row_purge_remove_clust_if_poss_low(
 
 	log_free_check();
 	mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+	// fprintf(stderr, "row_purge_remove_clust_if_poss_low mtr: %p trx_id: %zu\n",&mtr, node->trx_id);
+	(&mtr)->set_mtr_ipl_trx_id(node->trx_id);
+#endif
 	mtr.set_named_space(index->space);
+
+#ifdef UNIV_NVDIMM_IPL
+	// (jhpark): ipl-undo
+	if (node->pcur.btr_cur.page_cur.block != NULL) {
+		//ib::info() << "purge undo " << node->pcur.btr_cur.page_cur.block->page.id.space()
+		//					 << ":" << node->pcur.btr_cur.page_cur.block->page.id.page_no();
+		if( nvdimm_recv_running && recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {
+				goto func_exit;
+		}
+	} else {
+		//ib::info() << "purge undo, undo record of block is NULL";
+	}
+#endif
 
 	if (!row_purge_reposition_pcur(mode, node, &mtr)) {
 		/* The record was already removed. */

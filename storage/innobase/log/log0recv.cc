@@ -68,6 +68,10 @@ bool	recv_replay_file_ops	= true;
 #include "fut0lst.h"
 #endif /* !UNIV_HOTBACKUP */
 
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#endif
+
 /** Log records are stored in the hash table in chunks at most of this size;
 this must be less than UNIV_PAGE_SIZE as it is stored in the buffer pool */
 #define RECV_DATA_BLOCK_SIZE	(MEM_MAX_ALLOC_IN_BUF - sizeof(recv_data_t))
@@ -2423,6 +2427,144 @@ recv_recover_page_func(
 
 	recv = UT_LIST_GET_FIRST(recv_addr->rec_list);
 
+	// (jhpark): check IPLed page to require to prepare IPL apply 
+  // from WAL redo logs
+  // case1. recv->start_lsn < first IPLed LSN (static IPL lsn)
+  //  - we need to apply WAL redo log to apply IPL log
+  // case2. recv->start_lsn < last IPLed LSN
+  //  - 이런 경우가 있나?
+  // case3. page_lsn > recv->start_lsn  
+  //  - skip wal redo apply 
+
+#ifdef UNIV_NVDIMM_IPL
+  bool is_ipl = (recv_check_iplized(block->page.id) != NORMAL);
+
+	// (jhpark): calculate skipped apply count for IPL
+	//uint64_t tmp_cnt = 0;
+	//uint64_t total_len = UT_LIST_GET_LEN(recv_addr->rec_list);
+	//ipl_org_apply_cnt += total_len;
+	
+	while (recv) {
+
+    // (jhpark): ignore IPLed page (case 3)
+		if (is_ipl) {
+			//ib::info() << "IPled page apply redo logs! " <<block->page.id.space() << ":"
+			//					 << block->page.id.page_no() <<  " start_lsn: " 
+			//					 << recv->start_lsn <<" ipl_lsn: " << recv_get_first_ipl_lsn(block);
+
+			// ipl_lsn > WAL log : we can apply using IPL log only;
+			// do not consider WAL log
+			if (recv->start_lsn > recv_get_first_ipl_lsn(block)) {
+				//ib::info() << "now, we can skip the WAL redo log; becuase we keep previous log in our IPL region!";
+				//ipl_skip_apply_cnt += (total_len - tmp_cnt);
+				break;
+			}
+
+			if (recv->start_lsn < recv_get_first_ipl_lsn(block)) {
+				// now, we can apply the IPL log, no need to keep applying WAL log
+				//ib::info() << "now, we can skip the WAL redo log!";
+				//ipl_skip_apply_cnt += (total_len - tmp_cnt);
+				break;
+			}
+		}
+		//tmp_cnt++;
+	
+		end_lsn = recv->end_lsn;
+
+		ut_ad(end_lsn
+		      <= UT_LIST_GET_FIRST(log_sys->log_groups)->scanned_lsn);
+
+		if (recv->len > RECV_DATA_BLOCK_SIZE) {
+			/* We have to copy the record body to a separate
+			buffer */
+
+			buf = static_cast<byte*>(ut_malloc_nokey(recv->len));
+
+			recv_data_copy_to_buf(buf, recv);
+		} else {
+			buf = ((byte*)(recv->data)) + sizeof(recv_data_t);
+		}
+
+		if (recv->type == MLOG_INIT_FILE_PAGE) {
+			page_lsn = page_newest_lsn;
+
+			memset(FIL_PAGE_LSN + page, 0, 8);
+			memset(UNIV_PAGE_SIZE - FIL_PAGE_END_LSN_OLD_CHKSUM
+			       + page, 0, 8);
+
+			if (page_zip) {
+				memset(FIL_PAGE_LSN + page_zip->data, 0, 8);
+			}
+		}
+
+		/* If per-table tablespace was truncated and there exist REDO
+		records before truncate that are to be applied as part of
+		recovery (checkpoint didn't happen since truncate was done)
+		skip such records using lsn check as they may not stand valid
+		post truncate.
+		LSN at start of truncate is recorded and any redo record
+		with LSN less than recorded LSN is skipped.
+		Note: We can't skip complete recv_addr as same page may have
+		valid REDO records post truncate those needs to be applied. */
+		bool	skip_recv = false;
+		if (srv_was_tablespace_truncated(fil_space_get(recv_addr->space))) {
+			lsn_t	init_lsn =
+				truncate_t::get_truncated_tablespace_init_lsn(
+				recv_addr->space);
+			skip_recv = (recv->start_lsn < init_lsn);
+		}
+
+		/* Ignore applying the redo logs for tablespace that is
+		truncated. Post recovery there is fixup action that will
+		restore the tablespace back to normal state.
+		Applying redo at this stage can result in error given that
+		redo will have action recorded on page before tablespace
+		was re-inited and that would lead to an error while applying
+		such action. */
+		if (recv->start_lsn >= page_lsn
+		    && !srv_is_tablespace_truncated(recv_addr->space)
+		    && !skip_recv) {
+
+			lsn_t	end_lsn;
+
+			if (!modification_to_page) {
+
+				modification_to_page = TRUE;
+				start_lsn = recv->start_lsn;
+			}
+
+			DBUG_PRINT("ib_log",
+				   ("apply " LSN_PF ":"
+				    " %s len " ULINTPF " page %u:%u",
+				    recv->start_lsn,
+				    get_mlog_string(recv->type), recv->len,
+				    recv_addr->space,
+				    recv_addr->page_no));
+
+			recv_parse_or_apply_log_rec_body(
+				recv->type, buf, buf + recv->len,
+				recv_addr->space, recv_addr->page_no,
+				block, &mtr);
+
+			end_lsn = recv->start_lsn + recv->len;
+			mach_write_to_8(FIL_PAGE_LSN + page, end_lsn);
+			mach_write_to_8(UNIV_PAGE_SIZE
+					- FIL_PAGE_END_LSN_OLD_CHKSUM
+					+ page, end_lsn);
+
+			if (page_zip) {
+				mach_write_to_8(FIL_PAGE_LSN
+						+ page_zip->data, end_lsn);
+			}
+		}
+
+		if (recv->len > RECV_DATA_BLOCK_SIZE) {
+			ut_free(buf);
+		}
+
+		recv = UT_LIST_GET_NEXT(rec_list, recv);
+	}
+#else
 	while (recv) {
 		end_lsn = recv->end_lsn;
 
@@ -2520,6 +2662,8 @@ recv_recover_page_func(
 		recv = UT_LIST_GET_NEXT(rec_list, recv);
 	}
 
+#endif
+
 #ifdef UNIV_ZIP_DEBUG
 	if (fil_page_index_page_check(page)) {
 		page_zip_des_t*	page_zip = buf_block_get_page_zip(block);
@@ -2596,6 +2740,14 @@ recv_read_in_area(
 			mutex_enter(&(recv_sys->mutex));
 
 			if (recv_addr->state == RECV_NOT_PROCESSED) {
+#ifdef UNIV_NVDIMM_IPL				
+				if(recv_check_iplized(cur_page_id) != NORMAL && !recv_check_normal_flag_using_page_id(cur_page_id)){
+					recv_addr->state = RECV_PROCESSED;
+					recv_sys->n_addrs--;
+					mutex_exit(&(recv_sys->mutex));
+					continue;
+				}
+#endif				
 				recv_addr->state = RECV_BEING_READ;
 
 				page_nos[n] = page_no;
@@ -2711,6 +2863,15 @@ loop:
 					buf_block_dbg_add_level(
 						block, SYNC_NO_ORDER_CHECK);
 
+#ifdef UNIV_NVDIMM_IPL					
+					// (jhpark): recovery
+					// this is rare cases, somehow pages are fetched in the buffer pool
+					// without applying using IPL log
+					if (nvdimm_recv_running
+							&& recv_check_iplized(block->page.id) != NORMAL){
+						recv_ipl_apply(block);
+					}
+#endif					
 					recv_recover_page(FALSE, block);
 					mtr_commit(&mtr);
 				} else {
@@ -3848,6 +4009,84 @@ recv_group_scan_log_recs(
 	if (recv_sys->found_corrupt_log || recv_sys->found_corrupt_fs) {
 		DBUG_RETURN(false);
 	}
+// #ifdef UNIV_NVDIMM_IPL
+  
+//   // (jhpark): so far we scan from log files; now we read from persistent log buffer
+//   memcpy(log_sys->buf, nvdimm_info->nc_redo_start_pointer, log_sys->buf_size);
+
+//   fprintf(stderr, "[DEBUG] begin scan and parse persist redo log buffer size: %d\n", log_sys->buf_size);
+
+//   // parse current log buffer;
+//   // read from first secion of the redo log buffer
+  
+//   byte *log_block = log_sys->buf;
+//   ulint start_offset = log_block_get_first_rec_group(log_block);
+//   byte *nc_ptr = log_block + start_offset;
+
+//   byte* body;
+//   mlog_id_t type;
+//   ulint space, page_no;
+//   lsn_t old_lsn = recv_sys->recovered_lsn;
+//   lsn_t recovered_lsn;
+
+//   uint64_t nc_scanned_lsn  = 0;
+//   uint64_t nc_total_scanned_lsn = 0;
+
+//   for(;;) {
+
+// 	ulint nc_len = recv_parse_log_rec(
+// 		&type, nc_ptr, nc_ptr + (4*1024),
+// 		&space, &page_no, false, &body);
+
+// 	// LLL
+// 	ib::info() << "nc redo log : " << space 
+// 		<< ":" << page_no << " len: " << nc_len;
+
+// 	// jhpark: add parsing buffer
+// 	if (type != MLOG_MULTI_REC_END) {
+
+// 		if (space == 0) {
+// 		recv_add_to_hash_table(
+// 			type, space, page_no, body,
+// 			nc_ptr+nc_len, old_lsn,
+// 			recv_sys->recovered_lsn);   
+// 		}
+
+// 	}
+
+// 	if(nc_len == 0) {
+// 		log_block = nc_ptr;
+// 		ulint diff = 0;
+// 		if (nc_scanned_lsn > OS_FILE_LOG_BLOCK_SIZE) {
+// 		diff = nc_scanned_lsn - OS_FILE_LOG_BLOCK_SIZE;
+// 		nc_ptr = nc_ptr + log_block_get_first_rec_group(nc_ptr);
+// 		} else {
+// 		diff  = OS_FILE_LOG_BLOCK_SIZE - nc_scanned_lsn;
+// 		nc_ptr += (512-diff) + log_block_get_first_rec_group(nc_ptr);
+// 		}      
+
+// 		nc_total_scanned_lsn += nc_scanned_lsn;
+// 		nc_scanned_lsn = 0;
+// 	}
+
+// 	if (nc_scanned_lsn >= log_sys->buf_size) {
+// 		break;
+// 	}
+
+
+// 	nc_scanned_lsn += nc_len;    
+// 	nc_ptr += nc_len;
+// 	recovered_lsn = recv_calc_lsn_on_data_add(old_lsn, nc_len);
+// 	old_lsn = recovered_lsn;
+
+// 	// reset ptr info.
+
+//   } 
+
+//   recv_sys->found_corrupt_log = false;
+//   fprintf(stderr, "[DEBUG] finsish scan and parse persist redo log buffer size: %d\n", log_sys->buf_size);
+
+// #endif
 
 	DBUG_PRINT("ib_log", ("%s " LSN_PF
 			      " completed for log group " ULINTPF,

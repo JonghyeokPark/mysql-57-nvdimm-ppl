@@ -1896,6 +1896,12 @@ row_log_table_apply_delete(
 	}
 
 	mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "row_log_table_apply_delete mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 	mtr.set_named_space(index->space);
 	btr_pcur_open(index, old_pk, PAGE_CUR_LE,
 		      BTR_MODIFY_TREE | BTR_LATCH_FOR_DELETE,
@@ -2050,6 +2056,12 @@ row_log_table_apply_update(
 	}
 
 	mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "row_log_table_apply_update mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 	mtr.set_named_space(index->space);
 	btr_pcur_open(index, old_pk, PAGE_CUR_LE,
 		      BTR_MODIFY_TREE, &pcur, &mtr);
@@ -2315,6 +2327,12 @@ func_exit_committed:
 		}
 
 		mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+		if(thr != NULL){
+			// fprintf(stderr, "row_log_table_apply_update mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
+			(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+		}
+#endif
 		mtr.set_named_space(index->space);
 
 		if (ROW_FOUND != row_search_index_entry(

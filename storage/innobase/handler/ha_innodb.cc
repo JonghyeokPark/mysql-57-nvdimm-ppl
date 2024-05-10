@@ -412,6 +412,7 @@ static PSI_mutex_info all_innodb_mutexes[] = {
  #ifdef UNIV_NVDIMM_IPL
  	PSI_KEY(nvdimm_static_region_mutex),
 	PSI_KEY(nvdimm_dynamic_region_mutex),
+	PSI_KEY(nvdimm_second_dynamic_region_mutex),
 	PSI_KEY(ipl_map_mutex),
  #endif /* UNIV_NVDIMM_IPL */
 #  ifdef UNIV_DEBUG
@@ -20302,6 +20303,59 @@ static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl, srv_use_nvdimm_ipl,
 static MYSQL_SYSVAR_STR(nvdimm_home_dir, srv_nvdimm_home_dir,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
   "Path to NVDIMM-aware files.", NULL, NULL, NULL);
+
+static MYSQL_SYSVAR_ULONG(nvdimm_static_size, srv_nvdimm_static_size,
+  PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+  "The size of the Static PPL Overall size uses to on NVDIMM"
+  , NULL, NULL,
+  1024 * 1024 * 1024L, 1024 * 1024L,
+  UINT_MAX32, 0);
+
+static MYSQL_SYSVAR_ULONG(nvdimm_dynamic_size, srv_nvdimm_dynamic_size,
+  PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+  "The size of the Dynamic PPL Overall size uses to on NVDIMM"
+  , NULL, NULL,
+  1024 * 1024 * 1024L, 1024 * 1024L,
+  UINT_MAX32, 0);
+
+static MYSQL_SYSVAR_ULONG(nvdimm_sec_dynamic_size, srv_nvdimm_sec_dynamic_size,
+  PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+  "The size of the Second Dynamic PPL Overall size uses to on NVDIMM"
+  , NULL, NULL,
+  1024 * 1024 * 1024L, 1024 * 1024L,
+  UINT_MAX32, 0);
+
+static MYSQL_SYSVAR_ULONG(nvdimm_static_entry_size, srv_nvdimm_static_entry_size,
+  PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+  "Number of buffer pool instances for NVDIMM",
+  NULL, NULL, 256, 64, 2048, 0);
+
+static MYSQL_SYSVAR_ULONG(nvdimm_dynamic_entry_size, srv_nvdimm_dynamic_entry_size,
+  PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+  "Number of buffer pool instances for NVDIMM",
+  NULL, NULL, 256, 64, 8192, 0);
+
+static MYSQL_SYSVAR_ULONG(nvdimm_sec_dynamic_entry_size, srv_nvdimm_sec_dynamic_entry_size,
+  PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+  "Number of buffer pool instances for NVDIMM",
+  NULL, NULL, 2048, 64, 8192, 0);
+
+static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl_recovery, srv_use_nvdimm_ipl_recovery,
+  PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
+  "Enable NVDIMM IPL recovery mode (disabled by default).",
+  NULL, NULL, FALSE);
+
+// redo on nvdimm
+static MYSQL_SYSVAR_BOOL(use_nvdimm_redo, srv_use_nvdimm_redo,
+  PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
+  "Enable NVDIMM redo recovery mode (disabled by default)",
+  NULL, NULL, FALSE);
+
+// static MYSQL_SYSVAR_BOOL(use_nvdimm_dwb, srv_use_nvdimm_dwb,
+//   PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
+//   "Enable NVDIMM DWB (disabled by default).",
+//   NULL, NULL, FALSE);
+
 #endif
 
 static struct st_mysql_sys_var* innobase_system_variables[]= {
@@ -20480,6 +20534,15 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
 #ifdef UNIV_NVDIMM_IPL
 	MYSQL_SYSVAR(use_nvdimm_ipl),
 	MYSQL_SYSVAR(nvdimm_home_dir),
+	MYSQL_SYSVAR(nvdimm_static_size),
+	MYSQL_SYSVAR(nvdimm_dynamic_size),
+	MYSQL_SYSVAR(nvdimm_sec_dynamic_size),
+	MYSQL_SYSVAR(nvdimm_static_entry_size),
+	MYSQL_SYSVAR(nvdimm_dynamic_entry_size),
+	MYSQL_SYSVAR(nvdimm_sec_dynamic_entry_size),
+	MYSQL_SYSVAR(nvdimm_home_dir),
+	MYSQL_SYSVAR(use_nvdimm_ipl_recovery),
+	MYSQL_SYSVAR(use_nvdimm_redo),
 #endif
 
   NULL

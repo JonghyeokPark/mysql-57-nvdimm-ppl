@@ -47,6 +47,11 @@ extern os_event_t	buf_flush_event;
 
 class ut_stage_alter_t;
 
+void
+buf_flush_delete_from_flush_rbt(
+/*============================*/
+	buf_page_t*	bpage);
+
 /********************************************************************//**
 Remove a block from the flush list of modified blocks. */
 void
@@ -149,7 +154,8 @@ is not fast enough to keep pace with the workload.
 bool
 buf_flush_single_page_from_LRU(
 /*===========================*/
-	buf_pool_t*	buf_pool);	/*!< in/out: buffer pool instance */
+	buf_pool_t*	buf_pool,
+	ulint n_iterations);	/*!< in/out: buffer pool instance */
 /******************************************************************//**
 Waits until a flush batch of the given type ends */
 void
@@ -180,16 +186,6 @@ buf_flush_wait_batch_end_wait_only(
 This function should be called at a mini-transaction commit, if a page was
 modified in it. Puts the block to the list of modified blocks, if it not
 already in it. */
-UNIV_INLINE
-void
-buf_flush_note_modification(
-/*========================*/
-	buf_block_t*	block,		/*!< in: block which is modified */
-	lsn_t		start_lsn,	/*!< in: start lsn of the first mtr in a
-					set of mtr's */
-	lsn_t		end_lsn,	/*!< in: end lsn of the last mtr in the
-					set of mtr's */
-	FlushObserver*	observer);	/*!< in: flush observer */
 
 /********************************************************************//**
 This function should be called when recovery has modified a buffer page. */
@@ -299,6 +295,18 @@ writes! NOTE: buf_pool->mutex and buf_page_get_mutex(bpage) must be
 held upon entering this function, and they will be released by this
 function.
 @return TRUE if page was flushed */
+bool
+ipl_flush_page_and_try_neighbors(
+	buf_page_t*		bpage,
+	buf_flush_t		flush_type,
+	ulint			n_to_flush,
+	ulint*			count);
+ulint
+ipl_flush_try_neighbors(
+	const page_id_t&	page_id,
+	buf_flush_t		flush_type,
+	ulint			n_flushed,
+	ulint			n_to_flush);
 
 ibool
 buf_flush_ipl_clean_checkpointed_page(

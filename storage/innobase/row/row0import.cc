@@ -2423,7 +2423,7 @@ row_import_set_sys_max_row_id(
 
 		if (row_id >= dict_sys->row_id) {
 			dict_sys->row_id = row_id + 1;
-			dict_hdr_flush_row_id();
+			dict_hdr_flush_row_id(prebuilt->trx_id);
 		}
 
 		mutex_exit(&dict_sys->mutex);

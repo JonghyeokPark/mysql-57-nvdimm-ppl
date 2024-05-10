@@ -580,12 +580,6 @@ page_copy_rec_list_end_no_locks(
 	if (UNIV_LIKELY_NULL(heap)) {
 		mem_heap_free(heap);
 	}
-// #ifdef UNIV_NVDIMM_IPL
-// 	ib::info() << "page_copy_rec_list_end_no_locks: "
-// 		<< "block " << block->page.id
-// 		<< " new_block " << new_block->page.id;
-// 	nvdimm_ipl_add_split_merge_map(new_block->page.id);
-// #endif
 }
 
 #ifndef UNIV_HOTBACKUP
@@ -640,8 +634,8 @@ page_copy_rec_list_end(
 	mtr_log_t	log_mode = MTR_LOG_NONE;
 
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map(block->page.id);
-	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)block);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block);
 #endif
 
 	if (new_page_zip) {

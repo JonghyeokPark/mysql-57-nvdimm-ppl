@@ -504,30 +504,4 @@ struct mtr_buf_copy_t {
 	}
 };
 
-struct test_type{
-
-	byte * buffer;
-	ulint offset;
-	ulint log_size;
-
-	void init(ulint mtr_log_size){ // 추후 calloc 체킹 필요
-		buffer = (byte *)calloc(mtr_log_size, sizeof(char));
-		ut_d(!buffer);
-		offset = 0;
-		log_size = mtr_log_size;
-	}
-
-	bool operator()(const mtr_buf_t::block_t* block)
-	{
-		memcpy(buffer + offset, block->begin(), block->used());
-		offset += block->used();
-		return(true);
-	}
-	
-	void free_mem(){
-		free(buffer);
-	}
-
-};
-
 #endif /* dyn0buf_h */

@@ -1109,6 +1109,10 @@ trx_undo_truncate_end_func(
 
 	for (;;) {
 		mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+		// fprintf(stderr, "trx_undo_truncate_end_func mtr: %p, trx_id: %zu\n",&mtr, undo->trx_id);
+		(&mtr)->set_mtr_ipl_trx_id(undo->trx_id);
+#endif
 		if (noredo) {
 			mtr.set_log_mode(MTR_LOG_NO_REDO);
 			ut_ad(trx->rsegs.m_noredo.rseg == undo->rseg);
@@ -1780,6 +1784,10 @@ trx_undo_assign_undo(
 	ut_ad(mutex_own(&(trx->undo_mutex)));
 
 	mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+	// fprintf(stderr, "trx_undo_create mtr: %p, trx_id: %zu\n",&mtr, trx->id);
+	(&mtr)->set_mtr_ipl_trx_id(trx->id);
+#endif
 	if (&trx->rsegs.m_noredo == undo_ptr) {
 		mtr.set_log_mode(MTR_LOG_NO_REDO);;
 	} else {

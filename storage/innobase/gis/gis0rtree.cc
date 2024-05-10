@@ -1346,6 +1346,12 @@ rtr_ins_enlarge_mbr(
 	ulint*			offsets;
 	node_visit_t*		node_visit;
 	page_t*			page;
+#ifdef UNIV_NVDIMM_IPL
+	if(thr != NULL){
+		// fprintf(stderr, "rtr_ins_enlarge_mbr mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
+		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
+	}
+#endif
 
 	ut_ad(dict_index_is_spatial(index));
 

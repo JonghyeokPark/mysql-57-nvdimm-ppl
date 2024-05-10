@@ -1431,15 +1431,9 @@ func_exit:
 			: mlog_open_and_write_index(
 				mtr, page, index, type,
 				page_zip ? 1 : 0);
-
-		ulint		space;
-		ulint		offset;
-
-		space = mach_read_from_4(page + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
-		offset = mach_read_from_4(page + FIL_PAGE_OFFSET);
-		page_id_t page_id(space, offset);
-		nvdimm_ipl_add_split_merge_map(page_id);
-
+#ifdef UNIV_NVDIMM_IPL
+		nvdimm_ipl_add_split_merge_map((buf_page_t *) block);
+#endif
 		/* For compressed pages write the compression level. */
 		if (log_ptr && page_zip) {
 			mach_write_to_1(log_ptr, z_level);
@@ -1671,7 +1665,7 @@ btr_root_raise_and_insert(
 
 	/* Copy the records from root to the new page one by one. */
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map(new_block->page.id);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block);
 #endif
 
 	if (0
@@ -2494,8 +2488,14 @@ btr_insert_into_right_sibling(
 		insert buffer bitmap. */
 
 		if (next_block->page.size.is_compressed()) {
+#ifdef UNIV_NVDIMM_IPL
+			((buf_page_t *) next_block)->trx_id = mtr->get_mtr_ipl_trx_id();
+#endif
 			ibuf_update_free_bits_zip(next_block, mtr);
 		} else {
+#ifdef UNIV_NVDIMM_IPL
+			((buf_page_t *) next_block)->trx_id = mtr->get_mtr_ipl_trx_id();
+#endif
 			ibuf_update_free_bits_if_full(
 				next_block, max_size,
 				rec_offs_size(*offsets) + PAGE_DIR_SLOT_SIZE);
@@ -2646,11 +2646,8 @@ func_start:
 	btr_page_create(new_block, new_page_zip, cursor->index,
 			btr_page_get_level(page, mtr), mtr);
 #ifdef UNIV_NVDIMM_IPL
-	nvdimm_ipl_add_split_merge_map(new_block->page.id);
-	nvdimm_ipl_add_split_merge_map(block->page.id);
-	// if (nvdimm_ipl_lookup(block->page.id)) {
-	// 	nvdimm_ipl_erase(block->page.id);
-	// }
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)new_block);
+	nvdimm_ipl_add_split_merge_map((buf_page_t *)block);
 #endif
 	/* 3. Calculate the first record on the upper half-page, and the
 	first record (move_limit) on original page which ends up on the
@@ -3765,6 +3762,9 @@ retry:
 			never increase here.  Thus, it is safe to
 			write the bits accurately in a separate
 			mini-transaction. */
+#ifdef UNIV_NVDIMM_IPL	
+			((buf_page_t *) merge_block)->trx_id = mtr->get_mtr_ipl_trx_id();
+#endif
 			ibuf_update_free_bits_if_full(merge_block,
 						      UNIV_PAGE_SIZE,
 						      ULINT_UNDEFINED);

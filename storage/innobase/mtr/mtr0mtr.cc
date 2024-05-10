@@ -191,7 +191,6 @@ memo_slot_release(mtr_memo_slot_t* slot)
 		buf_block_t*	block;
 
 		block = reinterpret_cast<buf_block_t*>(slot->object);
-
 		buf_block_unfix(block);
 		buf_page_release_latch(block, slot->type);
 		break;
@@ -348,7 +347,6 @@ struct ReleaseBlocks {
 		buf_block_t*	block;
 
 		block = reinterpret_cast<buf_block_t*>(slot->object);
-
 		buf_flush_note_modification(block, m_start_lsn,
 					    m_end_lsn, m_flush_observer);
 	}
@@ -432,10 +430,21 @@ public:
 	@param[in]	len	number of bytes to write */
 	void finish_write(ulint len);
 
+#ifdef UNIV_NVDIMM_IPL
+  /** Write the mtr log (undo + redo of undo) record,and release the resorces */
+  void execute_nvm();
+#endif
+
 private:
 	/** Prepare to write the mini-transaction log to the redo log buffer.
 	@return number of bytes to write in finish_write() */
 	ulint prepare_write();
+
+#ifdef UNIV_NVDIMM_IPL
+	/** Prepare to write the mini-transaction log to the NVDIMM mtr log buffer.
+	@return number of bytes to write in finish_write() */
+	ulint prepare_write_nvm();
+#endif
 
 	/** true if it is a sync mini-transaction. */
 	bool			m_sync;
@@ -467,10 +476,9 @@ mtr_t::is_block_dirtied(const buf_block_t* block)
 	is only during write that the value is reset to 0. */
 	return(block->page.oldest_modification == 0);
 }
-
-static
+#ifdef UNIV_NVDIMM_IPL
 ulint
-recv_parse_log_rec(
+ipl_recv_parse_log_rec(
 	mlog_id_t*	type,
 	byte*		ptr,
 	byte*		end_ptr,
@@ -492,23 +500,6 @@ recv_parse_log_rec(
 		return(0);
 	}
 
-	switch (*ptr) {
-	case MLOG_MULTI_REC_END:
-	case MLOG_DUMMY_RECORD:
-		*type = static_cast<mlog_id_t>(*ptr);
-		return(1);
-	case MLOG_CHECKPOINT:
-		if (end_ptr < ptr + SIZE_OF_MLOG_CHECKPOINT) {
-			return(0);
-		}
-		*type = static_cast<mlog_id_t>(*ptr);
-		return(SIZE_OF_MLOG_CHECKPOINT);
-	case MLOG_MULTI_REC_END | MLOG_SINGLE_REC_FLAG:
-	case MLOG_DUMMY_RECORD | MLOG_SINGLE_REC_FLAG:
-	case MLOG_CHECKPOINT | MLOG_SINGLE_REC_FLAG:
-		return(0);
-	}
-
 	new_ptr = mlog_parse_initial_log_record(ptr, end_ptr, type, space,
 						page_no);
 	*body = new_ptr;
@@ -525,6 +516,7 @@ recv_parse_log_rec(
 	}
 	return(new_ptr - ptr);
 }
+#endif /* UNIV_NVDIMM_IPL */
 
 /** Write the block contents to the REDO log */
 struct mtr_write_log_t {
@@ -571,6 +563,11 @@ mtr_t::start(bool sync, bool read_only)
 	m_sync =  sync;
 
 	m_commit_lsn = 0;
+#ifdef UNIV_NVDIMM_IPL
+	mtr_ipl_start_ptr = NULL;
+	// mtr_ipl_before_log_count = 0;
+	mtr_ipl_trx_id = 0;
+#endif
 
 	new(&m_impl.m_log) mtr_buf_t();
 	new(&m_impl.m_memo) mtr_buf_t();
@@ -637,8 +634,16 @@ mtr_t::commit()
 
 		ut_ad(!srv_read_only_mode
 		      || m_impl.m_log_mode == MTR_LOG_NO_REDO);
-
+#ifdef UNIV_NVDIMM_IPL
+	if (srv_use_nvdimm_redo) {
+    	cmd.execute_nvm();
+	}
+	else{
 		cmd.execute();
+	}
+#else
+		cmd.execute();
+#endif
 	} else {
 		cmd.release_all();
 		cmd.release_resources();
@@ -866,167 +871,121 @@ mtr_t::release_page(const void* ptr, mtr_memo_type_t type)
 	/* The page was not found! */
 	ut_ad(0);
 }
-
-/* Add mtr_log to ipl using page_id
-   Get idea from log0recv.cc:recv_add_to_hash_table() */
-void 
-add_log_to_ipl(
-	mlog_id_t	type,		/*!< in: log record type */
-	ulint		space,		/*!< in: space id */
-	ulint		page_no,	/*!< in: page number */
-	byte*		body,		/*!< in: log record body */
-	byte*		rec_end)
+#ifdef UNIV_NVDIMM_IPL
+/** Prepare to write the mini-transaction log to the NVDIMM mtr log buffer.
+@return number of bytes to write in finish_write() */
+ulint
+mtr_t::Command::prepare_write_nvm()
 {
-	ulint			len;
-	const page_id_t	page_id(space, page_no);
-
-//leaf page만 거르기 위한 부분 추가.
-	buf_pool_t * buf_pool = buf_pool_get(page_id);
-	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
-	buf_block_t * buf_block = buf_page_get_block(buf_page);
-	ut_ad(buf_block != NULL);
-// page_is_leaf는 page_type만받기 때문에 위 과정을 통해서 page를 가져오는게 중요하다
-
-	ut_ad(type != MLOG_FILE_DELETE);
-	ut_ad(type != MLOG_FILE_CREATE2);
-	ut_ad(type != MLOG_FILE_RENAME2);
-	ut_ad(type != MLOG_FILE_NAME);
-	ut_ad(type != MLOG_DUMMY_RECORD);
-	ut_ad(type != MLOG_CHECKPOINT);
-	ut_ad(type != MLOG_INDEX_LOAD);
-	ut_ad(type != MLOG_TRUNCATE);
-
-	len = rec_end - body;
-
-	if(!is_system_or_undo_tablespace(space) && !nvdimm_ipl_is_split_or_merge_page(page_id)
-		&& page_is_leaf(buf_block->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
-		nvdimm_ipl_add(body, len, type, buf_page);
+	switch (m_impl->m_log_mode) {
+	case MTR_LOG_SHORT_INSERTS:
+		ut_ad(0);
+		/* fall through (write no redo log) */
+	case MTR_LOG_NO_REDO:
+	case MTR_LOG_NONE:
+		ut_ad(m_impl->m_log.size() == 0);
+		log_mutex_enter();
+		m_end_lsn = m_start_lsn = log_sys->lsn;
+		return(0);
+	case MTR_LOG_ALL:
+		break;
 	}
 
-	
+	ulint	len	= m_impl->m_log.size();
+	ulint	n_recs	= m_impl->m_n_log_recs;
+	ut_ad(len > 0);
+	ut_ad(n_recs > 0);
+	ut_ad(m_impl->m_n_log_recs == n_recs);
+
+	fil_space_t*	space = m_impl->m_user_space;
+	if (space != NULL && is_system_or_undo_tablespace(space->id)) {
+		/* Omit MLOG_FILE_NAME for predefined tablespaces. */
+		space = NULL;
+	}
+
+	if (fil_names_write_if_was_clean(space, m_impl->m_mtr)) {
+		/* This mini-transaction was the first one to modify
+		this tablespace since the latest checkpoint, so
+		some MLOG_FILE_NAME records were appended to m_log. */
+		ut_ad(m_impl->m_n_log_recs > n_recs);
+		mlog_catenate_ulint(
+			&m_impl->m_log, MLOG_MULTI_REC_END, MLOG_1BYTE);
+		len = m_impl->m_log.size();
+	} else {
+		/* This was not the first time of dirtying a
+		tablespace since the latest checkpoint. */
+
+		ut_ad(n_recs == m_impl->m_n_log_recs);
+
+		if (n_recs <= 1) {
+			ut_ad(n_recs == 1);
+
+			/* Flag the single log record as the
+			only record in this mini-transaction. */
+			*m_impl->m_log.front()->begin()
+				|= MLOG_SINGLE_REC_FLAG;
+		} else {
+			/* Because this mini-transaction comprises
+			multiple log records, append MLOG_MULTI_REC_END
+			at the end. */
+
+			mlog_catenate_ulint(
+				&m_impl->m_log, MLOG_MULTI_REC_END,
+				MLOG_1BYTE);
+			len++;
+		}
+	}
+
+// TODO(jhaprk): add checkpoint for mtr-logging 
+// check and attempt a checkpoint if exceeding capacity
+//	log_margin_checkpoint_age(len);
+
+	return(len);
 }
 
 /* Parse the sequential log to single mtr_log
    Get idea from log0recv.cc:recv_parse_log_recs() */
-bool
-my_recv_parse_log_recs(byte * start_ptr, ulint log_len)
+void
+my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 {
-	byte*		ptr;
 	byte*		end_ptr;
-	ulint 		offset = 0;
-	bool		single_rec;
 	ulint		len;
 	mlog_id_t	type;
 	ulint		space;
 	ulint		page_no;
 	byte*		body;
 	
-loop:
-	ptr = start_ptr + offset;
-	end_ptr = start_ptr + log_len;
+	end_ptr = ptr + log_len;
+
+  // (jhpark): recovery
+  if (nvdimm_recv_running) return;
 
 	if(ptr == end_ptr){
-		return false;
+		return ;
 	}
 
-	switch (*ptr)
-	{
-		case MLOG_CHECKPOINT:
-		case MLOG_DUMMY_RECORD:
-			single_rec = true;
-			break;
-		default:
-			single_rec = !!(*ptr & MLOG_SINGLE_REC_FLAG);
+	len = ipl_recv_parse_log_rec(&type, ptr, end_ptr, &space,
+					&page_no, true, &body);
+	if (len == 0) {
+		return;
 	}
-
-	if(single_rec){
-		len = recv_parse_log_rec(&type, ptr, end_ptr, &space,
-					 &page_no, true, &body);
-		// fprintf(stderr, "[single record for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
-		if (len == 0) {
-			return(false);
+	
+	const page_id_t	page_id(space, page_no);
+	buf_pool_t * buf_pool = buf_pool_get(page_id);
+	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
+	if(!is_system_or_undo_tablespace(space) && !get_flag(&(buf_page->flags), NORMALIZE)
+		&& page_is_leaf(((buf_block_t *)buf_page)->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
+		ulint log_len = (ptr + len) - body + APPLY_LOG_HDR_SIZE;
+		ulint rest_log_len = 0;
+		if(can_write_in_ipl(buf_page, log_len, &rest_log_len)){
+			nvdimm_ipl_add(body, log_len, type, buf_page, rest_log_len, trx_id);
 		}
-		offset += len;
-		switch(type){
-			case MLOG_DUMMY_RECORD:
-			case MLOG_CHECKPOINT:
-			case MLOG_FILE_NAME:
-			case MLOG_FILE_DELETE:
-			case MLOG_FILE_CREATE2:
-			case MLOG_FILE_RENAME2:
-			case MLOG_TRUNCATE:
-				break;
-			default:
-				add_log_to_ipl(type, space, page_no, body, ptr + len);
-				break;
+		else{
+			nvdimm_ipl_add_split_merge_map(buf_page);
 		}
 	}
-	else{
-
-		// for(;;){
-		// 	bool	only_mlog_file	= true;
-		// 	ulint	mlog_rec_len	= 0;
-
-		// 	len = recv_parse_log_rec(&type, ptr, end_ptr, &space, &page_no, false, &body);
-		// 	fprintf(stderr, "[first for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
-		// 	if (len == 0) {
-		// 		return(false);
-		// 	}
-		// 	if(type == MLOG_CHECKPOINT || (*ptr & MLOG_SINGLE_REC_FLAG)){
-		// 		return true;
-		// 	}
-		// 	if (type != MLOG_FILE_NAME && only_mlog_file == true) {
-		// 		only_mlog_file = false;
-		// 	}
-		// 	if (only_mlog_file) {
-		// 		mlog_rec_len += len;
-		// 		offset += len;
-		// 	}
-
-		// 	ptr += len;
-
-		// 	if (type == MLOG_MULTI_REC_END) {
-		// 		break;
-		// 	}
-		// }
-
-		// ptr = start_ptr + offset;
-		
-		for(;;){
-			len = recv_parse_log_rec(&type, ptr, end_ptr, &space, &page_no, false, &body);
-			// fprintf(stderr, "[second for loop] type: %u, ptr: %p, end_ptr: %p, space: %lu, page_no: %lu, body_ptr: %p len: %lu, log_len: %lu\n", type, ptr, end_ptr, space, page_no, body, len, log_len);
-
-			if (len == 0) { //corrput log인 경우는 베재해서 이 코드 작성
-				return(false);
-			}
-			
-			ut_a(len != 0); 
-
-			offset += len;
-			switch(type){
-				case MLOG_MULTI_REC_END:
-				/* Found the end mark for the records */
-					goto loop;
-				case MLOG_FILE_NAME:
-				case MLOG_FILE_DELETE:
-				case MLOG_FILE_CREATE2:
-				case MLOG_FILE_RENAME2:
-				case MLOG_INDEX_LOAD:
-				case MLOG_TRUNCATE:
-					/* These were already handled by
-					recv_parse_log_rec() and
-					recv_parse_or_apply_log_rec_body(). */
-					break;
-				default:
-					add_log_to_ipl(type, space, page_no, body, ptr + len);
-					break;
-			}
-			ptr += len;
-		}
-	}
-
-	goto loop;
 }
+#endif 
 
 /** Prepare to write the mini-transaction log to the redo log buffer.
 @return number of bytes to write in finish_write() */
@@ -1116,14 +1075,6 @@ mtr_t::Command::finish_write(
 	ut_ad(log_mutex_own());
 	ut_ad(m_impl->m_log.size() == len);
 	ut_ad(len > 0);
-
-	#ifdef UNIV_NVDIMM_IPL
-		test_type test;
-		test.init(m_impl->m_log.size());
-		m_impl->m_log.for_each_block(test);
-		my_recv_parse_log_recs(test.buffer, test.log_size);
-		test.free_mem();
-	#endif
 
 	if (m_impl->m_log.is_small()) {
 		const mtr_buf_t::block_t*	front = m_impl->m_log.front();
@@ -1219,6 +1170,139 @@ mtr_t::Command::execute()
 
 	release_resources();
 }
+
+#ifdef UNIV_NVDIMM_IPL
+void mtr_t::Command::execute_nvm() {
+  ut_ad(m_impl->m_log_mode != MTR_LOG_NONE);
+
+  // (jhpark): pull prepare_write() fucntion here
+  ulint len, n_recs;
+  fil_space_t*  space;
+
+  switch (m_impl->m_log_mode) {
+    case MTR_LOG_SHORT_INSERTS:
+      ut_ad(0);
+    /* fall through (write no redo log) */
+    case MTR_LOG_NO_REDO:
+    case MTR_LOG_NONE:
+      ut_ad(m_impl->m_log.size() == 0);
+      log_mutex_enter();
+      m_end_lsn = m_start_lsn = log_sys->lsn;
+      len = 0;
+      break;
+    case MTR_LOG_ALL:
+      break;
+  }
+
+  if (m_impl->m_log_mode == MTR_LOG_ALL) {
+    len = m_impl->m_log.size();
+    n_recs  = m_impl->m_n_log_recs;
+    ut_ad(len > 0);
+    ut_ad(n_recs > 0);
+
+    // (jhpark): call log_buffer_extend here!!!
+    if (len > log_sys->buf_size / 2) {
+      log_buffer_extend((len + 1) * 2);
+    }
+
+    ut_ad(m_impl->m_n_log_recs == n_recs);
+    space = m_impl->m_user_space;
+
+    if (space != NULL && is_system_or_undo_tablespace(space->id)) {
+      /* Omit MLOG_FILE_NAME for predefined tablespaces. */
+      space = NULL;
+    }
+
+    log_mutex_enter();
+
+	  if (fil_names_write_if_was_clean(space, m_impl->m_mtr)) {
+      /* This mini-transaction was the first one to modify
+      this tablespace since the latest checkpoint, so
+      some MLOG_FILE_NAME records were appended to m_log. */
+      ut_ad(m_impl->m_n_log_recs > n_recs);
+      mlog_catenate_ulint(
+        &m_impl->m_log, MLOG_MULTI_REC_END, MLOG_1BYTE);
+      len = m_impl->m_log.size();
+    } else {
+      /* This was not the first time of dirtying a
+      tablespace since the latest checkpoint. */
+
+      ut_ad(n_recs == m_impl->m_n_log_recs);
+
+    if (n_recs <= 1) {
+      ut_ad(n_recs == 1);
+
+      /* Flag the single log record as the
+      only record in this mini-transaction. */
+      *m_impl->m_log.front()->begin()
+        |= MLOG_SINGLE_REC_FLAG;
+    } else {
+      /* Because this mini-transaction comprises
+      multiple log records, append MLOG_MULTI_REC_END
+      at the end. */
+
+      mlog_catenate_ulint(
+        &m_impl->m_log, MLOG_MULTI_REC_END,
+        MLOG_1BYTE);
+      len++;
+    }
+   }
+
+   	/* check and attempt a checkpoint if exceeding capacity */
+    log_margin_checkpoint_age(len);
+  }
+
+  // (jhpark): end-of-prepare_write()
+  // (jhpark): pull finish_write()
+  if (len > 0) {
+    ut_ad(m_impl->m_log_mode == MTR_LOG_ALL);
+    ut_ad(log_mutex_own());
+    ut_ad(m_impl->m_log.size() == len);
+    ut_ad(len > 0);
+
+    if (m_impl->m_log.is_small()) {
+      const mtr_buf_t::block_t* front = m_impl->m_log.front();
+      ut_ad(len <= front->used());
+
+      m_end_lsn = log_reserve_and_write_fast(
+          front->begin(), len, &m_start_lsn);
+
+      if (m_end_lsn > 0) {
+        goto skip_redo;
+      }
+    }
+
+    /* Open the database log for log_write_low */
+    m_start_lsn = log_reserve_and_open(len);
+    mtr_write_log_t write_log;
+    m_impl->m_log.for_each_block(write_log);
+
+    m_end_lsn = log_close();
+  }
+  // (jhpark): end-of-finish_write()
+
+skip_redo:
+  if (m_impl->m_made_dirty) {
+    log_flush_order_mutex_enter();
+  }
+
+  /* It is now safe to release the log mutex because the
+  flush_order mutex will ensure that we are the first one
+  to insert into the flush list. */
+  log_mutex_exit();
+
+  m_impl->m_mtr->m_commit_lsn = m_end_lsn;
+
+  release_blocks();
+
+  if (m_impl->m_made_dirty) {
+    log_flush_order_mutex_exit();
+  }
+
+  release_latches();
+  release_resources();
+}
+#endif
 
 /** Release the free extents that was reserved using
 fsp_reserve_free_extents().  This is equivalent to calling

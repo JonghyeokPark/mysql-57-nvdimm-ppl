@@ -27,6 +27,7 @@ Created 12/7/1995 Heikki Tuuri
 #include "fsp0types.h"
 #include "mach0data.h"
 #include "trx0types.h"
+// #include "mtr0types.h"
 
 /********************************************************//**
 Opens a buffer to mlog. It must be closed with mlog_close.
@@ -43,11 +44,18 @@ mlog_open(
 
 	if (mtr_get_log_mode(mtr) == MTR_LOG_NONE
 	    || mtr_get_log_mode(mtr) == MTR_LOG_NO_REDO) {
-
 		return(NULL);
 	}
+#ifdef UNIV_NVDIMM_IPL
+	byte * mtr_ipl_start_pointer = mtr->get_log()->open(size);
+	mtr->set_mtr_ipl_start_pointer(mtr_ipl_start_pointer);
+	mtr->set_mtr_ipl_before_log_count(mtr->get_log_count());
 
+	return(mtr_ipl_start_pointer);
+#else
 	return(mtr->get_log()->open(size));
+#endif
+	
 }
 
 /********************************************************//**
@@ -60,9 +68,44 @@ mlog_close(
 	byte*	ptr)	/*!< in: buffer space from ptr up was not used */
 {
 	ut_ad(mtr_get_log_mode(mtr) != MTR_LOG_NONE);
-	ut_ad(mtr_get_log_mode(mtr) != MTR_LOG_NO_REDO);
-
+	ut_ad(mtr_get_log_mode(mtr) != MTR_LOG_NO_REDO);	
 	mtr->get_log()->close(ptr);
+#ifdef UNIV_NVDIMM_IPL
+	byte * mtr_ipl_start_pointer = mtr->get_mtr_ipl_start_pointer();
+	if(mtr_ipl_start_pointer != NULL && (mtr->get_mtr_ipl_before_log_count() + 1) == mtr->get_log_count()){
+		mlog_id_t type = (mlog_id_t) *mtr_ipl_start_pointer;
+		trx_id_t trx_id = mtr->get_mtr_ipl_trx_id();
+		// ulint		space;
+		// ulint		page_no;
+		// ipl_parse_initial_log_record(mtr_ipl_start_pointer, ptr, &type, &space, &page_no);
+		switch(type){
+			case MLOG_1BYTE:
+			case MLOG_2BYTES:
+			case MLOG_4BYTES:
+			case MLOG_8BYTES:
+			case MLOG_REC_SEC_DELETE_MARK:
+			case MLOG_WRITE_STRING:
+			case MLOG_IBUF_BITMAP_INIT:
+			case MLOG_COMP_REC_INSERT:
+			case MLOG_COMP_REC_CLUST_DELETE_MARK:
+			case MLOG_COMP_REC_UPDATE_IN_PLACE:
+			case MLOG_COMP_REC_DELETE:
+			case MLOG_INIT_FILE_PAGE2:
+			case MLOG_COMP_PAGE_CREATE:
+				my_recv_parse_log_recs(mtr_ipl_start_pointer, ptr - mtr_ipl_start_pointer, trx_id);
+				break;
+			default:
+				break;
+		}
+	}
+	// else{
+	// 	mlog_id_t type = (mlog_id_t) *mtr_ipl_start_pointer;
+	// 	ulint		space;
+	// 	ulint		page_no;
+	// 	ipl_parse_initial_log_record(mtr_ipl_start_pointer, ptr, &type, &space, &page_no);
+	// }
+	mtr->set_mtr_ipl_start_pointer(NULL);
+#endif
 }
 
 #ifndef UNIV_HOTBACKUP

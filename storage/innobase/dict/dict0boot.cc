@@ -146,7 +146,7 @@ dict_hdr_get_new_id(
 Writes the current value of the row id counter to the dictionary header file
 page. */
 void
-dict_hdr_flush_row_id(void)
+dict_hdr_flush_row_id(trx_id_t trx_id)
 /*=======================*/
 {
 	dict_hdr_t*	dict_hdr;
@@ -158,6 +158,9 @@ dict_hdr_flush_row_id(void)
 	id = dict_sys->row_id;
 
 	mtr_start(&mtr);
+#ifdef UNIV_NVDIMM_IPL
+	(&mtr)->set_mtr_ipl_trx_id(trx_id);
+#endif
 
 	dict_hdr = dict_hdr_get(&mtr);
 
