@@ -224,23 +224,22 @@ log_buffer_extend(
 	log_sys->buf_next_to_write -= move_start;
 #ifdef UNIV_NVDIMM_IPL
 	if (srv_use_nvdimm_redo) {
-    srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
-    log_sys->buf_size = LOG_BUFFER_SIZE;
+		srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
+		log_sys->buf_size = LOG_BUFFER_SIZE;
 
-    log_sys->buf_ptr = static_cast<byte*>(
-        ut_zalloc_nokey(log_sys->buf_size * 2 + OS_FILE_LOG_BLOCK_SIZE));
-    log_sys->buf = static_cast<byte*>(
-        ut_align(log_sys->buf_ptr, OS_FILE_LOG_BLOCK_SIZE));
-    
-    log_sys->first_in_use = true;
-    log_sys->max_buf_free = log_sys->buf_size / LOG_BUF_FLUSH_RATIO
-                - LOG_BUF_FLUSH_MARGIN;
+		log_sys->buf_ptr = static_cast<byte*>(
+			ut_zalloc_nokey(log_sys->buf_size * 2 + OS_FILE_LOG_BLOCK_SIZE));
+		log_sys->buf = static_cast<byte*>(
+			ut_align(log_sys->buf_ptr, OS_FILE_LOG_BLOCK_SIZE));
+		
+		log_sys->first_in_use = true;
+		log_sys->max_buf_free = log_sys->buf_size / LOG_BUF_FLUSH_RATIO
+					- LOG_BUF_FLUSH_MARGIN;
 
-    // update lsn
-    nc_redo_info->nc_lsn = log_sys->lsn;
-    nc_redo_info->nc_buf_free = log_sys->buf_free;
-    memcpy(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
-    flush_cache(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, sizeof(nc_redo_info));
+		// update lsn
+		nc_redo_info->nc_lsn = log_sys->lsn;
+		nc_redo_info->nc_buf_free = log_sys->buf_free;
+		memcpy_to_cxl(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
 	} else {
 		/* reallocate log buffer */
 		srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
@@ -473,8 +472,7 @@ part_loop:
 	}
 #ifdef UNIV_NVDIMM_IPL
 	if (srv_use_nvdimm_redo) {
-    ut_memcpy(log->buf + log->buf_free, str, len);
-    flush_cache(log->buf+log->buf_free, len);
+		memcpy_to_cxl(log->buf + log->buf_free, (void *)str, len);
 	} else {
 		ut_memcpy(log->buf + log->buf_free, str, len);
 	}
@@ -509,10 +507,9 @@ part_loop:
 	log->buf_free += len;
 #ifdef UNIV_NVDIMM_IPL
 	if (srv_use_nvdimm_redo) {
-    nc_redo_info->nc_lsn = log_sys->lsn;
-    nc_redo_info->nc_buf_free = log_sys->buf_free;
-    memcpy(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
-    flush_cache(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, sizeof(nc_redo_info));
+		nc_redo_info->nc_lsn = log_sys->lsn;
+		nc_redo_info->nc_buf_free = log_sys->buf_free;
+		memcpy_to_cxl(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
 	}
 #endif
 
@@ -849,6 +846,7 @@ void
 log_init(void)
 /*==========*/
 {
+		
 	log_sys = static_cast<log_t*>(ut_zalloc_nokey(sizeof(log_t)));
 
 	mutex_create(LATCH_ID_LOG_SYS, &log_sys->mutex);
@@ -867,17 +865,17 @@ log_init(void)
 	log_sys->buf_size = LOG_BUFFER_SIZE;
 
 #ifdef UNIV_NVDIMM_IPL
+	fprintf(stderr, "srv_use_nvdimm_redo: %d\n", srv_use_nvdimm_redo);
 	if (srv_use_nvdimm_redo) {
     // initialize nc_redo_info
-    nc_redo_info = static_cast<nc_redo_buf*> (malloc(sizeof(nc_redo_buf)));
-    nc_redo_info->nc_lsn = 0;
-    nc_redo_info->nc_buf_free = 0;
-    memcpy(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
-    flush_cache(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, sizeof(nc_redo_info));
+		nc_redo_info = static_cast<nc_redo_buf*> (malloc(sizeof(nc_redo_buf)));
+		nc_redo_info->nc_lsn = 0;
+		nc_redo_info->nc_buf_free = 0;
+		memcpy_to_cxl(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
 
-    log_sys->buf_ptr = static_cast<byte*>(nvdimm_info->nc_redo_start_pointer);
-    log_sys->buf = static_cast<byte*>(
-        ut_align(log_sys->buf_ptr, OS_FILE_LOG_BLOCK_SIZE));
+		log_sys->buf_ptr = static_cast<byte*>(nvdimm_info->nc_redo_start_pointer);
+		log_sys->buf = static_cast<byte*>(
+			ut_align(log_sys->buf_ptr, OS_FILE_LOG_BLOCK_SIZE));
 	} else {
 		log_sys->buf_ptr = static_cast<byte*>(
 			ut_zalloc_nokey(log_sys->buf_size * 2 + OS_FILE_LOG_BLOCK_SIZE));

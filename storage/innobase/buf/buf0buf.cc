@@ -1475,7 +1475,11 @@ buf_block_init(
 #endif /* PFS_SKIP_BUFFER_MUTEX_RWLOCK || PFS_GROUP_BUFFER_SYNC */
 
 	block->lock.is_block_lock = 1;
-
+	
+// in memory PPL structure 할당
+#ifdef UNIV_NVDIMM_IPL
+	new(&(block->in_memory_ppl_buf)) in_memory_ppl_buf_t();
+#endif
 	ut_ad(rw_lock_validate(&(block->lock)));
 }
 
@@ -1856,18 +1860,8 @@ buf_pool_init_instance(
 	buf_pool->ipl_look_up_table = new std::tr1::unordered_map<page_id_t, unsigned char*>;
 	buf_pool->ipl_look_up_table->clear();
 	rw_lock_create(ipl_map_mutex_key, &buf_pool->lookup_table_lock, SYNC_IPL_MAP_MUTEX);
-
-	buf_pool->static_ipl_allocator = new std::queue<uint>;
-	mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->static_allocator_mutex);
-	make_static_indirection_queue(buf_pool);
-
-	buf_pool->dynamic_ipl_allocator = new std::queue<uint>;
-	mutex_create(LATCH_ID_DYNAMIC_REGION, &buf_pool->dynamic_allocator_mutex);
-	make_dynamic_indirection_queue(buf_pool);
-
-	buf_pool->second_dynamic_ipl_allocator = new std::queue<uint>;
-	mutex_create(LATCH_ID_SECOND_DYNAMIC_REGION, &buf_pool->second_dynamic_allocator_mutex);
-	make_second_dynamic_indirection_queue(buf_pool);
+	// mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->static_allocator_mutex);
+	make_ppl_and_push_queue(buf_pool);
 #endif
 
 	buf_pool_mutex_exit(buf_pool);
@@ -1945,11 +1939,7 @@ buf_pool_free_instance(
 	free(buf_pool->ipl_look_up_table);
 	rw_lock_free(&buf_pool->lookup_table_lock);
 	free(buf_pool->static_ipl_allocator);
-	free(buf_pool->dynamic_ipl_allocator);
-	free(buf_pool->second_dynamic_ipl_allocator);
 	mutex_free(&buf_pool->static_allocator_mutex);
-	mutex_free(&buf_pool->dynamic_allocator_mutex);
-	mutex_free(&buf_pool->second_dynamic_allocator_mutex);
 #endif
 
 	buf_pool->allocator.~ut_allocator();
@@ -5896,7 +5886,7 @@ corrupt:
 	buf_page_monitor(bpage, io_type);
 
 #ifdef UNIV_NVDIMM_IPL
-	unsigned char *static_ipl_pointer, *dynamic_ipl_pointer, *second_dynamic_ipl_pointer;
+	unsigned char *static_ipl_pointer = NULL;
 	bool return_ipl = false;
 #endif
 	
@@ -5918,7 +5908,7 @@ corrupt:
 		//}
 
 		// (jhpark): recovery
-		if (!nvdimm_recv_running && get_flag(&(bpage->flags), IPLIZED)){
+		if (!nvdimm_recv_running && get_flag(&(bpage->flags), PPLIZED)){
 			buf_pool_mutex_exit(buf_pool);
 			set_apply_info_and_log_apply((buf_block_t*) bpage);
 			if (uncompressed) {
@@ -5943,27 +5933,16 @@ corrupt:
 		/* Write means a flush operation: call the completion
 		routine in the flush system */
 
-		// (jhpark): recovery
-		//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
-		//	recv_ipl_apply((buf_block_t*)bpage);
-		//}
-
 		buf_flush_write_complete(bpage);
-#ifdef UNIV_NVDIMM_IPL
-		second_dynamic_ipl_pointer = get_second_dynamic_ipl_pointer(bpage);
-		dynamic_ipl_pointer = get_dynamic_ipl_pointer(bpage);
-		static_ipl_pointer = bpage->static_ipl_pointer;
-		
-		// (jhpark): recovery
-		if (!nvdimm_recv_running) {
-			return_ipl = check_have_to_normalize_page_and_normalize(bpage, buf_page_get_flush_type(bpage));
-		}
-#endif
 		if (uncompressed) {
 			rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
 					      BUF_IO_WRITE);
 		}
-
+#ifdef UNIV_NVDIMM_IPL
+		((buf_block_t *)bpage)->in_memory_ppl_buf.erase();
+		static_ipl_pointer = bpage->static_ipl_pointer;
+		return_ipl = check_return_ppl_region(bpage);
+#endif
 		buf_pool->stat.n_pages_written++;
 
 		/* We decide whether or not to evict the page from the
@@ -5998,9 +5977,7 @@ corrupt:
 	buf_pool_mutex_exit(buf_pool);
 #ifdef UNIV_NVDIMM_IPL
 	if(!nvdimm_recv_running && return_ipl){
-		free_second_dynamic_address_to_indirection_queue(buf_pool, second_dynamic_ipl_pointer);
-		free_dynamic_address_to_indirection_queue(buf_pool, dynamic_ipl_pointer);
-		free_static_address_to_indirection_queue(buf_pool, static_ipl_pointer);
+		free_ppl_and_push_queue(buf_pool, static_ipl_pointer);
 	}
 #endif
 

@@ -774,20 +774,11 @@ buf_dblwr_update(
 	const buf_page_t*	bpage,	/*!< in: buffer block descriptor */
 	buf_flush_t		flush_type)/*!< in: flush type */
 {
-#ifdef UNIV_NVDIMM_IPL
-	if (!srv_use_doublewrite_buf
-	    || buf_dblwr == NULL
-	    || fsp_is_system_temporary(bpage->id.space())
-		|| check_not_flush_page((buf_page_t *)bpage, flush_type)) {
-		return;
-	}
-#else
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL
 	    || fsp_is_system_temporary(bpage->id.space())) {
 		return;
 	}
-#endif
 
 	ut_ad(!srv_read_only_mode);
 
@@ -1201,19 +1192,16 @@ try_again:
 		UNIV_MEM_ASSERT_RW(bpage->zip.data, bpage->size.physical());
 		/* Copy the compressed page and clear the rest. */
 
-		memcpy(p, bpage->zip.data, bpage->size.physical());
+		memcpy_to_cxl(p, bpage->zip.data, bpage->size.physical());
 
-		memset(p + bpage->size.physical(), 0x0,
+		memset_to_cxl(p + bpage->size.physical(), 0x0,
 		       univ_page_size.physical() - bpage->size.physical());
-		flush_cache(p, univ_page_size.physical() - bpage->size.physical());
 	} else {
 		ut_a(buf_page_get_state(bpage) == BUF_BLOCK_FILE_PAGE);
 
 		UNIV_MEM_ASSERT_RW(((buf_block_t*) bpage)->frame,
 				   bpage->size.logical());
-
-		memcpy(p, ((buf_block_t*) bpage)->frame, bpage->size.logical());
-		flush_cache(p,  bpage->size.logical());
+		memcpy_to_cxl(p, ((buf_block_t*) bpage)->frame, bpage->size.logical());
 	}
 #else
 	if (bpage->size.is_compressed()) {
@@ -1352,20 +1340,18 @@ retry:
 	bytes in the doublewrite page with zeros. */
 #ifdef UNIV_NVDIMM_IPL
 	if (bpage->size.is_compressed()) {
-		memcpy(buf_dblwr->write_buf + univ_page_size.physical() * i,
-		       bpage->zip.data, bpage->size.physical());
-
-		memset(buf_dblwr->write_buf + univ_page_size.physical() * i
-		       + bpage->size.physical(), 0x0,
-		       univ_page_size.physical() - bpage->size.physical());
-		flush_cache(buf_dblwr->write_buf,  bpage->size.physical());
+		memcpy_to_cxl(buf_dblwr->write_buf + univ_page_size.physical() * i,
+			bpage->zip.data, bpage->size.physical());
+		
+		memset_to_cxl(buf_dblwr->write_buf + univ_page_size.physical() * i
+			+ bpage->size.physical(), 0x0,
+			univ_page_size.physical() - bpage->size.physical());
 	} else {
 		// nvdimm은 fil_io를 할 필요가 없음
 		// 그리고, 압축되지 않았기 때문에, 물리 page 그대로 nvdimm dwb에 그대로 복사해서 넣어주기
-		memcpy(buf_dblwr->write_buf + univ_page_size.physical() * offset,
-           (void*) ((buf_block_t*) bpage)->frame,
-           bpage->size.physical());
-		flush_cache(buf_dblwr->write_buf + univ_page_size.physical() * offset, bpage->size.physical());
+		memcpy_to_cxl(buf_dblwr->write_buf + univ_page_size.physical() * offset,
+			(void*) ((buf_block_t*) bpage)->frame,
+			bpage->size.physical());
 	}
 
 	/* Now flush the doublewrite buffer data to disk */

@@ -18,18 +18,17 @@ std::tr1::unordered_map<page_id_t, uint64_t> ipl_recv_map;
 // anlayze the IPL region for reconstructing 
 void recv_ipl_parse_log() {
 
-	fprintf(stderr, "[DEBUG] printf_nvidmm_info: static_page_size: %lu dynamic_page_size: %lu\n"
-			 , nvdimm_info->static_ipl_per_page_size
-			 , nvdimm_info->dynamic_ipl_per_page_size);	
+	fprintf(stderr, "[DEBUG] printf_nvidmm_info: static_page_size: %lu\n"
+			 , nvdimm_info->each_ppl_size);	
 
 	uint64_t space_no = -1, page_no = -1, dynamic_addr= -1;
 	nvdimm_recv_ptr = nvdimm_ptr;
 
 	// step1. Read the IPL region from the begining of NVDIMM
-	byte hdr[IPL_LOG_HEADER_SIZE];
-	for (uint64_t i = 0; i < nvdimm_info->static_ipl_size; i+= nvdimm_info->static_ipl_per_page_size) {
+	byte hdr[IPL_HDR_SIZE];
+	for (uint64_t i = 0; i < nvdimm_info->overall_ppl_size; i+= nvdimm_info->each_ppl_size) {
 		// step2. Get the header information
-		memcpy(hdr, nvdimm_recv_ptr + i, IPL_LOG_HEADER_SIZE);
+		memcpy(hdr, nvdimm_recv_ptr + i, IPL_HDR_SIZE);
 		space_no = mach_read_from_4(hdr);
 		page_no = mach_read_from_4(hdr + 4);
 	
@@ -38,7 +37,7 @@ void recv_ipl_parse_log() {
 		// SDIPL > DIPL > SIPL 순으로, 삭제되기 때문에 normalize가 되어도 SDIPL이 있을 수 있다.
 		// 따라서, normalize flag를 확인해서 IPLed 페이지 해제함.
     /*
-		if(get_flag(nvdimm_recv_ptr + i + IPL_FLAG_OFFSET, NORMALIZE)) {
+		if(get_flag(nvdimm_recv_ptr + i + IPL_HDR_FLAG, NORMALIZE)) {
 			fprintf(stderr, "(%u,%u) is ipled but become normailze at crash\n"
 							, space_no, page_no);
 			continue;
@@ -61,7 +60,7 @@ void recv_ipl_parse_log() {
 		// 											mach_read_from_4(dynamic_pointer), 
 		// 											nvdimm_info->second_dynamic_ipl_per_page_size);
 		// }
-		// ppl_length = mach_read_from_4(hdr+IPL_LENGTH_OFFSET);
+		// ppl_length = mach_read_from_4(hdr+IPL_HDR_LEN);
 		// fprintf(stderr,"PPL_INFO,%lu,%lu,%d,%d,%zu\n", space, ppl_length, (dynamic_pointer != NULL), (second_dynamic_pointer != NULL), page_lsn);
 
 // 
@@ -91,7 +90,7 @@ RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id) {
 		uint64_t addr = recv_iter->second;
 		real_size = recv_ipl_get_len(nvdimm_recv_ptr + addr);
 		ipl_index = mach_read_from_4(nvdimm_recv_ptr + addr 
-																				+ DYNAMIC_ADDRESS_OFFSET);
+																				+ IPL_HDR_DYNAMIC_INDEX);
 
 		unsigned char* dynamic_start_pointer = get_addr_from_ipl_index(
 										nvdimm_info->dynamic_start_pointer
@@ -126,7 +125,7 @@ void recv_ipl_apply(buf_block_t* block) {
 
 		// static ipl address and length
 		apply_info.static_start_pointer = nvdimm_recv_ptr + addr;		
-		apply_info.ipl_log_length = mach_read_from_4(nvdimm_recv_ptr + addr + IPL_LENGTH_OFFSET);
+		apply_info.ipl_log_length = mach_read_from_4(nvdimm_recv_ptr + addr + IPL_HDR_LEN);
 
 		page_lsn = recv_ipl_get_lsn(nvdimm_recv_ptr + addr);
 		real_size = recv_ipl_get_wp(nvdimm_recv_ptr + addr);
@@ -140,7 +139,7 @@ void recv_ipl_apply(buf_block_t* block) {
 		}
 		// dyanmic ipl address
 		uint ipl_index = mach_read_from_4(apply_info.static_start_pointer 
-																				+ DYNAMIC_ADDRESS_OFFSET);
+																				+ IPL_HDR_DYNAMIC_INDEX);
 
 		unsigned char* dynamic_start_pointer = get_addr_from_ipl_index(
 										nvdimm_info->dynamic_start_pointer
@@ -234,26 +233,26 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 
 	offset = 0;
 	apply_buffer_size = 0;
-	sipl_size = nvdimm_info->static_ipl_per_page_size - IPL_LOG_HEADER_SIZE;
+	sipl_size = nvdimm_info->each_ppl_size - IPL_HDR_SIZE;
 	dipl_size = nvdimm_info->dynamic_ipl_per_page_size - DIPL_HEADER_SIZE;
 
 	// step1. second DIPL, first DIPL, SIPL apply인지 판별
 	// if(apply_info->second_dynamic_start_pointer != NULL) {
 	if (apply_info->ipl_log_length > 
-			nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size) {
+			nvdimm_info->each_ppl_size + nvdimm_info->dynamic_ipl_per_page_size) {
 
 		ib::info() << apply_info->block->page.id.space() << ":" << apply_info->block->page.id.page_no()
 							<< " SDIPL!!!";
 
 		// step2. SIPL, first DIPL, second DIPL 순서로 copy 연결
 		sdipl_size = apply_info->ipl_log_length 
-								- nvdimm_info->static_ipl_per_page_size 
+								- nvdimm_info->each_ppl_size 
 								- nvdimm_info->dynamic_ipl_per_page_size;
 
 		apply_buffer_size = sipl_size + dipl_size + sdipl_size;
 
 		unsigned char temp_mtr_buffer [apply_buffer_size] = {NULL, };
-		memcpy(temp_mtr_buffer, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,sipl_size);
+		memcpy(temp_mtr_buffer, apply_info->static_start_pointer + IPL_HDR_SIZE ,sipl_size);
 		offset += sipl_size;
 		
 		memcpy(temp_mtr_buffer + offset
@@ -277,14 +276,14 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 
 		return true;
 	
-	} else if (apply_info->ipl_log_length > nvdimm_info->static_ipl_per_page_size) {
+	} else if (apply_info->ipl_log_length > nvdimm_info->each_ppl_size) {
 dipl_apply:	
 		// step2. SIPL, 1st DIPL 순서대로 copy 후 연결
-		dipl_size = apply_info->ipl_log_length - nvdimm_info->static_ipl_per_page_size;
+		dipl_size = apply_info->ipl_log_length - nvdimm_info->each_ppl_size;
 		apply_buffer_size = sipl_size + dipl_size;
 
 		unsigned char temp_mtr_buffer [apply_buffer_size] = {NULL, };
-		memcpy(temp_mtr_buffer, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE ,sipl_size);
+		memcpy(temp_mtr_buffer, apply_info->static_start_pointer + IPL_HDR_SIZE ,sipl_size);
 		offset += sipl_size;
 		memcpy(temp_mtr_buffer + offset
 						, apply_info->dynamic_start_pointer + DIPL_HEADER_SIZE
@@ -308,7 +307,7 @@ dipl_apply:
 sipl_apply:
 		// step 3. IPL log apply
 
-		sipl_size = apply_info->ipl_log_length - IPL_LOG_HEADER_SIZE;
+		sipl_size = apply_info->ipl_log_length - IPL_HDR_SIZE;
 
 /*
 		// (jhpark): this is 2nd DIPL case, but we use only real_size
@@ -320,7 +319,7 @@ sipl_apply:
 			dipl_size = real_size;
 		} else if (real_size < sipl_size) {
 			// within the sipl area
-			sipl_size = real_size - IPL_LOG_HEADER_SIZE;
+			sipl_size = real_size - IPL_HDR_SIZE;
 		} else {
 			ib::info() << "error!";
 		}
@@ -338,8 +337,8 @@ sipl_apply:
                   , apply_info->block->page.id.page_no());
 
 
-		recv_ipl_log_apply(apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE
-											, apply_info->static_start_pointer + IPL_LOG_HEADER_SIZE + sipl_size
+		recv_ipl_log_apply(apply_info->static_start_pointer + IPL_HDR_SIZE
+											, apply_info->static_start_pointer + IPL_HDR_SIZE + sipl_size
 											, apply_info, temp_mtr);
 						
 	}
@@ -382,17 +381,17 @@ void recv_ipl_log_apply(byte * start_ptr, byte * end_ptr
 	// step4. IPL apply 완료 후, apply_ptr 기준으로 write_ptr 재설정
 	//if (apply_info->second_dynamic_start_pointer != NULL) {
 	if (apply_info->ipl_log_length >
-			nvdimm_info->static_ipl_per_page_size + nvdimm_info->dynamic_ipl_per_page_size) {
+			nvdimm_info->each_ppl_size + nvdimm_info->dynamic_ipl_per_page_size) {
 		apply_info->block->page.ipl_write_pointer =
 					apply_info->second_dynamic_start_pointer 
 					+ (apply_info->ipl_log_length 
-							- nvdimm_info->static_ipl_per_page_size
+							- nvdimm_info->each_ppl_size
 							- nvdimm_info->dynamic_ipl_per_page_size);
 	} else if (apply_info->ipl_log_length 
-						> nvdimm_info->static_ipl_per_page_size){
+						> nvdimm_info->each_ppl_size){
 		apply_info->block->page.ipl_write_pointer = 
 					apply_info->dynamic_start_pointer 
-					+ (apply_info->ipl_log_length - nvdimm_info->static_ipl_per_page_size);
+					+ (apply_info->ipl_log_length - nvdimm_info->each_ppl_size);
 	} else {
 		apply_info->block->page.ipl_write_pointer = 
 					apply_info->static_start_pointer 
@@ -416,7 +415,7 @@ bool recv_check_normal_flag(buf_block_t* block) {
 	std::tr1::unordered_map<page_id_t, uint64_t >::iterator recv_iter;
 	recv_iter = ipl_recv_map.find(block->page.id);
 	uint64_t addr = recv_iter->second;
-	return get_flag(nvdimm_recv_ptr + addr + IPL_FLAG_OFFSET, NORMALIZE);
+	return get_flag(nvdimm_recv_ptr + addr + IPL_HDR_FLAG, NORMALIZE);
 }
 
 lsn_t recv_get_first_ipl_lsn(buf_block_t* block) {
@@ -430,7 +429,7 @@ bool recv_check_normal_flag_using_page_id(page_id_t page_id) {
 	std::tr1::unordered_map<page_id_t, uint64_t >::iterator recv_iter;
 	recv_iter = ipl_recv_map.find(page_id);
 	uint64_t addr = recv_iter->second;
-	return get_flag(nvdimm_recv_ptr + addr + IPL_FLAG_OFFSET, NORMALIZE);
+	return get_flag(nvdimm_recv_ptr + addr + IPL_HDR_FLAG, NORMALIZE);
 }
 
 lsn_t recv_get_first_ipl_lsn_using_page_id(page_id_t page_id) {

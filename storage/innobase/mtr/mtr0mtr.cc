@@ -635,8 +635,8 @@ mtr_t::commit()
 		ut_ad(!srv_read_only_mode
 		      || m_impl.m_log_mode == MTR_LOG_NO_REDO);
 #ifdef UNIV_NVDIMM_IPL
-	if (srv_use_nvdimm_redo) {
-    	cmd.execute_nvm();
+	if(srv_use_nvdimm_redo){
+		cmd.execute_nvm();
 	}
 	else{
 		cmd.execute();
@@ -976,13 +976,7 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 	if(!is_system_or_undo_tablespace(space) && !get_flag(&(buf_page->flags), NORMALIZE)
 		&& page_is_leaf(((buf_block_t *)buf_page)->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
 		ulint log_len = (ptr + len) - body + APPLY_LOG_HDR_SIZE;
-		ulint rest_log_len = 0;
-		if(can_write_in_ipl(buf_page, log_len, &rest_log_len)){
-			nvdimm_ipl_add(body, log_len, type, buf_page, rest_log_len, trx_id);
-		}
-		else{
-			nvdimm_ipl_add_split_merge_map(buf_page);
-		}
+		nvdimm_ipl_add(body, log_len, type, buf_page, trx_id);
 	}
 }
 #endif 

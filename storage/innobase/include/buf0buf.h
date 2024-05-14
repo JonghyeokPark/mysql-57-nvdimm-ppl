@@ -41,7 +41,12 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0srv.h"
 #include <ostream>
 #include <tr1/unordered_map>
+#include "../../boost/boost_1_59_0/boost/lockfree/queue.hpp"
 
+#ifdef UNIV_NVDIMM_IPL
+#define IN_MEMORY_PPL_BUF_MAX_SIZES 4096
+typedef dyn_buf_t<IN_MEMORY_PPL_BUF_MAX_SIZES> in_memory_ppl_buf_t;
+#endif
 
 // Forward declaration
 struct fil_addr_t;
@@ -1872,6 +1877,10 @@ struct buf_block_t{
 					mutex in InnoDB-5.1 to relieve
 					contention on the buffer pool mutex */
 #endif /* !UNIV_HOTBACKUP */
+
+#ifdef UNIV_NVDIMM_IPL
+	in_memory_ppl_buf_t in_memory_ppl_buf;
+#endif
 };
 
 /** Check if a buf_block_t object is in a valid state
@@ -2106,12 +2115,8 @@ struct buf_pool_t{
 #ifdef UNIV_NVDIMM_IPL
 	std::tr1::unordered_map<page_id_t, unsigned char *> * ipl_look_up_table;
 	rw_lock_t lookup_table_lock;
-	std::queue<uint> * static_ipl_allocator;
-	std::queue<uint> * dynamic_ipl_allocator;
-	std::queue<uint> * second_dynamic_ipl_allocator;
+	boost::lockfree::queue<uint> * static_ipl_allocator;
 	ib_mutex_t static_allocator_mutex;
- 	ib_mutex_t dynamic_allocator_mutex;
-	ib_mutex_t second_dynamic_allocator_mutex;
 #endif
 
 	BufPoolMutex	mutex;		/*!< Buffer pool mutex of this

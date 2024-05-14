@@ -8,28 +8,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
-
 #include <string.h>
 #include <stdint.h>
 #include <assert.h>
 #include <unistd.h>
 #include <cassert>
 #include <iostream>
-#include "buf0buf.h"
 #include <queue>
 #include <time.h>
 #include <vector>
-
-// TDOO(jhpark): make this variable configurable
-
-#ifdef UNIV_NVDIMM_IPL
 #include <time.h>
 #include <sys/time.h>
+#include "buf0buf.h"
+#include "dyn0buf.h"
 extern struct timeval start, end;
-#endif
 
 #define NVDIMM_MMAP_FILE_NAME         			"nvdimm_mmap_file"
 #define NVDIMM_MMAP_MAX_FILE_NAME_LENGTH    10000
+#define CXL_SIMULATION_DELAY 500 // 500ns
 
 #define NVDIMM_INFO_PRINT(fmt, args...)              \
   fprintf(stderr, "[NVDIMM_INFO]: %s:%d:%s():" fmt,  \
@@ -85,17 +81,9 @@ extern int nvdimm_fd;
 extern time_t my_start;
 
 /*IPL allocation*/
-void make_static_indirection_queue(buf_pool_t * buf_pool);
-unsigned char * alloc_static_address_from_indirection_queue(buf_pool_t * buf_pool);
-void free_static_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr);
-
-void make_dynamic_indirection_queue(buf_pool_t * buf_pool);
-unsigned char * alloc_dynamic_address_from_indirection_queue(buf_pool_t * buf_pool);
-void free_dynamic_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr);
-
-void make_second_dynamic_indirection_queue(buf_pool_t * buf_pool);
-unsigned char * alloc_second_dynamic_address_from_indirection_queue(buf_pool_t * buf_pool);
-void free_second_dynamic_address_to_indirection_queue(buf_pool_t * buf_pool, unsigned char * addr);
+void make_ppl_and_push_queue(buf_pool_t * buf_pool);
+unsigned char * alloc_ppl_from_queue(buf_pool_t * buf_pool);
+void free_ppl_and_push_queue(buf_pool_t * buf_pool, unsigned char * addr);
 
 unsigned char * get_addr_from_ipl_index(unsigned char * start_ptr, uint index, uint64_t ipl_per_page_size);
 uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr, uint64_t ipl_per_page_size);
@@ -103,34 +91,22 @@ uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr
 /* IPL mapping */
 bool make_static_and_dynamic_ipl_region
         ( ulint number_of_buf_pool, 
-          ulint srv_nvdimm_static_size, 
-          ulint srv_nvdimm_dynamic_size,
-          ulint srv_nvdimm_sec_dynamic_size,
-          ulint srv_nvdimm_static_entry_size,
-          ulint srv_nvdimm_dynamic_entry_size,
-          ulint srv_nvdimm_sec_dynamic_entry_size);
+          ulonglong nvdimm_overall_ppl_size,
+          ulint nvdimm_each_ppl_size);
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size);
 void nvdimm_free(const uint64_t pool_size);
 
 
 /* space (4) | page_no (4) | First_Dynamic_index (4) | length (4) | LSN (8) | Normalize Flag(1) | mtr_log | mtr_log | ... */
-#define PAGE_NO_OFFSET 4UL
-#define DYNAMIC_ADDRESS_OFFSET 8UL
-#define IPL_LENGTH_OFFSET 12UL
-#define IPL_PAGE_LSN_OFFSET 16UL
-#define IPL_FLAG_OFFSET 24UL
-#define IPL_FLAG_FLUSH_MARK	25UL
-#define IPL_LOG_HEADER_SIZE 29UL
-
 /* IPL_LOG_HEADER OFFSET */
 #define IPL_HDR_SPACE							0
 #define IPL_HDR_PAGE							4
-#define IPL_HDR_DYNAMIC_INDEX			8
+#define IPL_HDR_DYNAMIC_INDEX					8
 #define IPL_HDR_LEN								12
 #define IPL_HDR_LSN								16	
 #define IPL_HDR_FLAG							24
-#define IPL_HDR_FLUSH_MARK				25
-
+#define IPL_HDR_FLUSH_MARK						25
+#define IPL_HDR_SIZE							29
 
 /* Second_Dynamic_index (4) | mtr_log | ... */
 #define DIPL_HEADER_SIZE 4UL
@@ -141,20 +117,19 @@ void nvdimm_free(const uint64_t pool_size);
 
 
 enum ipl_flag {
-  IPLIZED = 1,
+  PPLIZED = 1,
   NORMALIZE = 2,
   DIRTIFIED = 4,
-  IN_LOOK_UP = 8,
-  SECOND_DIPL = 16
+  IN_LOOK_UP = 8
 };
 
 typedef struct NVDIMM_SYSTEM
 {
   unsigned char* static_start_pointer;
-  uint64_t static_ipl_size;
-  uint64_t static_ipl_per_page_size;
+  uint64_t overall_ppl_size;
+  uint64_t each_ppl_size;
   uint64_t static_ipl_page_number_per_buf_pool;
-  
+
   unsigned char* dynamic_start_pointer;
   uint64_t dynamic_ipl_size;
   uint64_t dynamic_ipl_per_page_size;
@@ -185,36 +160,31 @@ extern nvdimm_system * nvdimm_info;
 /* IPL operations */
 
 //Page별 IPL allocation function
-bool alloc_static_ipl_to_bpage(buf_page_t * bpage);
-bool alloc_dynamic_ipl_to_bpage(buf_page_t * bpage);
-bool alloc_second_dynamic_ipl_to_bpage(buf_page_t * bpage);
-
-//IPL Log 추가 관련 함수들
-void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, ulint rest_log_len, trx_id_t trx_id);
-bool can_write_in_ipl(buf_page_t * bpage, ulint log_len, ulint * rest_log_len);
-
+bool alloc_cxl_write_pointer_to_bpage(buf_page_t * bpage);
+void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id);
+void copy_memory_log_to_cxl(buf_page_t * bpage);
 //page ipl log apply 관련 함수들
 void set_apply_info_and_log_apply(buf_block_t* block);
 void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr);
-void ipl_log_apply(byte * start_ptr, byte * end_ptr, apply_log_info * apply_info, mtr_t * temp_mtr);
+void ipl_log_apply(byte * start_ptr, byte * end_ptr, buf_block_t * block, mtr_t * temp_mtr);
 
 
 
 //page Normalize, lookup table 함수들
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage);
-void nvdimm_ipl_add_split_merge_map(buf_page_t * bpage);
+void set_noramlize_flag(buf_page_t * bpage);
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
-bool check_not_flush_page(buf_page_t * bpage, buf_flush_t flush_type);
-bool check_have_to_normalize_page_and_normalize(buf_page_t * bpage, buf_flush_t flush_type);
+bool check_can_be_pplized(buf_page_t * bpage);
+bool check_return_ppl_region(buf_page_t * bpage);
 
 
 //ipl metadata set, get 함수들
-ulint get_ipl_length_from_write_pointer(buf_page_t * bpage);
-ulint get_can_write_size_from_write_pointer(buf_page_t * bpage, uint * type);
+ulint get_ipl_length_from_in_cxl(buf_page_t * bpage);
+ulint get_left_size_in_cxl(buf_page_t * bpage);
 unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
 unsigned char * get_second_dynamic_ipl_pointer(buf_page_t * bpage);
-void set_ipl_length_in_ipl_header(buf_page_t * bpage);
+void set_ipl_length_in_ipl_header(buf_page_t * bpage, ulint length);
 uint get_ipl_length_from_ipl_header(buf_page_t * bpage);
 void set_page_lsn_in_ipl_header(unsigned char* static_ipl_pointer, lsn_t lsn);
 lsn_t get_page_lsn_from_ipl_header(unsigned char* static_ipl_pointer);
@@ -226,6 +196,10 @@ void set_flag(unsigned char * flags, ipl_flag flag);
 void unset_flag(unsigned char * flags, ipl_flag flag);
 bool get_flag(unsigned char * flags, ipl_flag flag);
 
+//CXL 관련 함수
+void memcpy_to_cxl(void *dest, void *src, size_t size);
+void memcpy_from_cxl(void *dest, void *src, size_t size);
+void memset_to_cxl(void* dest, int value, size_t size);
 //redo log buffer caching
 struct nc_redo_buf{
   uint64_t nc_buf_free;

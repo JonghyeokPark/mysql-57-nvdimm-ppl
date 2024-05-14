@@ -1022,19 +1022,8 @@ buf_LRU_free_from_unzip_LRU_list(
 		ut_ad(buf_block_get_state(block) == BUF_BLOCK_FILE_PAGE);
 		ut_ad(block->in_unzip_LRU_list);
 		ut_ad(block->page.in_LRU_list);
-#ifdef UNIV_NVDIMM_IPL
-		buf_page_t * bpage = (buf_page_t *) block;
-		if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){
-			goto scan_end;
-		}
 		freed = buf_LRU_free_page(&block->page, false);
-scan_end:
 		block = prev_block;
-#else
-		freed = buf_LRU_free_page(&block->page, false);
-
-		block = prev_block;
-#endif /* UNIV_NVDIMM_IPL */
 
 	}
 
@@ -1083,27 +1072,12 @@ buf_LRU_free_from_common_LRU_list(
 		ut_ad(bpage->in_LRU_list);
 
 		unsigned	accessed = buf_page_is_accessed(bpage);
-#ifdef UNIV_NVDIMM_IPL
-		if (buf_flush_ready_for_replace(bpage)) {
-			if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && get_dynamic_ipl_pointer(bpage) != NULL){
-				goto dynamic_end;
-			}
-			mutex_exit(mutex);
-			// fprintf(stderr, "buf_LRU_free_page block before: page_id:(%u, %u) oldest_lsn: %lu, frame: %p\n",bpage->id.space(), bpage->id.page_no(), bpage->oldest_modification, ((buf_block_t*)bpage)->frame);
-			freed = buf_LRU_free_page(bpage, true);
-		} 
-		else {
-dynamic_end:		
-			mutex_exit(mutex);
-		}
-#else
 		if (buf_flush_ready_for_replace(bpage)) {
 			mutex_exit(mutex);
 			freed = buf_LRU_free_page(bpage, true);
 		} else {
 			mutex_exit(mutex);
 		}
-#endif /* UNIV_NVDIMM_IPL */
 
 
 		if (freed && !accessed) {
@@ -1940,21 +1914,6 @@ func_exit:
 	ut_ad(bpage->in_LRU_list);
 	ut_ad(!bpage->in_flush_list == !bpage->oldest_modification);
 
-#ifdef UNIV_NVDIMM_IPL
-	if(get_flag(&(bpage->flags), IPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
-		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
-		// (jhpark): recovery
-		// fprintf(stderr, "SIPL ipl store write pointer %lu (%u:%u) oldset_modificatino: %lu\n"
-		// 	, get_ipl_length_from_write_pointer(bpage)
-		// 	, bpage->id.space(), bpage->id.page_no()
-		// 	, bpage->oldest_modification);
-
-		recv_ipl_set_wp(bpage->static_ipl_pointer, get_ipl_length_from_write_pointer(bpage));
-		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification); 
-		// Page가 Discard되기 전에 Page_lsn IPL header에 저장
-	}
-#endif /* UNIV_NVDIMM_IPL */
-
 	DBUG_PRINT("ib_buf", ("free page " UINT32PF ":" UINT32PF,
 			      bpage->id.space(), bpage->id.page_no()));
 
@@ -2175,6 +2134,10 @@ buf_LRU_block_free_non_file_page(
 	memset(block->frame + FIL_PAGE_OFFSET, 0xfe, 4);
 	memset(block->frame + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID, 0xfe, 4);
 #endif /* UNIV_DEBUG */
+
+#ifdef UNIV_NVDIMM_IPL
+	block->in_memory_ppl_buf.erase();
+#endif
 	data = block->page.zip.data;
 
 	if (data != NULL) {
@@ -2207,7 +2170,6 @@ buf_LRU_block_free_non_file_page(
 		ut_d(block->in_withdraw_list = TRUE);
 	} else {
 		UT_LIST_ADD_FIRST(buf_pool->free, &block->page);
-		// fprintf(stderr, "Success add page to free list: (%u, %u) frmae: %p\n", block->frame);
 		ut_d(block->page.in_free_list = TRUE);
 	}
 
