@@ -162,8 +162,7 @@ buf_dblwr_init(
 #ifdef UNIV_NVDIMM_IPL
 	dberr_t err;
 	byte * buf;
-	buf_dblwr->write_buf_unaligned = static_cast<byte*>(
-	nvdimm_info->second_dynamic_start_pointer + (1024 * 1024 * 1024UL));
+	buf_dblwr->write_buf_unaligned = static_cast<byte*>(nvdimm_info->nvdimm_dwb_pointer);
 	buf_dblwr->write_buf = static_cast<byte*>(
 		ut_align(buf_dblwr->write_buf_unaligned,
 			 UNIV_PAGE_SIZE));

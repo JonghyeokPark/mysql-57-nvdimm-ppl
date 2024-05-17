@@ -973,10 +973,21 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 	const page_id_t	page_id(space, page_no);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
 	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
-	if(!is_system_or_undo_tablespace(space) && !get_flag(&(buf_page->flags), NORMALIZE)
-		&& page_is_leaf(((buf_block_t *)buf_page)->frame) && buf_page_in_file(buf_page) && page_id.page_no() > 7){
+	if(!is_system_or_undo_tablespace(space) && 
+		!get_flag(&(buf_page->flags), NORMALIZE) && 
+		page_is_leaf(((buf_block_t *)buf_page)->frame) && 
+		buf_page_in_file(buf_page) &&
+		page_id.page_no() > 7){
 		ulint log_len = (ptr + len) - body + APPLY_LOG_HDR_SIZE;
-		nvdimm_ipl_add(body, log_len, type, buf_page, trx_id);
+		if(((buf_block_t *)buf_page)->in_memory_ppl_buf.size() + log_len > nvdimm_info->max_ppl_size){
+			set_normalize_flag(buf_page);
+			return;
+		}
+		copy_log_to_memory(body, log_len, type, buf_page, trx_id);
+	}
+	else{
+		set_normalize_flag(buf_page);
+		return;
 	}
 }
 #endif 

@@ -252,6 +252,8 @@ char* srv_nvdimm_home_dir = NULL;
 ulonglong srv_nvdimm_static_size = 0;
 /** Static PPL Entry Size */
 ulong srv_nvdimm_static_entry_size = 0;
+/** MAX PPL Size Per Page */
+ulong srv_nvdimm_max_ppl_size = 0;
 /** IPLizatio recovery optimization **/
 my_bool srv_use_nvdimm_ipl_recovery = FALSE;
 /** Redo on NVDIMM optimization */

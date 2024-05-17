@@ -504,26 +504,5 @@ struct mtr_buf_copy_t {
 	}
 };
 
-#ifdef UNIV_NVDIMM_IPL
-void memcpy_to_cxl(void *dest, void *src, size_t size);
-struct mem_to_cxl_copy_t{
-
-	byte * buffer;
-	ulint offset;
-
-	void init(byte * cxl_pointer){ // 추후 calloc 체킹 필요
-		buffer = cxl_pointer;
-		offset = 0;
-	}
-
-	bool operator()(const mtr_buf_t::block_t* block)
-	{
-		memcpy_to_cxl(buffer + offset, (byte *)(block->begin()), block->used());
-		offset += block->used();
-		return(true);
-	}
-};
-#endif
-
 
 #endif /* dyn0buf_h */

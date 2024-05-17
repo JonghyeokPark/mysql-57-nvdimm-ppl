@@ -40,17 +40,26 @@ time_t my_start = 0;
 bool make_static_and_dynamic_ipl_region
 	( ulint number_of_buf_pool, 
 	ulonglong nvdimm_overall_ppl_size, 
-	ulint nvdimm_each_ppl_size){ //여기서 static 크기 바꿔주면 STATIC_MAX_SIZE 바꿔줘야함.
+	ulint nvdimm_each_ppl_size,
+	ulint nvdimm_max_ppl_size){ //여기서 static 크기 바꿔주면 STATIC_MAX_SIZE 바꿔줘야함.
 
 	nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
 	nvdimm_info->overall_ppl_size = nvdimm_overall_ppl_size; // static ipl size : 1,8GB
 	nvdimm_info->each_ppl_size = nvdimm_each_ppl_size; // per page static size : 1KB
+	nvdimm_info->max_ppl_size = nvdimm_max_ppl_size - (IPL_HDR_SIZE + ((nvdimm_max_ppl_size / nvdimm_each_ppl_size) - 1) * NTH_IPL_HEADER_SIZE);
 	nvdimm_info->static_ipl_page_number_per_buf_pool = (nvdimm_info->overall_ppl_size / nvdimm_info->each_ppl_size) / number_of_buf_pool; 
 	nvdimm_info->static_start_pointer = nvdimm_ptr;
-	nvdimm_info->nc_redo_start_pointer = nvdimm_ptr + nvdimm_overall_ppl_size + (2 * 1024 * 1024 * 1024UL);
+	nvdimm_info->nvdimm_dwb_pointer = nvdimm_ptr + nvdimm_overall_ppl_size + (2 * 1024 * 1024 * 1024UL);
+	nvdimm_info->nc_redo_start_pointer = nvdimm_ptr + nvdimm_overall_ppl_size + (3 * 1024 * 1024 * 1024UL);
 	
 	fprintf(stderr, "Overall PPL Size : %luG\n", nvdimm_info->overall_ppl_size / (1024 * 1024 * 1024));
 	fprintf(stderr, "Each PPL Size : %lu\n", nvdimm_info->each_ppl_size);
+	fprintf(stderr, "Max PPL Size : %lu\n", nvdimm_info->max_ppl_size);
+
+	fprintf(stderr, "nvdimm_ptr: %p\n", nvdimm_ptr);
+	fprintf(stderr, "static_start_pointer: %p\n", nvdimm_info->static_start_pointer);
+	fprintf(stderr, "nc_redo_start_pointer: %p\n", nvdimm_info->nc_redo_start_pointer);
+
 	my_start = time(NULL);
 	return true;
 }
@@ -94,7 +103,7 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
     }
 
     // TODO(jhpark): optimize
-    nvdimm_recv_running = true;
+    nvdimm_recv_running = false;
     //recv_ipl_parse_log();
  
 	}

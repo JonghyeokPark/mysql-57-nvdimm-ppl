@@ -1839,11 +1839,15 @@ innobase_start_or_create_for_mysql(void)
 			NVDIMM_ERROR_PRINT("nvdimm_ptr created failed  dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
 			assert(nvdimm_ptr);
 		}
+		else{
+			NVDIMM_INFO_PRINT("nvdimm_ptr created Success dir: %s\nsize: %zu\n", nvdimm_file_path, pool_size);
+		}
 
 		if(make_static_and_dynamic_ipl_region
 			(	srv_buf_pool_instances,
 				srv_nvdimm_static_size,
-				srv_nvdimm_static_entry_size)){
+				srv_nvdimm_static_entry_size,
+				srv_nvdimm_max_ppl_size)){
     		NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
 		}
 		

@@ -92,7 +92,8 @@ uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr
 bool make_static_and_dynamic_ipl_region
         ( ulint number_of_buf_pool, 
           ulonglong nvdimm_overall_ppl_size,
-          ulint nvdimm_each_ppl_size);
+          ulint nvdimm_each_ppl_size,
+		  ulint nvdimm_max_ppl_size);
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size);
 void nvdimm_free(const uint64_t pool_size);
 
@@ -109,7 +110,7 @@ void nvdimm_free(const uint64_t pool_size);
 #define IPL_HDR_SIZE							29
 
 /* Second_Dynamic_index (4) | mtr_log | ... */
-#define DIPL_HEADER_SIZE 4UL
+#define NTH_IPL_HEADER_SIZE 4UL
 
 /* In apply log strucrute*/
 /* mtr_log_type(1) | mtr_body_len (2) | trx_id (8) | mtr_log_body(1 ~ 110) | */
@@ -129,6 +130,7 @@ typedef struct NVDIMM_SYSTEM
   uint64_t overall_ppl_size;
   uint64_t each_ppl_size;
   uint64_t static_ipl_page_number_per_buf_pool;
+  uint64_t max_ppl_size;
 
   unsigned char* dynamic_start_pointer;
   uint64_t dynamic_ipl_size;
@@ -141,6 +143,7 @@ typedef struct NVDIMM_SYSTEM
   uint64_t second_dynamic_ipl_page_number_per_buf_pool;
 
   unsigned char * nc_redo_start_pointer;
+  unsigned char * nvdimm_dwb_pointer;
 }nvdimm_system;
 
 typedef struct APPLY_LOG_INFO
@@ -154,36 +157,39 @@ typedef struct APPLY_LOG_INFO
 }apply_log_info;
 
 
+
 // extern std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map; // (page_id , ipl_static_address)
 extern nvdimm_system * nvdimm_info;
 
 /* IPL operations */
 
 //Page별 IPL allocation function
-bool alloc_cxl_write_pointer_to_bpage(buf_page_t * bpage);
-void nvdimm_ipl_add(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id);
-void copy_memory_log_to_cxl(buf_page_t * bpage);
+bool alloc_first_ppl_to_bpage(buf_page_t * bpage);
+bool alloc_nth_ppl_to_bpage(buf_page_t * bpage);
+void copy_log_to_memory(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id);
+bool copy_memory_log_to_cxl(buf_page_t * bpage);
+bool copy_log_to_ppl(unsigned char *log, ulint len, buf_page_t * bpage);
+
 //page ipl log apply 관련 함수들
 void set_apply_info_and_log_apply(buf_block_t* block);
-void copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr);
-void ipl_log_apply(byte * start_ptr, byte * end_ptr, buf_block_t * block, mtr_t * temp_mtr);
+void ipl_log_apply(byte *start_ptr, ulint apply_log_size, buf_block_t *block, mtr_t *temp_mtr);
+byte* fetch_next_segment(byte* current_end, byte** new_end, byte** next_ppl);
+void apply_log_record(mlog_id_t log_type, byte* log_data, uint length, trx_id_t trx_id, buf_block_t* block, mtr_t* temp_mtr);
+// byte * ipl_complete_log_apply(byte * apply_ptr, uint * ppl_left_size, buf_block_t * block, mtr_t * temp_mtr);
 
 
 
 //page Normalize, lookup table 함수들
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage);
-void set_noramlize_flag(buf_page_t * bpage);
+void set_normalize_flag(buf_page_t * bpage);
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 bool check_can_be_pplized(buf_page_t * bpage);
 bool check_return_ppl_region(buf_page_t * bpage);
+unsigned char * get_last_block_address_index(buf_page_t * bpage);
 
 
 //ipl metadata set, get 함수들
-ulint get_ipl_length_from_in_cxl(buf_page_t * bpage);
-ulint get_left_size_in_cxl(buf_page_t * bpage);
-unsigned char * get_dynamic_ipl_pointer(buf_page_t * bpage);
-unsigned char * get_second_dynamic_ipl_pointer(buf_page_t * bpage);
 void set_ipl_length_in_ipl_header(buf_page_t * bpage, ulint length);
 uint get_ipl_length_from_ipl_header(buf_page_t * bpage);
 void set_page_lsn_in_ipl_header(unsigned char* static_ipl_pointer, lsn_t lsn);
@@ -198,8 +204,24 @@ bool get_flag(unsigned char * flags, ipl_flag flag);
 
 //CXL 관련 함수
 void memcpy_to_cxl(void *dest, void *src, size_t size);
-void memcpy_from_cxl(void *dest, void *src, size_t size);
 void memset_to_cxl(void* dest, int value, size_t size);
+
+struct mem_to_cxl_copy_t{
+
+	buf_page_t * bpage;
+
+	void init(buf_page_t * target_page){ // 추후 calloc 체킹 필요
+		bpage = target_page;
+	}
+
+	bool operator()(const mtr_buf_t::block_t* block)
+	{
+		return copy_log_to_ppl((unsigned char *)(block->begin()), block->used(), bpage);
+	}
+};
+
+
+
 //redo log buffer caching
 struct nc_redo_buf{
   uint64_t nc_buf_free;

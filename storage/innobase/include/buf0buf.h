@@ -1708,6 +1708,7 @@ public:
 	unsigned char * static_ipl_pointer;
 	unsigned char * ipl_write_pointer;
 	unsigned char flags; // first bit: iplized_flag, second bit: normalize_flag, third bit: dirtifed_flag
+	uint block_used;
 	trx_id_t trx_id;
 #endif
 };

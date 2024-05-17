@@ -347,12 +347,15 @@ extern char* srv_nvdimm_home_dir;
 extern ulonglong srv_nvdimm_static_size;
 /** Static PPL Entry Size */
 extern ulong srv_nvdimm_static_entry_size;
+/** MAX PPL Entry Size */
+extern ulong srv_nvdimm_max_ppl_size;
 
 
 /** IPLized recovery optimization */
 extern my_bool srv_use_nvdimm_ipl_recovery;
 /** Redo on NVDIMM optimization */
 extern my_bool srv_use_nvdimm_redo;
+
 #endif
 
 /* We use this dummy default value at startup for max_io_capacity.

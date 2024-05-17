@@ -1128,17 +1128,20 @@ buf_flush_write_block_low(
 	adds an overhead during flushing. */
 #ifdef UNIV_NVDIMM_IPL
 	if(check_can_be_pplized(bpage)){
-		copy_memory_log_to_cxl(bpage);
-		if(sync){
-			buf_page_io_complete(bpage, true);
+		// fprintf(stderr, "Not Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
+		if(copy_memory_log_to_cxl(bpage)){
+			if(sync){
+				buf_page_io_complete(bpage, true);
+			}
+			else{
+				buf_page_io_complete(bpage, false);
+			}
+			return;
 		}
-		else{
-			buf_page_io_complete(bpage, false);
-		}
-		buf_LRU_stat_inc_io();
-		return;
 	}
 #endif
+	// fprintf(stderr, "Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
+	set_normalize_flag(bpage);
 
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL
@@ -1160,6 +1163,7 @@ buf_flush_write_block_low(
 		buf_dblwr_write_single_page(bpage, sync);
 	} else {
 		ut_ad(!sync);
+		// fprintf(stderr, "buf_dblwr_add_to_batch: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
 		buf_dblwr_add_to_batch(bpage);
 	}
 

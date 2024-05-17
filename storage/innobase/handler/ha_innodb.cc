@@ -20312,7 +20312,12 @@ static MYSQL_SYSVAR_ULONGLONG(nvdimm_static_size, srv_nvdimm_static_size,
 static MYSQL_SYSVAR_ULONG(nvdimm_static_entry_size, srv_nvdimm_static_entry_size,
   PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
   "Number of buffer pool instances for NVDIMM",
-  NULL, NULL, 4096, 64, 16384, 0);
+  NULL, NULL, 256, 128, 4096, 0);
+
+static MYSQL_SYSVAR_ULONG(nvdimm_max_ppl_size, srv_nvdimm_max_ppl_size,
+  PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
+  "Max PPL Size Per Page",
+  NULL, NULL, 256, 128, 2048, 0);
 
 static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl_recovery, srv_use_nvdimm_ipl_recovery,
   PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
@@ -20322,8 +20327,8 @@ static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl_recovery, srv_use_nvdimm_ipl_recovery,
 // redo on nvdimm
 static MYSQL_SYSVAR_BOOL(use_nvdimm_redo, srv_use_nvdimm_redo,
   PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
-  "Enable NVDIMM redo recovery mode (disabled by default)",
-  NULL, NULL, FALSE);
+  "Enable NVDIMM redo recovery mode (abled by default)",
+  NULL, NULL, TRUE);
 
 // static MYSQL_SYSVAR_BOOL(use_nvdimm_dwb, srv_use_nvdimm_dwb,
 //   PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
@@ -20510,6 +20515,7 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
 	MYSQL_SYSVAR(nvdimm_home_dir),
 	MYSQL_SYSVAR(nvdimm_static_size),
 	MYSQL_SYSVAR(nvdimm_static_entry_size),
+	MYSQL_SYSVAR(nvdimm_max_ppl_size),
 	MYSQL_SYSVAR(nvdimm_home_dir),
 	MYSQL_SYSVAR(use_nvdimm_ipl_recovery),
 	MYSQL_SYSVAR(use_nvdimm_redo),

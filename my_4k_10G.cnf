@@ -48,6 +48,9 @@ innodb_use_nvdimm_ipl=true
 innodb_nvdimm_home_dir=/pmem
 innodb_nvdimm_static_size=1G
 innodb_nvdimm_static_entry_size=128
+innodb_nvdimm_max_ppl_size=384
+innodb_use_nvdimm_ipl_recovery=false
+innodb_use_nvdimm_redo=true
 
 #file per table ON
 innodb_file_per_table=1

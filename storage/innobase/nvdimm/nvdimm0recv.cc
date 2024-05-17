@@ -234,7 +234,7 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 	offset = 0;
 	apply_buffer_size = 0;
 	sipl_size = nvdimm_info->each_ppl_size - IPL_HDR_SIZE;
-	dipl_size = nvdimm_info->dynamic_ipl_per_page_size - DIPL_HEADER_SIZE;
+	dipl_size = nvdimm_info->dynamic_ipl_per_page_size - NTH_IPL_HEADER_SIZE;
 
 	// step1. second DIPL, first DIPL, SIPL apply인지 판별
 	// if(apply_info->second_dynamic_start_pointer != NULL) {
@@ -256,7 +256,7 @@ bool recv_copy_log_to_mem_to_apply(apply_log_info * apply_info, mtr_t * temp_mtr
 		offset += sipl_size;
 		
 		memcpy(temp_mtr_buffer + offset
-					, apply_info->dynamic_start_pointer + DIPL_HEADER_SIZE
+					, apply_info->dynamic_start_pointer + NTH_IPL_HEADER_SIZE
 					, dipl_size);
 		offset += dipl_size;
 
@@ -286,7 +286,7 @@ dipl_apply:
 		memcpy(temp_mtr_buffer, apply_info->static_start_pointer + IPL_HDR_SIZE ,sipl_size);
 		offset += sipl_size;
 		memcpy(temp_mtr_buffer + offset
-						, apply_info->dynamic_start_pointer + DIPL_HEADER_SIZE
+						, apply_info->dynamic_start_pointer + NTH_IPL_HEADER_SIZE
 						, dipl_size);
 	
 		fprintf(stderr,"DIPL org: %llu page_lsn: %llu (%lu:%lu)\n", cur_page_lsn, page_lsn
