@@ -57,7 +57,6 @@ mlog_open(
 #endif
 	
 }
-
 /********************************************************//**
 Closes a buffer opened to mlog. */
 UNIV_INLINE
@@ -75,9 +74,6 @@ mlog_close(
 	if(mtr_ipl_start_pointer != NULL && (mtr->get_mtr_ipl_before_log_count() + 1) == mtr->get_log_count()){
 		mlog_id_t type = (mlog_id_t) *mtr_ipl_start_pointer;
 		trx_id_t trx_id = mtr->get_mtr_ipl_trx_id();
-		// ulint		space;
-		// ulint		page_no;
-		// ipl_parse_initial_log_record(mtr_ipl_start_pointer, ptr, &type, &space, &page_no);
 		switch(type){
 			case MLOG_1BYTE:
 			case MLOG_2BYTES:
@@ -92,18 +88,13 @@ mlog_close(
 			case MLOG_COMP_REC_DELETE:
 			case MLOG_INIT_FILE_PAGE2:
 			case MLOG_COMP_PAGE_CREATE:
-				my_recv_parse_log_recs(mtr_ipl_start_pointer, ptr - mtr_ipl_start_pointer, trx_id);
+			case MLOG_COMP_PAGE_REORGANIZE:
+				if(can_page_be_pplized(mtr_ipl_start_pointer, ptr))	my_recv_parse_log_recs(mtr_ipl_start_pointer, ptr - mtr_ipl_start_pointer, trx_id);
 				break;
 			default:
 				break;
 		}
 	}
-	// else{
-	// 	mlog_id_t type = (mlog_id_t) *mtr_ipl_start_pointer;
-	// 	ulint		space;
-	// 	ulint		page_no;
-	// 	ipl_parse_initial_log_record(mtr_ipl_start_pointer, ptr, &type, &space, &page_no);
-	// }
 	mtr->set_mtr_ipl_start_pointer(NULL);
 #endif
 }

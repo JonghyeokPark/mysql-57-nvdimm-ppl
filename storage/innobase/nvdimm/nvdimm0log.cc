@@ -24,8 +24,6 @@
 #include "mtr0log.h"
 #include "page0page.h"
 #include "buf0flu.h"
-//싹다 클래스로 캡슐레이션을 해버려야 되나...
-// 나중에 시간되면 해보기.
 
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
 	unsigned char * static_ipl_pointer = alloc_ppl_from_queue(buf_pool_get(bpage->id));
@@ -210,27 +208,6 @@ void ipl_log_apply(byte *start_ptr, ulint apply_log_size, buf_block_t *block, mt
 			apply_log_size -= 8;
 		}
 
-        
-        // Ensure there is enough data in the current segment to cover the log body
-        // if ((end_ptr - current_ptr) < log_body_length) {
-        //     size_t remaining = end_ptr - current_ptr;
-        //     memcpy(temp_buffer, current_ptr, remaining);
-		// 	apply_log_size -= remaining;
-        //     current_ptr = fetch_next_segment(current_ptr, &end_ptr, &next_ppl);
-		// 	fprintf(stderr, "(%u, %u) No Body: current_end : %p, new_end : %p, next_ppl : %p\n",block->page.id.space(), block->page.id.page_no(), current_ptr, end_ptr, next_ppl);
-        //     if (!current_ptr) {
-        //         break; // If no more segments after fetching, exit loop
-        //     }
-        //     memcpy(temp_buffer + remaining, current_ptr, log_body_length - remaining);
-        //     current_ptr += (log_body_length - remaining);
-		// 	apply_log_size -= log_body_length - remaining;
-		// 	apply_log_record(log_type, temp_buffer, log_body_length, trx_id, block, temp_mtr);
-        // } else {
-        //     apply_log_record(log_type, current_ptr, log_body_length, trx_id, block, temp_mtr);
-		// 	current_ptr += log_body_length; // Move past the log body
-		// 	apply_log_size -= log_body_length;
-        // }
-
 		if ((end_ptr - current_ptr) < log_body_length) {
 			size_t remaining = end_ptr - current_ptr;
 			memcpy(temp_buffer, current_ptr, remaining);
@@ -268,10 +245,6 @@ void ipl_log_apply(byte *start_ptr, ulint apply_log_size, buf_block_t *block, mt
 			current_ptr += log_body_length; // Move past the log body
 			apply_log_size -= log_body_length;
 		}
-
-
-
-
     }
 	block->page.ipl_write_pointer = current_ptr;
 	block->page.block_used = current_ptr - (end_ptr - 128);
@@ -462,5 +435,48 @@ void memcpy_to_cxl(void *dest, void *src, size_t size){
 void memset_to_cxl(void* dest, int value, size_t size){
 	memset(dest, value, size);	
 	flush_cache(dest, size);
+}
+
+bool
+can_page_be_pplized(
+/*==========================*/
+	const byte*	ptr,	/*!< in: buffer */
+	const byte*	end_ptr/*!< in: buffer end */
+)
+{
+	mlog_id_t type;
+	ulint space, page_no;
+	if (end_ptr < ptr + 1) {
+
+		return false;
+	}
+
+	type = (mlog_id_t)((ulint)*ptr & ~MLOG_SINGLE_REC_FLAG);
+	ut_ad(type <= MLOG_BIGGEST_TYPE);
+
+	ptr++;
+
+	if (end_ptr < ptr + 2) {
+
+		return false;
+	}
+
+	space = mach_parse_compressed(&ptr, end_ptr);
+
+	if (ptr != NULL) {
+		page_no = mach_parse_compressed(&ptr, end_ptr);
+	}
+	const page_id_t	page_id(space, page_no);
+	buf_pool_t * buf_pool = buf_pool_get(page_id);
+	buf_page_t * buf_page = buf_page_get_also_watch(buf_pool, page_id);
+	if(!is_system_or_undo_tablespace(space) && 
+		!get_flag(&(buf_page->flags), NORMALIZE) && 
+		page_is_leaf(((buf_block_t *)buf_page)->frame) && 
+		buf_page_in_file(buf_page) &&
+		page_id.page_no() > 7){
+		return true;
+	}
+	set_normalize_flag(buf_page);
+	return false;
 }
 #endif

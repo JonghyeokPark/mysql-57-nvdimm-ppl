@@ -206,6 +206,9 @@ bool get_flag(unsigned char * flags, ipl_flag flag);
 void memcpy_to_cxl(void *dest, void *src, size_t size);
 void memset_to_cxl(void* dest, int value, size_t size);
 
+//PPL시킬 수 있는지 판별하는 함수
+bool can_page_be_pplized(const byte* ptr, const byte* end_ptr);
+
 struct mem_to_cxl_copy_t{
 
 	buf_page_t * bpage;
