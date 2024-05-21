@@ -1129,7 +1129,11 @@ buf_flush_write_block_low(
 #ifdef UNIV_NVDIMM_IPL
 	if(check_can_be_pplized(bpage)){
 		// fprintf(stderr, "Not Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
+		if(get_flag(&(bpage->flags), DIRECTLY_WRITE)){
+			goto jump_to_io_complete;
+		}
 		if(copy_memory_log_to_cxl(bpage)){
+jump_to_io_complete:			
 			if(sync){
 				buf_page_io_complete(bpage, true);
 			}

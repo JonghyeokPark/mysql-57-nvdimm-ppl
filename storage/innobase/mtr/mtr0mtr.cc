@@ -974,11 +974,22 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
 	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
 	log_len = (ptr + len) - body + APPLY_LOG_HDR_SIZE;
-	if(((buf_block_t *)buf_page)->in_memory_ppl_buf.size() + log_len > nvdimm_info->max_ppl_size){
-		set_normalize_flag(buf_page);
-		return;
+	
+	if(get_flag(&(buf_page->flags), PPLIZED)){
+		if(get_ipl_length_from_ipl_header(buf_page) + log_len > nvdimm_info->max_ppl_size){
+			set_normalize_flag(buf_page);
+			return;
+		}
+		copy_log_to_ppl_directly(body, log_len, type, buf_page, trx_id);
 	}
-	copy_log_to_memory(body, log_len, type, buf_page, trx_id);
+	else{
+		if(((buf_block_t *)buf_page)->in_memory_ppl_buf.size() + log_len > nvdimm_info->max_ppl_size){
+			set_normalize_flag(buf_page);
+			return;
+		}
+		copy_log_to_memory(body, log_len, type, buf_page, trx_id);
+	}
+	
 }
 #endif 
 

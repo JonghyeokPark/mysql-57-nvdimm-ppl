@@ -1860,7 +1860,7 @@ buf_pool_init_instance(
 	buf_pool->ipl_look_up_table = new std::tr1::unordered_map<page_id_t, unsigned char*>;
 	buf_pool->ipl_look_up_table->clear();
 	rw_lock_create(ipl_map_mutex_key, &buf_pool->lookup_table_lock, SYNC_IPL_MAP_MUTEX);
-	// mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->static_allocator_mutex);
+	mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->static_allocator_mutex);
 	make_ppl_and_push_queue(buf_pool);
 #endif
 

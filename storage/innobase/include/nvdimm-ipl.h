@@ -121,7 +121,8 @@ enum ipl_flag {
   PPLIZED = 1,
   NORMALIZE = 2,
   DIRTIFIED = 4,
-  IN_LOOK_UP = 8
+  IN_LOOK_UP = 8,
+  DIRECTLY_WRITE = 16
 };
 
 typedef struct NVDIMM_SYSTEM
@@ -167,8 +168,9 @@ extern nvdimm_system * nvdimm_info;
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage);
 bool alloc_nth_ppl_to_bpage(buf_page_t * bpage);
 void copy_log_to_memory(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id);
+void copy_log_to_ppl_directly(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id);
 bool copy_memory_log_to_cxl(buf_page_t * bpage);
-bool copy_log_to_ppl(unsigned char *log, ulint len, buf_page_t * bpage);
+bool copy_memory_log_to_ppl(unsigned char *log, ulint len, buf_page_t * bpage);
 
 //page ipl log apply 관련 함수들
 void set_apply_info_and_log_apply(buf_block_t* block);
@@ -203,7 +205,8 @@ void unset_flag(unsigned char * flags, ipl_flag flag);
 bool get_flag(unsigned char * flags, ipl_flag flag);
 
 //CXL 관련 함수
-void memcpy_to_cxl(void *dest, void *src, size_t size);
+// void memcpy_to_cxl(void *dest, void *src, size_t size);
+void memcpy_to_cxl(void *__restrict dst, const void * __restrict src, size_t n);
 void memset_to_cxl(void* dest, int value, size_t size);
 
 //PPL시킬 수 있는지 판별하는 함수
@@ -219,7 +222,7 @@ struct mem_to_cxl_copy_t{
 
 	bool operator()(const mtr_buf_t::block_t* block)
 	{
-		return copy_log_to_ppl((unsigned char *)(block->begin()), block->used(), bpage);
+		return copy_memory_log_to_ppl((unsigned char *)(block->begin()), block->used(), bpage);
 	}
 };
 

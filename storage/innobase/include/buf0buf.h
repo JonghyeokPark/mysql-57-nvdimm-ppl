@@ -41,7 +41,8 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0srv.h"
 #include <ostream>
 #include <tr1/unordered_map>
-#include "../../boost/boost_1_59_0/boost/lockfree/queue.hpp"
+#include <queue>
+// #include "../../boost/boost_1_59_0/boost/lockfree/queue.hpp"
 
 #ifdef UNIV_NVDIMM_IPL
 #define IN_MEMORY_PPL_BUF_MAX_SIZES 4096
@@ -2116,7 +2117,7 @@ struct buf_pool_t{
 #ifdef UNIV_NVDIMM_IPL
 	std::tr1::unordered_map<page_id_t, unsigned char *> * ipl_look_up_table;
 	rw_lock_t lookup_table_lock;
-	boost::lockfree::queue<uint> * static_ipl_allocator;
+	std::queue<uint> * static_ipl_allocator;
 	ib_mutex_t static_allocator_mutex;
 #endif
 

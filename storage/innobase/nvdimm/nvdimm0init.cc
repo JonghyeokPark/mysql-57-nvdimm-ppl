@@ -52,7 +52,7 @@ bool make_static_and_dynamic_ipl_region
 	nvdimm_info->nvdimm_dwb_pointer = nvdimm_ptr + nvdimm_overall_ppl_size + (2 * 1024 * 1024 * 1024UL);
 	nvdimm_info->nc_redo_start_pointer = nvdimm_ptr + nvdimm_overall_ppl_size + (3 * 1024 * 1024 * 1024UL);
 	
-	fprintf(stderr, "Overall PPL Size : %luG\n", nvdimm_info->overall_ppl_size / (1024 * 1024 * 1024));
+	fprintf(stderr, "Overall PPL Size : %luM\n", nvdimm_info->overall_ppl_size / (1024 * 1024));
 	fprintf(stderr, "Each PPL Size : %lu\n", nvdimm_info->each_ppl_size);
 	fprintf(stderr, "Max PPL Size : %lu\n", nvdimm_info->max_ppl_size);
 
