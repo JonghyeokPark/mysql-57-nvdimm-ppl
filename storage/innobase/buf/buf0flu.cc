@@ -192,6 +192,7 @@ struct page_cleaner_t {
 };
 
 static page_cleaner_t*	page_cleaner = NULL;
+static page_cleaner_t*	ppl_page_cleaner = NULL;
 
 #ifdef UNIV_DEBUG
 my_bool innodb_page_cleaner_disabled_debug;
@@ -1133,7 +1134,8 @@ buf_flush_write_block_low(
 			goto jump_to_io_complete;
 		}
 		if(copy_memory_log_to_cxl(bpage)){
-jump_to_io_complete:			
+jump_to_io_complete:
+			set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification);
 			if(sync){
 				buf_page_io_complete(bpage, true);
 			}
@@ -2812,6 +2814,55 @@ buf_flush_page_cleaner_close(void)
 	page_cleaner = NULL;
 }
 
+#ifdef UNIV_NVDIMM_IPL
+/******************************************************************//**
+Initialize PPL Page Cleaner. */
+void
+buf_flush_ppl_page_cleaner_init(void)
+/*=============================*/
+{
+	ut_ad(page_cleaner == NULL);
+
+	ppl_page_cleaner = static_cast<page_cleaner_t*>(
+		ut_zalloc_nokey(sizeof(*page_cleaner)));
+	mutex_create(LATCH_ID_PAGE_CLEANER, &ppl_page_cleaner->mutex);
+
+	ppl_page_cleaner->is_requested = os_event_create("pc_is_requested");
+	ppl_page_cleaner->is_finished = os_event_create("pc_is_finished");
+	ppl_page_cleaner->n_slots = static_cast<ulint>(srv_buf_pool_instances);
+
+	ppl_page_cleaner->slots = static_cast<page_cleaner_slot_t*>(
+		ut_zalloc_nokey(ppl_page_cleaner->n_slots
+				* sizeof(*ppl_page_cleaner->slots)));
+	ut_d(ppl_page_cleaner->n_disabled_debug = 0);
+
+	ppl_page_cleaner->is_running = true;
+}
+
+/**
+Close PPL Page Cleaner. */
+static
+void
+buf_flush_ppl_page_cleaner_close(void)
+{
+	/* waiting for all worker threads exit */
+	while (ppl_page_cleaner->n_workers > 0) {
+		os_thread_sleep(10000);
+	}
+
+	mutex_destroy(&ppl_page_cleaner->mutex);
+
+	ut_free(ppl_page_cleaner->slots);
+
+	os_event_destroy(ppl_page_cleaner->is_finished);
+	os_event_destroy(ppl_page_cleaner->is_requested);
+
+	ut_free(ppl_page_cleaner);
+
+	ppl_page_cleaner = NULL;
+}
+#endif
+
 /**
 Requests for all slots to flush all buffer pool instances.
 @param min_n	wished minimum mumber of blocks flushed
@@ -3020,6 +3071,165 @@ pc_wait_finished(
 
 	return(all_succeeded);
 }
+
+#ifdef UNIV_NVDIMM_IPL
+/**
+Requests for all slots to flush all buffer pool instances.
+@param min_n	wished minimum mumber of blocks flushed
+		(it is not guaranteed that the actual number is that big)
+@param lsn_limit in the case BUF_FLUSH_LIST all blocks whose
+		oldest_modification is smaller than this should be flushed
+		(if their number does not exceed min_n), otherwise ignored
+*/
+static
+void
+ppl_pc_request()
+{
+	mutex_enter(&ppl_page_cleaner->mutex);
+
+	ut_ad(ppl_page_cleaner->n_slots_requested == 0);
+	ut_ad(ppl_page_cleaner->n_slots_flushing == 0);
+	ut_ad(ppl_page_cleaner->n_slots_finished == 0);
+
+	for (ulint i = 0; i < ppl_page_cleaner->n_slots; i++) {
+		page_cleaner_slot_t* slot = &ppl_page_cleaner->slots[i];
+
+		ut_ad(slot->state == PAGE_CLEANER_STATE_NONE);
+		/* slot->n_pages_requested was already set by
+		page_cleaner_flush_pages_recommendation() */
+
+		slot->state = PAGE_CLEANER_STATE_REQUESTED;
+	}
+
+	ppl_page_cleaner->n_slots_requested = page_cleaner->n_slots;
+	ppl_page_cleaner->n_slots_flushing = 0;
+	ppl_page_cleaner->n_slots_finished = 0;
+
+	os_event_set(ppl_page_cleaner->is_requested);
+
+	mutex_exit(&ppl_page_cleaner->mutex);
+}
+
+/**
+Do flush for one slot.
+@return	the number of the slots which has not been treated yet. */
+static
+ulint
+ppl_pc_flush_slot(void)
+{
+	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it;
+	mutex_enter(&ppl_page_cleaner->mutex);
+
+	if (ppl_page_cleaner->n_slots_requested > 0) {
+		page_cleaner_slot_t*	slot = NULL;
+		ulint			i;
+
+		for (i = 0; i < ppl_page_cleaner->n_slots; i++) {
+			slot = &ppl_page_cleaner->slots[i];
+
+			if (slot->state == PAGE_CLEANER_STATE_REQUESTED) {
+				break;
+			}
+		}
+
+		/* slot should be found because
+		page_cleaner->n_slots_requested > 0 */
+		ut_a(i < page_cleaner->n_slots);
+
+		buf_pool_t* buf_pool = buf_pool_from_array(i);
+
+		ppl_page_cleaner->n_slots_requested--;
+		ppl_page_cleaner->n_slots_flushing++;
+		slot->state = PAGE_CLEANER_STATE_FLUSHING;
+
+		if (ppl_page_cleaner->n_slots_requested == 0) {
+			os_event_reset(ppl_page_cleaner->is_requested);
+		}
+
+		if (!ppl_page_cleaner->is_running) {
+			slot->n_flushed_lru = 0;
+			slot->n_flushed_list = 0;
+			goto finish_mutex;
+		}
+
+		mutex_exit(&ppl_page_cleaner->mutex);
+		slot->n_flushed_lru = 0;
+		/* PPL Page 별로 접근해서  Page LSN만 읽어오기*/
+		rw_lock_s_lock(&buf_pool->lookup_table_lock);
+		for (it = buf_pool->ipl_look_up_table->begin(); it != buf_pool->ipl_look_up_table->end(); ++it) {
+			page_id_t page_id = it->first;
+			unsigned char * first_ppl_pointer = it->second;
+			// if(get_page_lsn_from_ipl_header(first_ppl_pointer) != 0)
+				// fprintf(stderr, "(%u,%u): Page LSN: %zu\n", page_id.space(), page_id.page_no(), get_page_lsn_from_ipl_header(first_ppl_pointer));
+		}
+		rw_lock_s_unlock(&buf_pool->lookup_table_lock);
+
+		if (!ppl_page_cleaner->is_running) {
+			slot->n_flushed_list = 0;
+			goto finish;
+		}
+finish:
+		mutex_enter(&ppl_page_cleaner->mutex);
+finish_mutex:
+		ppl_page_cleaner->n_slots_flushing--;
+		ppl_page_cleaner->n_slots_finished++;
+		slot->state = PAGE_CLEANER_STATE_FINISHED;
+
+		if (ppl_page_cleaner->n_slots_requested == 0
+		    && ppl_page_cleaner->n_slots_flushing == 0) {
+			os_event_set(ppl_page_cleaner->is_finished);
+		}
+		// fprintf(stderr, "ppl_cold_page_cleaner_worker[%d]: %d\n",i, ppl_page_cleaner->n_slots_requested);
+	}
+
+	ulint	ret = ppl_page_cleaner->n_slots_requested;
+
+
+	mutex_exit(&ppl_page_cleaner->mutex);
+
+	return(ret);
+}
+
+/**
+Wait until all flush requests are finished.
+@param n_flushed_lru	number of pages flushed from the end of the LRU list.
+@param n_flushed_list	number of pages flushed from the end of the
+			flush_list.
+@return			true if all flush_list flushing batch were success. */
+static
+bool
+ppl_pc_wait_finished()
+{
+	bool	all_succeeded = true;
+
+	os_event_wait(ppl_page_cleaner->is_finished);
+
+	mutex_enter(&ppl_page_cleaner->mutex);
+
+	ut_ad(ppl_page_cleaner->n_slots_requested == 0);
+	ut_ad(ppl_page_cleaner->n_slots_flushing == 0);
+	ut_ad(ppl_page_cleaner->n_slots_finished == page_cleaner->n_slots);
+
+	for (ulint i = 0; i < ppl_page_cleaner->n_slots; i++) {
+		page_cleaner_slot_t* slot = &ppl_page_cleaner->slots[i];
+
+		ut_ad(slot->state == PAGE_CLEANER_STATE_FINISHED);
+		all_succeeded &= slot->succeeded_list;
+
+		slot->state = PAGE_CLEANER_STATE_NONE;
+
+		slot->n_pages_requested = 0;
+	}
+
+	ppl_page_cleaner->n_slots_finished = 0;
+
+	os_event_reset(ppl_page_cleaner->is_finished);
+
+	mutex_exit(&ppl_page_cleaner->mutex);
+
+	return(all_succeeded);
+}
+#endif
 
 #ifdef UNIV_LINUX
 /**
@@ -3316,6 +3526,9 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 
 			/* Request flushing for threads */
 			pc_request(ULINT_MAX, lsn_limit);
+#ifdef UNIV_NVDIMM_IPL
+			ppl_pc_request();
+#endif /* UNIV_NVDIMM_IPL */
 
 			ulint tm = ut_time_ms();
 
@@ -3331,6 +3544,9 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			ulint	n_flushed_lru = 0;
 			ulint	n_flushed_list = 0;
 			pc_wait_finished(&n_flushed_lru, &n_flushed_list);
+#ifdef UNIV_NVDIMM_IPL
+			ppl_pc_wait_finished();
+#endif /* UNIV_NVDIMM_IPL */
 
 			if (n_flushed_list > 0 || n_flushed_lru > 0) {
 				buf_flush_stats(n_flushed_list, n_flushed_lru);
@@ -3360,6 +3576,9 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 
 			/* Request flushing for threads */
 			pc_request(n_to_flush, lsn_limit);
+#ifdef UNIV_NVDIMM_IPL
+			ppl_pc_request();
+#endif /* UNIV_NVDIMM_IPL */
 
 			ulint tm = ut_time_ms();
 
@@ -3378,6 +3597,9 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			ulint	n_flushed_list = 0;
 
 			pc_wait_finished(&n_flushed_lru, &n_flushed_list);
+#ifdef UNIV_NVDIMM_IPL
+			ppl_pc_wait_finished();
+#endif /* UNIV_NVDIMM_IPL */
 
 			if (n_flushed_list > 0 || n_flushed_lru > 0) {
 				buf_flush_stats(n_flushed_list, n_flushed_lru);
@@ -3521,6 +3743,9 @@ thread_exit:
 	os_event_set(page_cleaner->is_requested);
 
 	buf_flush_page_cleaner_close();
+#ifdef UNIV_NVDIMM_IPL
+	buf_flush_ppl_page_cleaner_close();
+#endif /* UNIV_NVDIMM_IPL */
 
 	buf_page_cleaner_is_active = false;
 
@@ -3583,6 +3808,46 @@ DECLARE_THREAD(buf_flush_page_cleaner_worker)(
 
 	OS_THREAD_DUMMY_RETURN;
 }
+
+#ifdef UNIV_NVDIMM_IPL
+/******************************************************************//**
+Worker thread of ppl_cold_page_cleaner.
+@return a dummy parameter */
+extern "C"
+os_thread_ret_t
+DECLARE_THREAD(buf_flush_ppl_page_cleaner_worker)(
+/*==========================================*/
+	void*	arg MY_ATTRIBUTE((unused)))
+			/*!< in: a dummy parameter required by
+			os_thread_create */
+{
+	my_thread_init();
+
+	mutex_enter(&ppl_page_cleaner->mutex);
+	mutex_exit(&ppl_page_cleaner->mutex);
+
+	while (true) {
+		os_event_wait(ppl_page_cleaner->is_requested);
+
+		ut_d(buf_flush_page_cleaner_disabled_loop());
+
+		if (!ppl_page_cleaner->is_running) {
+			break;
+		}
+		ppl_pc_flush_slot();
+	}
+
+	mutex_enter(&ppl_page_cleaner->mutex);
+	ppl_page_cleaner->n_workers--;
+	mutex_exit(&ppl_page_cleaner->mutex);
+
+	my_thread_end();
+
+	os_thread_exit();
+
+	OS_THREAD_DUMMY_RETURN;
+}
+#endif /* UNIV_NVDIMM_IPL */
 
 /*******************************************************************//**
 Synchronously flush dirty blocks from the end of the flush list of all buffer

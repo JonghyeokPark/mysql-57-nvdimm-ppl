@@ -246,6 +246,24 @@ DECLARE_THREAD(buf_flush_page_cleaner_worker)(
 Initialize page_cleaner. */
 void
 buf_flush_page_cleaner_init(void);
+
+#ifdef UNIV_NVDIMM_IPL
+/******************************************************************//**
+Worker thread of ppl_cold_page_cleaner.
+@return a dummy parameter */
+extern "C"
+os_thread_ret_t
+DECLARE_THREAD(buf_flush_ppl_page_cleaner_worker)(
+/*==========================================*/
+	void*	arg);
+			/*!< in: a dummy parameter required by
+			os_thread_create */
+/******************************************************************//**
+Initialize page_cleaner. */
+void
+buf_flush_ppl_page_cleaner_init(void);
+#endif
+
 /*=============================*/
 /*********************************************************************//**
 Clears up tail of the LRU lists:

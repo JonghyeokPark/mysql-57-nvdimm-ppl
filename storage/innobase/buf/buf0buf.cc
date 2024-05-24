@@ -5865,6 +5865,17 @@ corrupt:
 		}
 
 	}
+#ifdef UNIV_NVDIMM_IPL
+			// (jhpark): recovery
+			//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
+			//	recv_ipl_apply((buf_block_t*)bpage);
+			//}
+
+			// (jhpark): recovery
+			if (io_type == BUF_IO_READ && !nvdimm_recv_running && get_flag(&(bpage->flags), PPLIZED)){
+				set_apply_info_and_log_apply((buf_block_t*) bpage);
+			}
+#endif
 
 	buf_pool_mutex_enter(buf_pool);
 	mutex_enter(buf_page_get_mutex(bpage));
@@ -5900,26 +5911,6 @@ corrupt:
 		ut_ad(buf_pool->n_pend_reads > 0);
 		buf_pool->n_pend_reads--;
 		buf_pool->stat.n_pages_read++;
-
-#ifdef UNIV_NVDIMM_IPL
-		// (jhpark): recovery
-		//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
-		//	recv_ipl_apply((buf_block_t*)bpage);
-		//}
-
-		// (jhpark): recovery
-		if (!nvdimm_recv_running && get_flag(&(bpage->flags), PPLIZED)){
-			buf_pool_mutex_exit(buf_pool);
-			set_apply_info_and_log_apply((buf_block_t*) bpage);
-			if (uncompressed) {
-				rw_lock_x_unlock_gen(&((buf_block_t*) bpage)->lock,
-							BUF_IO_READ);
-			}
-
-			mutex_exit(buf_page_get_mutex(bpage));
-			return(true);
-		}
-#endif
 		if (uncompressed) {
 			rw_lock_x_unlock_gen(&((buf_block_t*) bpage)->lock,
 					     BUF_IO_READ);
