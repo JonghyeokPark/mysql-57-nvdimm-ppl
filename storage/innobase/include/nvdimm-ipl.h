@@ -122,7 +122,8 @@ enum ipl_flag {
   NORMALIZE = 2,
   DIRTIFIED = 4,
   IN_LOOK_UP = 8,
-  DIRECTLY_WRITE = 16
+  DIRECTLY_WRITE = 16,
+  CLEANING = 32
 };
 
 typedef struct NVDIMM_SYSTEM
@@ -226,6 +227,21 @@ struct mem_to_cxl_copy_t{
 	}
 };
 
+
+/* PPL NVDIMM BUFFER FUNCTION*/
+ulint
+ppl_buf_page_read_in_area(
+	page_id_t*	page_id_list /*Page_id List*/,
+	ulint read_page_no,
+	buf_pool_t * buf_pool);
+
+void
+ppl_buf_flush_note_modification(
+/*=============================*/
+	buf_block_t*	block);	/*!< in: end lsn of the last mtr in the
+					set of mtr's */
+
+/* PPL NVDIMM BUFFER FUNCTION*/
 
 
 //redo log buffer caching

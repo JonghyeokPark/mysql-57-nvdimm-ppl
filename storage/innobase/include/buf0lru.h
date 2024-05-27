@@ -195,6 +195,21 @@ buf_LRU_old_ratio_update(
 	ibool	adjust);/*!< in: TRUE=adjust the LRU list;
 			FALSE=just assign buf_pool->LRU_old_ratio
 			during the initialization of InnoDB */
+			
+#ifdef UNIV_NVDIMM_IPL
+/**********************************************************************//**
+Updates buf_pool->LRU_old_ratio.
+@return updated old_pct */
+uint
+ppl_buf_LRU_old_ratio_update(
+/*=====================*/
+	uint	old_pct,/*!< in: Reserve this percentage of
+			the buffer pool for "old" blocks. */
+	ibool	adjust);	/*!< in: TRUE=adjust the LRU list;
+			FALSE=just assign buf_pool->LRU_old_ratio
+			during the initialization of InnoDB */
+#endif
+
 /********************************************************************//**
 Update the historical stats that we are collecting for LRU eviction
 policy at the end of each interval. */

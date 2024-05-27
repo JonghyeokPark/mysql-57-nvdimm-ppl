@@ -99,6 +99,11 @@ struct fil_addr_t;
 extern	buf_pool_t*	buf_pool_ptr;	/*!< The buffer pools
 					of the database */
 
+#ifdef UNIV_NVDIMM_IPL
+extern	buf_pool_t*	ppl_buf_pool_ptr;	/*!< The PPL buffer pools
+					of the database */
+#endif
+
 extern	volatile bool	buf_pool_withdrawing; /*!< true when withdrawing buffer
 					pool pages might cause page relocation */
 
@@ -243,6 +248,16 @@ public:
 		ut_ad(space <= 0xFFFFFFFFU);
 		ut_ad(page_no <= 0xFFFFFFFFU);
 	}
+
+#ifdef UNIV_NVDIMM_IPL
+	page_id_t()
+		:
+		m_space(0),
+		m_page_no(0),
+		m_fold(ULINT_UNDEFINED)
+	{
+	}
+#endif
 
 	/** Retrieve the tablespace id.
 	@return tablespace id */
@@ -1297,6 +1312,41 @@ buf_page_init_for_read(
 	const page_size_t&	page_size,
 	ibool			unzip);
 
+#ifdef UNIV_NVDIMM_IPL
+/********************************************************************//**
+Creates the buffer pool.
+@return DB_SUCCESS if success, DB_ERROR if not enough memory or error */
+dberr_t
+ppl_buf_pool_init(
+/*=========*/
+	ulint	size,		/*!< in: Size of the total pool in bytes */
+	ulint	n_instances);	/*!< in: Number of instances */
+/********************************************************************//**
+Frees the buffer pool at shutdown.  This must not be invoked before
+freeing all mutexes. */
+void
+ppl_buf_pool_free(
+/*==========*/
+	ulint	n_instances);	/*!< in: numbere of instances to free */
+
+buf_page_t*
+ppl_buf_page_init_for_read(
+	dberr_t*		err,
+	ulint			mode,
+	const page_id_t&	page_id,
+	const page_size_t&	page_size,
+	ibool			unzip,
+	buf_pool_t * buf_pool);
+/********************************************************************//**
+Calculates the index of a buffer pool to the buf_pool[] array.
+@return the position of the buffer pool in buf_pool[] */
+UNIV_INLINE
+ulint
+get_ppl_buf_pool_index(
+/*===========*/
+	const buf_pool_t*	buf_pool);	/*!< in: buffer pool */
+#endif
+
 /********************************************************************//**
 Completes an asynchronous read or write request of a file page to or from
 the buffer pool.
@@ -1319,7 +1369,6 @@ buf_pool_index(
 /******************************************************************//**
 Returns the buffer pool instance given a page instance
 @return buf_pool */
-UNIV_INLINE
 buf_pool_t*
 buf_pool_from_bpage(
 /*================*/

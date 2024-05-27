@@ -1,0 +1,94 @@
+#ifdef UNIV_NVDIMM_IPL
+#include "nvdimm-ipl.h"
+#include "mtr0log.h"
+#include "page0page.h"
+#include "buf0flu.h"
+#include "buf0rea.h"
+#include <emmintrin.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <stdint.h>
+
+/** Hashed page file address struct */
+struct ppl_page_t{
+	enum recv_addr_state state;
+				/*!< recovery state of the page */
+	unsigned	space:32;/*!< space id */
+	unsigned	page_no:32;/*!< page number */
+};
+
+ulint
+ppl_buf_page_read_in_area(
+	page_id_t*	page_id_list /*Page_id List*/,
+	ulint read_page_no,
+	buf_pool_t * buf_pool)
+{
+	recv_addr_t* recv_addr;
+	ulint	n;
+
+	n = 0;
+
+	for (ulint i = 0; i < read_page_no; i++) {
+		const page_id_t cur_page_id = page_id_list[i];
+		fil_space_t*		space	= fil_space_get(cur_page_id.space());
+		buf_pool_t * page_buf_pool = buf_pool_get(cur_page_id);
+		buf_page_t * buf_page = buf_page_get_also_watch(page_buf_pool, cur_page_id);
+		const page_size_t	page_size(space->flags);
+
+		if (buf_page != NULL) { /* 현재 다른 버퍼에 페이지가 존재한다면*/
+			page_id_list[i].reset(0,0);
+			set_normalize_flag(buf_page);
+			continue;
+		}
+		if(ppl_buf_read_page_background(cur_page_id, page_size, false, buf_pool)){
+			// fprintf(stderr, "ppl_buf_page_read_in_area: read page_id(%lu, %lu), buf_pool: %p, LRU_INFO: %p, LRU_LEN: %lu\n", 
+	//				cur_page_id.space(), cur_page_id.page_no(), 
+	//				buf_pool, &(buf_pool->LRU), UT_LIST_GET_LEN(buf_pool->LRU));
+			n++;
+		}
+		else{
+			// fprintf(stderr, "ppl_buf_page_read_in_area: failed to read page_id(%lu, %lu), Already in buf_pool: %p\n", cur_page_id.space(), cur_page_id.page_no(), buf_pool);
+			continue;
+		}
+		
+	}
+	return(n);
+}
+
+void
+ppl_buf_flush_note_modification(
+/*=============================*/
+	buf_block_t*	block)	/*!< in: end lsn of the last mtr in the
+					set of mtr's */
+{
+#ifdef UNIV_DEBUG
+	{
+		ut_ad(!srv_read_only_mode);
+		ut_ad(buf_block_get_state(block) == BUF_BLOCK_FILE_PAGE);
+		ut_ad(block->page.buf_fix_count > 0);
+
+		buf_pool_t*	buf_pool = buf_pool_from_block(block);
+
+		ut_ad(!buf_pool_mutex_own(buf_pool));
+		ut_ad(!buf_flush_list_mutex_own(buf_pool));
+
+		ut_ad(start_lsn != 0);
+		ut_ad(block->page.newest_modification <= end_lsn);
+	}
+#endif /* UNIV_DEBUG */
+	// fprintf(stderr, "ppl_buf_flush_note_modification: block(%u, %u)\n", block->page.id.space(), block->page.id.page_no());
+	block->page.newest_modification = log_sys->lsn;
+
+	if (!block->page.oldest_modification) {
+		buf_pool_t*	buf_pool = buf_pool_from_block(block);
+
+		buf_flush_insert_sorted_into_flush_list(
+			buf_pool, block, log_sys->lsn);
+	} else {
+		ut_ad(block->page.oldest_modification <= start_lsn);
+	}
+	// fprintf(stderr, "ppl_buf_flush_note_modification: block(%u, %u)\n", block->page.id.space(), block->page.id.page_no());
+
+}
+
+#endif

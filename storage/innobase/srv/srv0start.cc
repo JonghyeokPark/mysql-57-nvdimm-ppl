@@ -1888,6 +1888,27 @@ innobase_start_or_create_for_mysql(void)
 
 	ib::info() << "Completed initialization of buffer pool";
 
+#ifdef UNIV_NVDIMM_IPL
+	ulong ppl_buf_pool_instances = 8;
+	double	ppl_size = 16;
+	char	ppl_unit = 'M';
+	double	ppl_chunk_size = 2;
+	char	ppl_chunk_unit = 'M';
+	ib::info() << "Initializing PPL Cleaner buffer pool, total size = "
+		<< ppl_size << ppl_unit << ", instances = " << ppl_buf_pool_instances
+		<< ", chunk size = " << ppl_chunk_size << ppl_chunk_unit;
+
+	err = ppl_buf_pool_init(ppl_size * 1024 * 1024, ppl_buf_pool_instances);
+
+	if (err != DB_SUCCESS) {
+		ib::error() << "Cannot allocate memory for the buffer pool";
+
+		return(srv_init_abort(DB_ERROR));
+	}
+
+	ib::info() << "Completed initialization of buffer pool";
+#endif
+
 #ifdef UNIV_DEBUG
 	/* We have observed deadlocks with a 5MB buffer pool but
 	the actual lower limit could very well be a little higher. */
@@ -2884,6 +2905,7 @@ innobase_shutdown_for_mysql(void)
 	pars_lexer_close();
 	log_mem_free();
 	buf_pool_free(srv_buf_pool_instances);
+	ppl_buf_pool_free(srv_buf_pool_instances);
 
 	/* 6. Free the thread management resoruces. */
 	os_thread_free();

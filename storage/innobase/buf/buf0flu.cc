@@ -192,7 +192,10 @@ struct page_cleaner_t {
 };
 
 static page_cleaner_t*	page_cleaner = NULL;
+
+#ifdef UNIV_NVDIMM_IPL
 static page_cleaner_t*	ppl_page_cleaner = NULL;
+#endif
 
 #ifdef UNIV_DEBUG
 my_bool innodb_page_cleaner_disabled_debug;
@@ -3118,15 +3121,24 @@ ulint
 ppl_pc_flush_slot(void)
 {
 	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it;
+	//page_id_list 생성
+	page_id_t page_id_list[100];
+	int index = 0;
 	mutex_enter(&ppl_page_cleaner->mutex);
 
+
+	// 현재 PPL Page Cleaner가 처리할 slot을 찾는다.
 	if (ppl_page_cleaner->n_slots_requested > 0) {
 		page_cleaner_slot_t*	slot = NULL;
 		ulint			i;
 
+
+		// PPL Page Cleaner가 cleaning할 slot을 찾는다.
 		for (i = 0; i < ppl_page_cleaner->n_slots; i++) {
 			slot = &ppl_page_cleaner->slots[i];
 
+			// slot의 상태가 PAGE_CLEANER_STATE_REQUESTED인 slot을 찾는다.
+			// 즉, 아직 처리되지 않은 slot을 찾는다.
 			if (slot->state == PAGE_CLEANER_STATE_REQUESTED) {
 				break;
 			}
@@ -3134,18 +3146,24 @@ ppl_pc_flush_slot(void)
 
 		/* slot should be found because
 		page_cleaner->n_slots_requested > 0 */
-		ut_a(i < page_cleaner->n_slots);
+		ut_a(i < ppl_page_cleaner->n_slots);
 
+		// 여기서는 Nomral Buffer Pool을 잡는다.
+		// 왜냐면 PPL Lookup Table을 뒤져야하는데, PPL Lookup Table은 Normal Buffer Pool에 존재한다.
 		buf_pool_t* buf_pool = buf_pool_from_array(i);
 
+		// slot의 상태를 Flushing 중인 상태로 변경한다.
+		// PAGE_CLEANER_STATE_REQUESTED -> PAGE_CLEANER_STATE_FLUSHING
 		ppl_page_cleaner->n_slots_requested--;
 		ppl_page_cleaner->n_slots_flushing++;
 		slot->state = PAGE_CLEANER_STATE_FLUSHING;
 
+		// 모든 slot이 처리되었을 때, is_requested를 reset한다.
 		if (ppl_page_cleaner->n_slots_requested == 0) {
 			os_event_reset(ppl_page_cleaner->is_requested);
 		}
 
+		// PPL Page Cleaner가 종료되었을 때, slot의 n_flushed_lru를 0으로 초기화한다.
 		if (!ppl_page_cleaner->is_running) {
 			slot->n_flushed_lru = 0;
 			slot->n_flushed_list = 0;
@@ -3158,12 +3176,18 @@ ppl_pc_flush_slot(void)
 		rw_lock_s_lock(&buf_pool->lookup_table_lock);
 		for (it = buf_pool->ipl_look_up_table->begin(); it != buf_pool->ipl_look_up_table->end(); ++it) {
 			page_id_t page_id = it->first;
-			unsigned char * first_ppl_pointer = it->second;
-			// if(get_page_lsn_from_ipl_header(first_ppl_pointer) != 0)
-				// fprintf(stderr, "(%u,%u): Page LSN: %zu\n", page_id.space(), page_id.page_no(), get_page_lsn_from_ipl_header(first_ppl_pointer));
+			lsn_t page_lsn = get_page_lsn_from_ipl_header(it->second);
+			if(index == 100)	break;
+			if(page_lsn != 0 && page_lsn < log_sys->last_checkpoint_lsn)
+			{
+				page_id_list[index].copy_from(page_id);
+				index++;
+			}
 		}
 		rw_lock_s_unlock(&buf_pool->lookup_table_lock);
-
+		// fprintf(stderr, "ppl_cold_page_cleaner_worker[%d]: buf_pool: %p\n", i, ppl_buf_pool_from_array(i));
+		ppl_buf_page_read_in_area(page_id_list, index, ppl_buf_pool_from_array(i));
+		
 		if (!ppl_page_cleaner->is_running) {
 			slot->n_flushed_list = 0;
 			goto finish;
@@ -3183,8 +3207,6 @@ finish_mutex:
 	}
 
 	ulint	ret = ppl_page_cleaner->n_slots_requested;
-
-
 	mutex_exit(&ppl_page_cleaner->mutex);
 
 	return(ret);
@@ -3377,6 +3399,8 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			os_thread_create */
 {
 	ulint	next_loop_time = ut_time_ms() + 1000;
+	ulint	ppl_next_loop_time = ut_time_ms() + 10000;
+	bool 	ppl_request = false;
 	ulint	n_flushed = 0;
 	ulint	last_activity = srv_get_activity_count();
 	ulint	last_pages = 0;
@@ -3527,7 +3551,11 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			/* Request flushing for threads */
 			pc_request(ULINT_MAX, lsn_limit);
 #ifdef UNIV_NVDIMM_IPL
-			ppl_pc_request();
+			if(ut_time_ms() > ppl_next_loop_time) {
+				ppl_pc_request();
+				ppl_next_loop_time = ut_time_ms() + 10000;
+				ppl_request = true;
+			}
 #endif /* UNIV_NVDIMM_IPL */
 
 			ulint tm = ut_time_ms();
@@ -3545,7 +3573,10 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			ulint	n_flushed_list = 0;
 			pc_wait_finished(&n_flushed_lru, &n_flushed_list);
 #ifdef UNIV_NVDIMM_IPL
-			ppl_pc_wait_finished();
+			if(ppl_request) {
+				ppl_pc_wait_finished();
+				ppl_request = false;
+			}
 #endif /* UNIV_NVDIMM_IPL */
 
 			if (n_flushed_list > 0 || n_flushed_lru > 0) {
@@ -3577,7 +3608,11 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			/* Request flushing for threads */
 			pc_request(n_to_flush, lsn_limit);
 #ifdef UNIV_NVDIMM_IPL
-			ppl_pc_request();
+			if(ut_time_ms() > ppl_next_loop_time) {
+				ppl_pc_request();
+				ppl_next_loop_time = ut_time_ms() + 10000;
+				ppl_request = true;
+			}
 #endif /* UNIV_NVDIMM_IPL */
 
 			ulint tm = ut_time_ms();
@@ -3598,7 +3633,10 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 
 			pc_wait_finished(&n_flushed_lru, &n_flushed_list);
 #ifdef UNIV_NVDIMM_IPL
-			ppl_pc_wait_finished();
+			if(ppl_request) {
+				ppl_pc_wait_finished();
+				ppl_request = false;
+			}
 #endif /* UNIV_NVDIMM_IPL */
 
 			if (n_flushed_list > 0 || n_flushed_lru > 0) {

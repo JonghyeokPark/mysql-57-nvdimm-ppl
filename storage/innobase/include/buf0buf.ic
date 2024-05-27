@@ -82,20 +82,22 @@ buf_pool_index(
 	return(i);
 }
 
-/******************************************************************//**
-Returns the buffer pool instance given a page instance
-@return buf_pool */
+#ifdef UNIV_NVDIMM_IPL
+/********************************************************************//**
+Calculates the index of a buffer pool to the buf_pool[] array.
+@return the position of the buffer pool in buf_pool[] */
 UNIV_INLINE
-buf_pool_t*
-buf_pool_from_bpage(
-/*================*/
-	const buf_page_t*	bpage) /*!< in: buffer pool page */
+ulint
+get_ppl_buf_pool_index(
+/*===========*/
+	const buf_pool_t*	buf_pool)	/*!< in: buffer pool */
 {
-	ulint	i;
-	i = bpage->buf_pool_index;
+	ulint	i = buf_pool - ppl_buf_pool_ptr;
+	ut_ad(i < MAX_BUFFER_POOLS);
 	ut_ad(i < srv_buf_pool_instances);
-	return(&buf_pool_ptr[i]);
+	return(i);
 }
+#endif /* UNIV_NVDIMM_IPL */
 
 /******************************************************************//**
 Returns the buffer pool instance given a block instance
@@ -1029,6 +1031,23 @@ buf_pool_from_array(
 	ut_ad(index < srv_buf_pool_instances);
 	return(&buf_pool_ptr[index]);
 }
+
+#ifdef UNIV_NVDIMM_IPL
+/******************************************************************//**
+Returns the buffer pool instance given its array index
+@return buffer pool */
+UNIV_INLINE
+buf_pool_t*
+ppl_buf_pool_from_array(
+/*================*/
+	ulint	index)		/*!< in: array index to get
+				buffer pool instance from */
+{
+	ut_ad(index < MAX_BUFFER_POOLS);
+	ut_ad(index < srv_buf_pool_instances);
+	return(&ppl_buf_pool_ptr[index]);
+}
+#endif
 
 /** Returns the control block of a file page, NULL if not found.
 @param[in]	buf_pool	buffer pool instance
