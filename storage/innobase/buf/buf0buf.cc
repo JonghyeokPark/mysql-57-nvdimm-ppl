@@ -1871,6 +1871,7 @@ buf_pool_init_instance(
 	rw_lock_create(ipl_map_mutex_key, &buf_pool->lookup_table_lock, SYNC_IPL_MAP_MUTEX);
 	mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->static_allocator_mutex);
 	make_ppl_and_push_queue(buf_pool);
+	buf_pool->is_ppl_buf_pool = false;
 	fprintf(stderr, "buf_pool_init_instance: %d: %p, ipl_look_up_table: %p\n"
 			,buf_pool->instance_no, buf_pool, buf_pool->ipl_look_up_table);
 #endif
@@ -2167,6 +2168,7 @@ ppl_buf_pool_init_instance(
 	/* Initialize the iterator for single page scan search */
 	new(&buf_pool->single_scan_itr) LRUItr(buf_pool, &buf_pool->mutex);
 
+	buf_pool->is_ppl_buf_pool = true;
 	buf_pool_mutex_exit(buf_pool);
 
 	return(DB_SUCCESS);
@@ -5728,7 +5730,7 @@ ppl_buf_page_init_for_read(
 
 		buf_page_init(buf_pool, page_id, page_size, block);
 		bpage->buf_pool_index = get_ppl_buf_pool_index(buf_pool);
-		set_flag(&(bpage->flags), CLEANING);
+		set_flag(&(bpage->flags), IN_PPL_BUF_POOL);
 		set_flag(&(bpage->flags), NORMALIZE);
 
 		/* Note: We are using the hash_lock for protection. This is
@@ -5828,7 +5830,7 @@ ppl_buf_page_init_for_read(
 		buf_page_init_low(bpage);
 		
 		bpage->buf_pool_index = get_ppl_buf_pool_index(buf_pool);
-		set_flag(&(bpage->flags), CLEANING);
+		set_flag(&(bpage->flags), IN_PPL_BUF_POOL);
 		set_flag(&(bpage->flags), NORMALIZE);
 
 		bpage->state = BUF_BLOCK_ZIP_PAGE;
@@ -5902,7 +5904,7 @@ buf_pool_from_bpage(
 	i = bpage->buf_pool_index;
 	ut_ad(i < srv_buf_pool_instances);
 #ifdef UNIV_NVDIMM_IPL
-	if(get_flag((unsigned char *)(&(bpage->flags)), CLEANING)) {
+	if(get_flag((unsigned char *)(&(bpage->flags)), IN_PPL_BUF_POOL)) {
 		return(&ppl_buf_pool_ptr[i]);
 	}
 #endif
@@ -6450,6 +6452,8 @@ corrupt:
 #ifdef UNIV_NVDIMM_IPL
 	unsigned char *static_ipl_pointer = NULL;
 	bool return_ipl = false;
+	bool is_cleaning_ppl_page = false;
+	buf_pool_t * normal_buf_pool = NULL;
 #endif
 	
 
@@ -6467,13 +6471,12 @@ corrupt:
 					     BUF_IO_READ);
 		}
 #ifdef UNIV_NVDIMM_IPL
-		if(get_flag(&(bpage->flags), CLEANING)){
-			// log_flush_order_mutex_enter();
-			// ppl_buf_flush_note_modification((buf_block_t*) bpage);
-			// log_flush_order_mutex_exit();
+		if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
+			log_flush_order_mutex_enter();
+			ppl_buf_flush_note_modification((buf_block_t*) bpage);
+			log_flush_order_mutex_exit();
 			mutex_exit(buf_page_get_mutex(bpage));
-			// fprintf(stderr, "Remove Page: Flush Note Modification (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
-			buf_LRU_free_page(bpage, true);
+			// buf_LRU_free_page(bpage, true);
 			break;
 		}
 #endif
@@ -6493,7 +6496,14 @@ corrupt:
 #ifdef UNIV_NVDIMM_IPL
 		((buf_block_t *)bpage)->in_memory_ppl_buf.erase();
 		static_ipl_pointer = bpage->static_ipl_pointer;
+		is_cleaning_ppl_page = get_flag(&(bpage->flags), IN_PPL_BUF_POOL);
+		if(is_cleaning_ppl_page)	{
+			// fprintf(stderr, "After Writing page_id: (%u, %u): %p\n", bpage->id.space(), bpage->id.page_no(), static_ipl_pointer);
+			normal_buf_pool = normal_buf_pool_get(bpage->id);
+			evict = true;
+		}
 		return_ipl = check_return_ppl_region(bpage);
+
 #endif
 		buf_pool->stat.n_pages_written++;
 
@@ -6512,6 +6522,9 @@ corrupt:
 		if (evict) {
 			mutex_exit(buf_page_get_mutex(bpage));
 			buf_LRU_free_page(bpage, true);
+			if(is_cleaning_ppl_page)	{
+				// fprintf(stderr, "Removing page_id: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+			}
 		} else {
 			mutex_exit(buf_page_get_mutex(bpage));
 		}
@@ -6529,7 +6542,12 @@ corrupt:
 	buf_pool_mutex_exit(buf_pool);
 #ifdef UNIV_NVDIMM_IPL
 	if(!nvdimm_recv_running && return_ipl){
-		free_ppl_and_push_queue(buf_pool, static_ipl_pointer);
+		if(is_cleaning_ppl_page){
+			free_ppl_and_push_queue(normal_buf_pool, static_ipl_pointer); 
+		}
+		else{
+			free_ppl_and_push_queue(buf_pool, static_ipl_pointer);
+		}
 	}
 #endif
 

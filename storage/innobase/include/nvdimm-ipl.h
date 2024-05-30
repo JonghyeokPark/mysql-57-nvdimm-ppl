@@ -123,7 +123,7 @@ enum ipl_flag {
   DIRTIFIED = 4,
   IN_LOOK_UP = 8,
   DIRECTLY_WRITE = 16,
-  CLEANING = 32
+  IN_PPL_BUF_POOL = 32
 };
 
 typedef struct NVDIMM_SYSTEM
@@ -206,8 +206,8 @@ void unset_flag(unsigned char * flags, ipl_flag flag);
 bool get_flag(unsigned char * flags, ipl_flag flag);
 
 //CXL 관련 함수
-// void memcpy_to_cxl(void *dest, void *src, size_t size);
-void memcpy_to_cxl(void *__restrict dst, const void * __restrict src, size_t n);
+void memcpy_to_cxl(void *dest, void *src, size_t size);
+// void memcpy_to_cxl(void *__restrict dst, const void * __restrict src, size_t n);
 void memset_to_cxl(void* dest, int value, size_t size);
 
 //PPL시킬 수 있는지 판별하는 함수

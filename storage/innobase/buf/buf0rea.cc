@@ -126,14 +126,6 @@ buf_read_page_low(
 {
 	buf_page_t*	bpage;
 	*err = DB_SUCCESS;
-
-	// if(buf_page_peek(page_id)){
-	// 	fprintf(stderr, "page is in hash (%u, %u)\n", page_id.space(), page_id.page_no());
-	// }
-	// else{
-	// 	fprintf(stderr, "Not in hash (%u, %u)\n", page_id.space(), page_id.page_no());
-	// }
-
 	if (page_id.space() == TRX_SYS_SPACE
 	    && buf_dblwr_page_inside(page_id.page_no())) {
 
@@ -1013,15 +1005,6 @@ ppl_buf_read_page_low(
 	if (bpage == NULL) {
 		return(0);
 	}
-	// bpage->buf_pool_index = get_ppl_buf_pool_index(buf_pool);
-	// set_flag(&(bpage->flags), CLEANING);
-	// set_flag(&(bpage->flags), NORMALIZE);
-	// fprintf(stderr, "read page %u:%u size=%u unzip=%u,%s\n",
-	// 		      (unsigned) page_id.space(),
-	// 		      (unsigned) page_id.page_no(),
-	// 		      (unsigned) page_size.physical(),
-	// 		      (unsigned) unzip,
-	// 		      sync ? "sync" : "async");
 
 	DBUG_PRINT("ib_buf", ("read page %u:%u size=%u unzip=%u,%s",
 			      (unsigned) page_id.space(),

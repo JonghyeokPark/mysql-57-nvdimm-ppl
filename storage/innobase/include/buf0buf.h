@@ -2168,6 +2168,7 @@ struct buf_pool_t{
 	rw_lock_t lookup_table_lock;
 	std::queue<uint> * static_ipl_allocator;
 	ib_mutex_t static_allocator_mutex;
+	bool is_ppl_buf_pool;
 #endif
 
 	BufPoolMutex	mutex;		/*!< Buffer pool mutex of this

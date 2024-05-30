@@ -1337,6 +1337,9 @@ loop:
 
 		block->skip_flush_check = false;
 		block->page.flush_observer = NULL;
+		if(buf_pool->is_ppl_buf_pool){
+			set_flag(&((buf_page_t *)block)->flags, IN_PPL_BUF_POOL);
+		}
 		return(block);
 	}
 

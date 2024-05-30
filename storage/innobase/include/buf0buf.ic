@@ -1014,6 +1014,12 @@ buf_pool_get(
 
         ulint		i = id.fold() % srv_buf_pool_instances;
 
+#ifdef UNIV_NVDIMM_IPL
+		if (buf_page_hash_get_low(&ppl_buf_pool_ptr[i], page_id)) {
+			// fprintf(stderr, "ppl_buf_pool [%lu] is used: (%u, %u)\n", i, page_id.space(), page_id.page_no());
+			return(&ppl_buf_pool_ptr[i]);
+		}
+#endif
         return(&buf_pool_ptr[i]);
 }
 
@@ -1046,6 +1052,42 @@ ppl_buf_pool_from_array(
 	ut_ad(index < MAX_BUFFER_POOLS);
 	ut_ad(index < srv_buf_pool_instances);
 	return(&ppl_buf_pool_ptr[index]);
+}
+
+/** Returns the buffer pool instance given a page id.
+@param[in]	page_id	page id
+@return buffer pool */
+UNIV_INLINE
+buf_pool_t*
+ppl_buf_pool_get(
+	const page_id_t&	page_id)
+{
+        /* 2log of BUF_READ_AHEAD_AREA (64) */
+        ulint		ignored_page_no = page_id.page_no() >> 6;
+
+        page_id_t	id(page_id.space(), ignored_page_no);
+
+        ulint		i = id.fold() % srv_buf_pool_instances;
+
+        return(&ppl_buf_pool_ptr[i]);
+}
+
+/** Returns the buffer pool instance given a page id.
+@param[in]	page_id	page id
+@return buffer pool */
+UNIV_INLINE
+buf_pool_t*
+normal_buf_pool_get(
+	const page_id_t&	page_id)
+{
+        /* 2log of BUF_READ_AHEAD_AREA (64) */
+        ulint		ignored_page_no = page_id.page_no() >> 6;
+
+        page_id_t	id(page_id.space(), ignored_page_no);
+
+        ulint		i = id.fold() % srv_buf_pool_instances;
+
+        return(&buf_pool_ptr[i]);
 }
 #endif
 

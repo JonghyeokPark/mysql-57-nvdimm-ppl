@@ -31,7 +31,7 @@
 #include <stdint.h>
 
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
-	unsigned char * static_ipl_pointer = alloc_ppl_from_queue(buf_pool_get(bpage->id));
+	unsigned char * static_ipl_pointer = alloc_ppl_from_queue(normal_buf_pool_get(bpage->id));
 	unsigned char temp_buf[8] = {0};
 	if(static_ipl_pointer == NULL) return false;
 	ulint offset = 0;
@@ -53,7 +53,7 @@ bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
 }
 
 bool alloc_nth_ppl_to_bpage(buf_page_t * bpage){
-	unsigned char * new_ppl_block = alloc_ppl_from_queue(buf_pool_get(bpage->id));
+	unsigned char * new_ppl_block = alloc_ppl_from_queue(normal_buf_pool_get(bpage->id));
 	if(new_ppl_block == NULL) return false;
 	mach_write_to_4(get_last_block_address_index(bpage), get_ipl_index_from_addr(nvdimm_info->static_start_pointer, new_ppl_block, nvdimm_info->each_ppl_size));
 	
@@ -314,7 +314,7 @@ void apply_log_record(mlog_id_t log_type, byte* log_data, uint length, trx_id_t 
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 	page_id_t page_id = bpage->id;
 	std::pair <page_id_t, unsigned char *> insert_data = std::make_pair(bpage->id, bpage->static_ipl_pointer);
-	buf_pool_t * buf_pool = buf_pool_get(page_id);
+	buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
 	rw_lock_x_lock(&buf_pool->lookup_table_lock);
 	buf_pool->ipl_look_up_table->insert(insert_data);
 	rw_lock_x_unlock(&buf_pool->lookup_table_lock);
@@ -328,8 +328,8 @@ void set_normalize_flag(buf_page_t * bpage){
 
 /* Unset_flag를 해주지 않아도 Static_ipl이 free 되면 초기화 됨*/
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){ 
-	buf_pool_t * buf_pool = buf_pool_get(page_id);
 	if(get_flag(&(bpage->flags), IN_LOOK_UP)){
+		buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
 		rw_lock_x_lock(&buf_pool->lookup_table_lock);
 		buf_pool->ipl_look_up_table->erase(page_id);
 		rw_lock_x_unlock(&buf_pool->lookup_table_lock);
@@ -337,8 +337,15 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	bpage->static_ipl_pointer = NULL;
 	bpage->ipl_write_pointer = NULL;
 	bpage->block_used = 0;
-	bpage->flags = 0;
 	bpage->trx_id = 0;
+	if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
+		bpage->flags = 0;
+		set_flag(&(bpage->flags), IN_PPL_BUF_POOL);
+	}
+	else{
+		bpage->flags = 0;
+	}
+	
 }
 
 
@@ -346,11 +353,11 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 void set_for_ipl_page(buf_page_t* bpage){
 	bpage->trx_id = 0;
 	bpage->static_ipl_pointer = NULL;
-	bpage->flags = 0;
 	bpage->ipl_write_pointer = NULL;
 	bpage->block_used = 0;
+	bpage->flags = 0;
 	page_id_t page_id = bpage->id;
-	buf_pool_t * buf_pool = buf_pool_get(page_id);
+	buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
 	rw_lock_s_lock(&buf_pool->lookup_table_lock);
 	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it = buf_pool->ipl_look_up_table->find(page_id);
 	rw_lock_s_unlock(&buf_pool->lookup_table_lock);
@@ -397,10 +404,15 @@ bool check_return_ppl_region(buf_page_t * bpage){
 		// fprintf(stderr, "Non PPLed Page (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		bpage->static_ipl_pointer = NULL;
 		bpage->ipl_write_pointer = NULL;
-		bpage->flags = 0;
 		bpage->trx_id = 0;
 		bpage->block_used = 0;
-		return false;
+		if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
+			bpage->flags = 0;
+			set_flag(&(bpage->flags), IN_PPL_BUF_POOL);
+		}
+		else{
+			bpage->flags = 0;
+		}
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
@@ -463,51 +475,51 @@ bool get_flag(unsigned char * flags, ipl_flag flag_type){
 	return (*flags) & flag_type;
 }
 
-// void memcpy_to_cxl(void *dest, void *src, size_t size){
-// 	memcpy(dest, src, size);
-// 	flush_cache(dest, size);
+void memcpy_to_cxl(void *dest, void *src, size_t size){
+	memcpy(dest, src, size);
+	flush_cache(dest, size);
 	
-// }
-
-#define NT_THRESHOLD (2 * CACHE_LINE_SIZE)
-
-void memcpy_to_cxl(void *__restrict dst, const void * __restrict src, size_t n)
-{
-	if (n < NT_THRESHOLD) {
-		memcpy(dst, src, n);
-		return;
-	}
-
-	size_t n_unaligned = CACHE_LINE_SIZE - (uintptr_t)dst % CACHE_LINE_SIZE;
-
-	if (n_unaligned > n)
-		n_unaligned = n;
-
-	memcpy(dst, src, n_unaligned);
-	dst += n_unaligned;
-	src += n_unaligned;
-	n -= n_unaligned;
-
-	size_t num_lines = n / CACHE_LINE_SIZE;
-
-	size_t i;
-	for (i = 0; i < num_lines; i++) {
-		size_t j;
-		for (j = 0; j < CACHE_LINE_SIZE / sizeof(__m128i); j++) {
-			__m128i blk = _mm_loadu_si128((const __m128i *)src);
-			/* non-temporal store */
-			_mm_stream_si128((__m128i *)dst, blk);
-			src += sizeof(__m128i);
-			dst += sizeof(__m128i);
-		}
-		n -= CACHE_LINE_SIZE;
-	}
-
-	if (num_lines > 0)
-		_mm_sfence();
-
-	memcpy(dst, src, n);
 }
+
+// #define NT_THRESHOLD (2 * CACHE_LINE_SIZE)
+
+// void memcpy_to_cxl(void *__restrict dst, const void * __restrict src, size_t n)
+// {
+// 	if (n < NT_THRESHOLD) {
+// 		memcpy(dst, src, n);
+// 		return;
+// 	}
+
+// 	size_t n_unaligned = CACHE_LINE_SIZE - (uintptr_t)dst % CACHE_LINE_SIZE;
+
+// 	if (n_unaligned > n)
+// 		n_unaligned = n;
+
+// 	memcpy(dst, src, n_unaligned);
+// 	dst += n_unaligned;
+// 	src += n_unaligned;
+// 	n -= n_unaligned;
+
+// 	size_t num_lines = n / CACHE_LINE_SIZE;
+
+// 	size_t i;
+// 	for (i = 0; i < num_lines; i++) {
+// 		size_t j;
+// 		for (j = 0; j < CACHE_LINE_SIZE / sizeof(__m128i); j++) {
+// 			__m128i blk = _mm_loadu_si128((const __m128i *)src);
+// 			/* non-temporal store */
+// 			_mm_stream_si128((__m128i *)dst, blk);
+// 			src += sizeof(__m128i);
+// 			dst += sizeof(__m128i);
+// 		}
+// 		n -= CACHE_LINE_SIZE;
+// 	}
+
+// 	if (num_lines > 0)
+// 		_mm_sfence();
+
+// 	memcpy(dst, src, n);
+// }
 
 
 void memset_to_cxl(void* dest, int value, size_t size){
