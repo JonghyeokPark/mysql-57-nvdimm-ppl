@@ -1337,9 +1337,12 @@ loop:
 
 		block->skip_flush_check = false;
 		block->page.flush_observer = NULL;
+#ifdef UNIV_NVDIMM_IPL
 		if(buf_pool->is_ppl_buf_pool){
+			((buf_page_t *)block)->buf_pool_index = get_ppl_buf_pool_index(buf_pool);
 			set_flag(&((buf_page_t *)block)->flags, IN_PPL_BUF_POOL);
 		}
+#endif
 		return(block);
 	}
 

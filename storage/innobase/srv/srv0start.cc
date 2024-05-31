@@ -1955,7 +1955,8 @@ innobase_start_or_create_for_mysql(void)
 	}
 
 #ifdef UNIV_NVDIMM_IPL
-	for (i = 0; i < srv_n_page_cleaners; ++i) {
+	ulint ppl_clenaer_num = 8;
+	for (i = 0; i < ppl_clenaer_num; ++i) {
 		os_thread_create(buf_flush_ppl_page_cleaner_worker,
 				NULL, NULL);
 	}
