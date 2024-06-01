@@ -1132,29 +1132,20 @@ buf_flush_write_block_low(
 	Given the nature and load of temporary tablespace doublewrite buffer
 	adds an overhead during flushing. */
 #ifdef UNIV_NVDIMM_IPL
-	if(check_can_be_pplized(bpage)){
+	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
 		// fprintf(stderr, "Not Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
-		if(get_flag(&(bpage->flags), DIRECTLY_WRITE)){
-			goto jump_to_io_complete;
+		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification);
+		insert_page_ipl_info_in_hash_table(bpage);
+		if(sync){
+			buf_page_io_complete(bpage, true);
 		}
-		if(copy_memory_log_to_cxl(bpage)){
-jump_to_io_complete:
-			set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification);
-			if(sync){
-				buf_page_io_complete(bpage, true);
-			}
-			else{
-				buf_page_io_complete(bpage, false);
-			}
-			return;
+		else{
+			buf_page_io_complete(bpage, false);
 		}
+		buf_LRU_stat_inc_io();
+		return;
 	}
 #endif
-	//if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
-		//fprintf(stderr, "Flush In PPL Buffer Pool: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
-	//}
-	// fprintf(stderr, "Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
-	set_normalize_flag(bpage);
 
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL
@@ -2281,8 +2272,12 @@ buf_flush_single_page_from_LRU(
 				break;
 			}
 
-		} else if (buf_flush_ready_for_flush(
-				   bpage, BUF_FLUSH_SINGLE_PAGE)) {
+		} 
+#ifdef UNIV_NVDIMM_IPL
+		else if ((n_iterations > 1) && buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
+#else
+		else if (buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
+#endif
 
 			/* Block is ready for flush. Try and dispatch an IO
 			request. We'll put it on free list in IO completion

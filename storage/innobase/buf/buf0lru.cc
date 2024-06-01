@@ -1337,9 +1337,12 @@ loop:
 
 		block->skip_flush_check = false;
 		block->page.flush_observer = NULL;
+#ifdef UNIV_NVDIMM_IPL
 		if(buf_pool->is_ppl_buf_pool){
+			((buf_page_t *)block)->buf_pool_index = get_ppl_buf_pool_index(buf_pool);
 			set_flag(&((buf_page_t *)block)->flags, IN_PPL_BUF_POOL);
 		}
+#endif
 		return(block);
 	}
 
@@ -2137,10 +2140,6 @@ buf_LRU_block_free_non_file_page(
 	memset(block->frame + FIL_PAGE_OFFSET, 0xfe, 4);
 	memset(block->frame + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID, 0xfe, 4);
 #endif /* UNIV_DEBUG */
-
-#ifdef UNIV_NVDIMM_IPL
-	block->in_memory_ppl_buf.erase();
-#endif
 	data = block->page.zip.data;
 
 	if (data != NULL) {

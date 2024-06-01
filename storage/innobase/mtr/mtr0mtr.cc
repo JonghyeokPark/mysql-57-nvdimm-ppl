@@ -983,11 +983,18 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 		copy_log_to_ppl_directly(body, log_len, type, buf_page, trx_id);
 	}
 	else{
-		if(((buf_block_t *)buf_page)->in_memory_ppl_buf.size() + log_len > nvdimm_info->max_ppl_size){
+		if(log_len > nvdimm_info->max_ppl_size){
 			set_normalize_flag(buf_page);
 			return;
 		}
-		copy_log_to_memory(body, log_len, type, buf_page, trx_id);
+		else{
+			if(alloc_first_ppl_to_bpage(buf_page)){
+				copy_log_to_ppl_directly(body, log_len, type, buf_page, trx_id);
+			}
+			else{
+				set_normalize_flag(buf_page);
+			}
+		}
 	}
 	
 }

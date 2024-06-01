@@ -1919,10 +1919,6 @@ struct buf_block_t{
 					mutex in InnoDB-5.1 to relieve
 					contention on the buffer pool mutex */
 #endif /* !UNIV_HOTBACKUP */
-
-#ifdef UNIV_NVDIMM_IPL
-	in_memory_ppl_buf_t in_memory_ppl_buf;
-#endif
 };
 
 /** Check if a buf_block_t object is in a valid state

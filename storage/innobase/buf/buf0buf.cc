@@ -1484,11 +1484,6 @@ buf_block_init(
 #endif /* PFS_SKIP_BUFFER_MUTEX_RWLOCK || PFS_GROUP_BUFFER_SYNC */
 
 	block->lock.is_block_lock = 1;
-	
-// in memory PPL structure 할당
-#ifdef UNIV_NVDIMM_IPL
-	new(&(block->in_memory_ppl_buf)) in_memory_ppl_buf_t();
-#endif
 	ut_ad(rw_lock_validate(&(block->lock)));
 }
 
@@ -6476,7 +6471,6 @@ corrupt:
 			ppl_buf_flush_note_modification((buf_block_t*) bpage);
 			log_flush_order_mutex_exit();
 			mutex_exit(buf_page_get_mutex(bpage));
-			// buf_LRU_free_page(bpage, true);
 			break;
 		}
 #endif
@@ -6494,7 +6488,6 @@ corrupt:
 					      BUF_IO_WRITE);
 		}
 #ifdef UNIV_NVDIMM_IPL
-		((buf_block_t *)bpage)->in_memory_ppl_buf.erase();
 		static_ipl_pointer = bpage->static_ipl_pointer;
 		is_cleaning_ppl_page = get_flag(&(bpage->flags), IN_PPL_BUF_POOL);
 		if(is_cleaning_ppl_page)	{
@@ -6522,9 +6515,6 @@ corrupt:
 		if (evict) {
 			mutex_exit(buf_page_get_mutex(bpage));
 			buf_LRU_free_page(bpage, true);
-			if(is_cleaning_ppl_page)	{
-				// fprintf(stderr, "Removing page_id: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
-			}
 		} else {
 			mutex_exit(buf_page_get_mutex(bpage));
 		}
