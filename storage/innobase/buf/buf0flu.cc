@@ -63,6 +63,7 @@ static const int buf_flush_page_cleaner_priority = -20;
 
 #ifdef UNIV_NVDIMM_IPL
 #include "nvdimm-ipl.h"
+#include "vector"
 #endif
 
 /** Sleep time in microseconds for loop waiting for the oldest
@@ -1149,9 +1150,9 @@ jump_to_io_complete:
 		}
 	}
 #endif
-	if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
-		fprintf(stderr, "Flush In PPL Buffer Pool: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
-	}
+	//if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
+		//fprintf(stderr, "Flush In PPL Buffer Pool: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
+	//}
 	// fprintf(stderr, "Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
 	set_normalize_flag(bpage);
 
@@ -3138,8 +3139,7 @@ ppl_pc_flush_slot(void)
 {
 	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it;
 	//page_id_list 생성
-	page_id_t page_id_list[100];
-	int index = 0;
+	std::vector <page_id_t> page_id_list;
 	mutex_enter(&ppl_page_cleaner->mutex);
 
 
@@ -3189,33 +3189,26 @@ ppl_pc_flush_slot(void)
 		mutex_exit(&ppl_page_cleaner->mutex);
 		// 일단은 Page를 FLUSH 진행
 		/* Flush pages from flush_list if required */
-		// if (ppl_page_cleaner->requested) {
-		// 	slot->succeeded_list = buf_flush_do_batch(
-		// 		ppl_buf_pool_from_array(i), BUF_FLUSH_LIST,
-		// 		slot->n_pages_requested,
-		// 		ppl_page_cleaner->lsn_limit,
-		// 		&slot->n_flushed_list);
-		// 	// fprintf(stderr, "ppl_cold_page_cleaner_worker[%d]: n_pages_requested: %d, slot->n_flushed_list: %d\n",
-		// 			// i, slot->n_pages_requested, slot->n_flushed_list);
-		// } else {
-		// 	slot->n_flushed_list = 0;
-		// 	slot->succeeded_list = true;
-		// }
+		if (ppl_page_cleaner->requested) {
+			slot->succeeded_list = buf_flush_do_batch(
+				ppl_buf_pool_from_array(i), BUF_FLUSH_LIST,
+				slot->n_pages_requested,
+				ppl_page_cleaner->lsn_limit,
+				&slot->n_flushed_list);
+		} else {
+			slot->n_flushed_list = 0;
+			slot->succeeded_list = true;
+		}
 		slot->n_flushed_lru = 0;
 		/* PPL Page 별로 접근해서  Page LSN만 읽어오기*/
 		rw_lock_s_lock(&buf_pool->lookup_table_lock);
 		for (it = buf_pool->ipl_look_up_table->begin(); it != buf_pool->ipl_look_up_table->end(); ++it) {
 			page_id_t page_id = it->first;
 			lsn_t page_lsn = get_page_lsn_from_ipl_header(it->second);
-			if(index == slot->n_pages_requested)	break;
-			if(page_lsn != 0 && page_lsn < log_sys->last_checkpoint_lsn)
-			{
-				page_id_list[index].copy_from(page_id);
-				index++;
-			}
+			if(page_lsn != 0 && page_lsn < log_sys->last_checkpoint_lsn)	page_id_list.push_back(page_id);
 		}
 		rw_lock_s_unlock(&buf_pool->lookup_table_lock);
-		ppl_buf_page_read_in_area(page_id_list, index, ppl_buf_pool_from_array(i));
+		ppl_buf_page_read_in_area(page_id_list, slot->n_pages_requested, ppl_buf_pool_from_array(i));
 		
 		if (!ppl_page_cleaner->is_running) {
 			slot->n_flushed_list = 0;

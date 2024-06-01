@@ -6476,6 +6476,7 @@ corrupt:
 			ppl_buf_flush_note_modification((buf_block_t*) bpage);
 			log_flush_order_mutex_exit();
 			mutex_exit(buf_page_get_mutex(bpage));
+			// buf_LRU_free_page(bpage, true);
 			break;
 		}
 #endif
@@ -6521,6 +6522,9 @@ corrupt:
 		if (evict) {
 			mutex_exit(buf_page_get_mutex(bpage));
 			buf_LRU_free_page(bpage, true);
+			if(is_cleaning_ppl_page)	{
+				// fprintf(stderr, "Removing page_id: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
+			}
 		} else {
 			mutex_exit(buf_page_get_mutex(bpage));
 		}

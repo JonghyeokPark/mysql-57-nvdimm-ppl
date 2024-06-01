@@ -249,16 +249,6 @@ public:
 		ut_ad(page_no <= 0xFFFFFFFFU);
 	}
 
-#ifdef UNIV_NVDIMM_IPL
-	page_id_t()
-		:
-		m_space(0),
-		m_page_no(0),
-		m_fold(ULINT_UNDEFINED)
-	{
-	}
-#endif
-
 	/** Retrieve the tablespace id.
 	@return tablespace id */
 	inline ib_uint32_t space() const
@@ -346,8 +336,9 @@ private:
 	mutable ulint	m_fold;
 
 	/* Disable implicit copying. */
+#ifndef UNIV_NVDIMM_IPL
 	void operator=(const page_id_t&);
-
+#endif
 	/** Declare the overloaded global operator<< as a friend of this
 	class. Refer to the global declaration for further details.  Print
 	the given page_id_t object.

@@ -19,34 +19,31 @@ struct ppl_page_t{
 
 ulint
 ppl_buf_page_read_in_area(
-	page_id_t*	page_id_list /*Page_id List*/,
-	ulint read_page_no,
+	std::vector<page_id_t>	page_id_list /*Page_id List*/,
+	uint read_page_no,
 	buf_pool_t * buf_pool)
 {
 	ulint	n;
 
 	n = 0;
 
-	for (ulint i = 0; i < read_page_no; i++) {
+	// for문으로 돌지말고, iterator로 돌아줘
+
+	for (uint i = 0; i < page_id_list.capacity() && n < read_page_no; i++) {
 		const page_id_t cur_page_id = page_id_list[i];
-		fil_space_t*		space	= fil_space_get(cur_page_id.space());
 		buf_pool_t * page_buf_pool = buf_pool_get(cur_page_id);
 		buf_page_t * buf_page = buf_page_hash_get_low(page_buf_pool, cur_page_id);
-		const page_size_t	page_size(space->flags);
 
 		if (buf_page != NULL) { /* 현재 다른 버퍼에 페이지가 존재한다면*/
-			page_id_list[i].reset(0,0);
-			set_normalize_flag(buf_page);
 			continue;
 		}
+
+		fil_space_t*		space	= fil_space_get(cur_page_id.space());
+		const page_size_t	page_size(space->flags);
 		if(ppl_buf_read_page_background(cur_page_id, page_size, false, buf_pool)){
 			// fprintf(stderr, "ppl_buf_page_read_in_area: read page_id(%lu, %lu), buf_pool[%d]: %p\n", 
 			// 		cur_page_id.space(), cur_page_id.page_no(), buf_pool->instance_no, buf_pool);
 			n++;
-		}
-		else{
-			// fprintf(stderr, "ppl_buf_page_read_in_area: failed to read page_id(%lu, %lu), Already in buf_pool: %p\n", cur_page_id.space(), cur_page_id.page_no(), buf_pool);
-			continue;
 		}
 		
 	}
