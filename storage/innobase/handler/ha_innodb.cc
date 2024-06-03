@@ -20317,7 +20317,7 @@ static MYSQL_SYSVAR_ULONG(nvdimm_static_entry_size, srv_nvdimm_static_entry_size
 static MYSQL_SYSVAR_ULONG(nvdimm_max_ppl_size, srv_nvdimm_max_ppl_size,
   PLUGIN_VAR_OPCMDARG | PLUGIN_VAR_READONLY,
   "Max PPL Size Per Page",
-  NULL, NULL, 256, 128, 2048, 0);
+  NULL, NULL, 384, 128, 4096, 0);
 
 static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl_recovery, srv_use_nvdimm_ipl_recovery,
   PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,

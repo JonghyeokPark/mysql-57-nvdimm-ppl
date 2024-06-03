@@ -1920,6 +1920,14 @@ func_exit:
 	ut_ad(bpage->in_LRU_list);
 	ut_ad(!bpage->in_flush_list == !bpage->oldest_modification);
 
+#ifdef UNIV_NVDIMM_IPL
+	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
+		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification); 
+		// Page가 Discard되기 전에 Page_lsn IPL header에 저장
+	}
+#endif /* UNIV_NVDIMM_IPL */
+
 	DBUG_PRINT("ib_buf", ("free page " UINT32PF ":" UINT32PF,
 			      bpage->id.space(), bpage->id.page_no()));
 
