@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <stddef.h>
 
+bool is_flushed_thread = false;
 
 void make_ppl_and_push_queue(buf_pool_t * buf_pool){
 	uint start_index = nvdimm_info->static_ipl_page_number_per_buf_pool * buf_pool->instance_no;
@@ -33,6 +34,11 @@ unsigned char * alloc_ppl_from_queue(buf_pool_t * buf_pool){
 	buf_pool->static_ipl_allocator->pop();
 	//fprintf(stderr, "Static,%f,%lu,%u\n", (double)(time(NULL) - my_start),buf_pool->instance_no, (nvdimm_info->static_ipl_page_number_per_buf_pool - buf_pool->static_ipl_allocator->size()) * 100 / nvdimm_info->static_ipl_page_number_per_buf_pool);
 	mutex_exit(&buf_pool->static_allocator_mutex);
+
+	// if(!is_flushed_thread && ((nvdimm_info->static_ipl_page_number_per_buf_pool - buf_pool->static_ipl_allocator->size()) * 100 / nvdimm_info->static_ipl_page_number_per_buf_pool) > 90){
+	// 	os_event_set(ppl_buf_flush_event);
+	// 	is_flushed_thread = true;
+	// }
 	
 	return ret_address;
 }

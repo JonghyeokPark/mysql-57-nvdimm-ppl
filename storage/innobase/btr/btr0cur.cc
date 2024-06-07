@@ -3560,7 +3560,7 @@ btr_cur_pessimistic_insert(
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
-	set_normalize_flag((buf_page_t *)(btr_cur_get_block(cursor)));
+	set_normalize_flag((buf_page_t *)(btr_cur_get_block(cursor)), 1);
 #endif
 
 	return(DB_SUCCESS);
@@ -4762,7 +4762,7 @@ return_after_reservations:
 	*big_rec = big_rec_vec;
 
 #ifdef UNIV_NVDIMM_IPL
-	set_normalize_flag((buf_page_t *)(btr_cur_get_block(cursor)));
+	set_normalize_flag((buf_page_t *)(btr_cur_get_block(cursor)), 1);
 #endif
 
 
@@ -5570,7 +5570,7 @@ return_after_reservations:
 
 
 #ifdef UNIV_NVDIMM_IPL
-	set_normalize_flag((buf_page_t *)(btr_cur_get_block(cursor)));
+	set_normalize_flag((buf_page_t *)(btr_cur_get_block(cursor)), 1);
 #endif
 
 

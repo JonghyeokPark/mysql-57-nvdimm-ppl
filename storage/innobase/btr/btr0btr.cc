@@ -1432,7 +1432,7 @@ func_exit:
 				mtr, page, index, type,
 				page_zip ? 1 : 0);
 #ifdef UNIV_NVDIMM_IPL
-		set_normalize_flag((buf_page_t *) block);
+		set_normalize_flag((buf_page_t *) block, 1);
 #endif
 		/* For compressed pages write the compression level. */
 		if (log_ptr && page_zip) {
@@ -1665,7 +1665,7 @@ btr_root_raise_and_insert(
 
 	/* Copy the records from root to the new page one by one. */
 #ifdef UNIV_NVDIMM_IPL
-	set_normalize_flag((buf_page_t *)new_block);
+	set_normalize_flag((buf_page_t *)new_block, 1);
 #endif
 
 	if (0
@@ -2646,8 +2646,8 @@ func_start:
 	btr_page_create(new_block, new_page_zip, cursor->index,
 			btr_page_get_level(page, mtr), mtr);
 #ifdef UNIV_NVDIMM_IPL
-	set_normalize_flag((buf_page_t *)new_block);
-	set_normalize_flag((buf_page_t *)block);
+	set_normalize_flag((buf_page_t *)new_block, 1);
+	set_normalize_flag((buf_page_t *)block, 1);
 #endif
 	/* 3. Calculate the first record on the upper half-page, and the
 	first record (move_limit) on original page which ends up on the

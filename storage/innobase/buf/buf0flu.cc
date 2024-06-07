@@ -64,6 +64,7 @@ static const int buf_flush_page_cleaner_priority = -20;
 #ifdef UNIV_NVDIMM_IPL
 #include "nvdimm-ipl.h"
 #include "vector"
+#include "algorithm"
 #endif
 
 /** Sleep time in microseconds for loop waiting for the oldest
@@ -195,6 +196,9 @@ struct page_cleaner_t {
 static page_cleaner_t*	page_cleaner = NULL;
 
 #ifdef UNIV_NVDIMM_IPL
+mysql_pfs_key_t ppl_page_cleaner_thread_key;
+bool ppl_buf_page_cleaner_is_active = false;
+os_event_t	ppl_buf_flush_event;
 static page_cleaner_t*	ppl_page_cleaner = NULL;
 #endif
 
@@ -1148,8 +1152,9 @@ buf_flush_write_block_low(
 #ifdef UNIV_NVDIMM_IPL
 	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
 		// fprintf(stderr, "Not Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
+		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification);
 		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
-		insert_page_ipl_info_in_hash_table(bpage);
+		
 		if(sync){
 			buf_page_io_complete(bpage, true);
 		}
@@ -2289,7 +2294,7 @@ buf_flush_single_page_from_LRU(
 		} 
 #ifdef UNIV_NVDIMM_IPL
 		// else if ((n_iterations > 1) && buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
-		else if (buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
+		else if (n_iterations > 1 && buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
 #else
 		else if (buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
 #endif
@@ -2780,6 +2785,31 @@ pc_sleep_if_needed(
 	return(OS_SYNC_TIME_EXCEEDED);
 }
 
+#ifdef UNIV_NVDIMM_IPL
+static
+ulint
+ppl_pc_sleep_if_needed(
+/*===============*/
+	ulint		next_loop_time,
+	int64_t		sig_count)
+{
+	ulint	cur_time = ut_time_ms();
+
+	if (next_loop_time > cur_time) {
+		/* Get sleep interval in micro seconds. We use
+		ut_min() to avoid long sleep in case of wrap around. */
+		ulint	sleep_us;
+
+		sleep_us = ut_min(static_cast<ulint>(1000000),
+				  (next_loop_time - cur_time) * 1000);
+		return(os_event_wait_time_low(ppl_buf_flush_event,
+					      sleep_us, sig_count));
+	}
+
+	return(OS_SYNC_TIME_EXCEEDED);
+}
+#endif
+
 /******************************************************************//**
 Initialize page_cleaner. */
 void
@@ -3089,6 +3119,9 @@ pc_wait_finished(
 }
 
 #ifdef UNIV_NVDIMM_IPL
+bool compare(const std::pair<page_id_t, uint64_t>& a, const std::pair<page_id_t, uint64_t>& b) {
+    return a.second < b.second;
+}
 /**
 Requests for all slots to flush all buffer pool instances.
 @param min_n	wished minimum mumber of blocks flushed
@@ -3149,7 +3182,7 @@ ppl_pc_flush_slot(void)
 {
 	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it;
 	//page_id_list 생성
-	std::vector <page_id_t> page_id_list;
+	std::vector <std::pair<page_id_t, uint64_t> > page_id_list;
 	mutex_enter(&ppl_page_cleaner->mutex);
 
 
@@ -3205,19 +3238,20 @@ ppl_pc_flush_slot(void)
 				slot->n_pages_requested,
 				ppl_page_cleaner->lsn_limit,
 				&slot->n_flushed_list);
+			// fprintf(stderr, "slot->n_pages_requested,: %d slot->n_flushed_list : %d\n", slot->n_pages_requested, slot->n_flushed_list);
 		} else {
 			slot->n_flushed_list = 0;
 			slot->succeeded_list = true;
 		}
-		slot->n_flushed_lru = 0;
 		/* PPL Page 별로 접근해서  Page LSN만 읽어오기*/
 		rw_lock_s_lock(&buf_pool->lookup_table_lock);
 		for (it = buf_pool->ipl_look_up_table->begin(); it != buf_pool->ipl_look_up_table->end(); ++it) {
 			page_id_t page_id = it->first;
 			lsn_t page_lsn = get_page_lsn_from_ipl_header(it->second);
-			if(page_lsn != 0 && page_lsn < log_sys->last_checkpoint_lsn)	page_id_list.push_back(page_id);
+			page_id_list.push_back(std::make_pair(page_id, page_lsn));
 		}
 		rw_lock_s_unlock(&buf_pool->lookup_table_lock);
+		std::sort(page_id_list.begin(), page_id_list.end(), compare);
 		ppl_buf_page_read_in_area(page_id_list, slot->n_pages_requested, ppl_buf_pool_from_array(i));
 		
 		if (!ppl_page_cleaner->is_running) {
@@ -3251,7 +3285,8 @@ Wait until all flush requests are finished.
 @return			true if all flush_list flushing batch were success. */
 static
 bool
-ppl_pc_wait_finished()
+ppl_pc_wait_finished(
+	ulint * n_flushed)
 {
 	bool	all_succeeded = true;
 
@@ -3265,6 +3300,8 @@ ppl_pc_wait_finished()
 
 	for (ulint i = 0; i < ppl_page_cleaner->n_slots; i++) {
 		page_cleaner_slot_t* slot = &ppl_page_cleaner->slots[i];
+
+		*n_flushed += slot->n_flushed_list;
 
 		ut_ad(slot->state == PAGE_CLEANER_STATE_FINISHED);
 		all_succeeded &= slot->succeeded_list;
@@ -3342,6 +3379,48 @@ buf_flush_page_cleaner_disabled_loop(void)
 	page_cleaner->n_disabled_debug--;
 	mutex_exit(&page_cleaner->mutex);
 }
+#ifdef UNIV_NVDIMM_IPL
+/** Loop used to disable page cleaner threads. */
+static
+void
+ppl_buf_flush_page_cleaner_disabled_loop(void)
+{
+	ut_ad(ppl_page_cleaner != NULL);
+
+	if (!innodb_page_cleaner_disabled_debug) {
+		/* We return to avoid entering and exiting mutex. */
+		return;
+	}
+
+	mutex_enter(&ppl_page_cleaner->mutex);
+	ppl_page_cleaner->n_disabled_debug++;
+	mutex_exit(&ppl_page_cleaner->mutex);
+
+	while (innodb_page_cleaner_disabled_debug
+	       && srv_shutdown_state == SRV_SHUTDOWN_NONE
+	       && ppl_page_cleaner->is_running) {
+
+		os_thread_sleep(100000); /* [A] */
+	}
+
+	/* We need to wait for threads exiting here, otherwise we would
+	encounter problem when we quickly perform following steps:
+		1) SET GLOBAL innodb_page_cleaner_disabled_debug = 1;
+		2) SET GLOBAL innodb_page_cleaner_disabled_debug = 0;
+		3) SET GLOBAL innodb_page_cleaner_disabled_debug = 1;
+	That's because after step 1 this thread could still be sleeping
+	inside the loop above at [A] and steps 2, 3 could happen before
+	this thread wakes up from [A]. In such case this thread would
+	not re-increment n_disabled_debug and we would be waiting for
+	him forever in buf_flush_page_cleaner_disabled_debug_update(...).
+
+	Therefore we are waiting in step 2 for this thread exiting here. */
+
+	mutex_enter(&ppl_page_cleaner->mutex);
+	ppl_page_cleaner->n_disabled_debug--;
+	mutex_exit(&ppl_page_cleaner->mutex);
+}
+#endif
 
 /** Disables page cleaner threads (coordinator and workers).
 It's used by: SET GLOBAL innodb_page_cleaner_disabled_debug = 1 (0).
@@ -3430,7 +3509,6 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			os_thread_create */
 {
 	ulint	next_loop_time = ut_time_ms() + 1000;
-	ulint	ppl_next_loop_time = ut_time_ms() + 10000;
 	bool 	ppl_request = false;
 	ulint	n_flushed = 0;
 	ulint	last_activity = srv_get_activity_count();
@@ -3581,14 +3659,6 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 
 			/* Request flushing for threads */
 			pc_request(ULINT_MAX, lsn_limit);
-#ifdef UNIV_NVDIMM_IPL
-			if(ut_time_ms() > ppl_next_loop_time) {
-				ppl_pc_request(100, LSN_MAX);
-				ppl_next_loop_time = ut_time_ms() + 10000;
-				ppl_request = true;
-			}
-#endif /* UNIV_NVDIMM_IPL */
-
 			ulint tm = ut_time_ms();
 
 			/* Coordinator also treats requests */
@@ -3603,12 +3673,6 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			ulint	n_flushed_lru = 0;
 			ulint	n_flushed_list = 0;
 			pc_wait_finished(&n_flushed_lru, &n_flushed_list);
-#ifdef UNIV_NVDIMM_IPL
-			if(ppl_request) {
-				ppl_pc_wait_finished();
-				ppl_request = false;
-			}
-#endif /* UNIV_NVDIMM_IPL */
 
 			if (n_flushed_list > 0 || n_flushed_lru > 0) {
 				buf_flush_stats(n_flushed_list, n_flushed_lru);
@@ -3637,15 +3701,8 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			}
 
 			/* Request flushing for threads */
+			// fprintf(stderr, "n_to_flush : %d\n", n_to_flush);
 			pc_request(n_to_flush, lsn_limit);
-#ifdef UNIV_NVDIMM_IPL
-			if(ut_time_ms() > ppl_next_loop_time) {
-				ppl_pc_request(100, LSN_MAX);
-				ppl_next_loop_time = ut_time_ms() + 10000;
-				ppl_request = true;
-			}
-#endif /* UNIV_NVDIMM_IPL */
-
 			ulint tm = ut_time_ms();
 
 			/* Coordinator also treats requests */
@@ -3663,13 +3720,6 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			ulint	n_flushed_list = 0;
 
 			pc_wait_finished(&n_flushed_lru, &n_flushed_list);
-#ifdef UNIV_NVDIMM_IPL
-			if(ppl_request) {
-				ppl_pc_wait_finished();
-				ppl_request = false;
-			}
-#endif /* UNIV_NVDIMM_IPL */
-
 			if (n_flushed_list > 0 || n_flushed_lru > 0) {
 				buf_flush_stats(n_flushed_list, n_flushed_lru);
 			}
@@ -3812,9 +3862,6 @@ thread_exit:
 	os_event_set(page_cleaner->is_requested);
 
 	buf_flush_page_cleaner_close();
-#ifdef UNIV_NVDIMM_IPL
-	buf_flush_ppl_page_cleaner_close();
-#endif /* UNIV_NVDIMM_IPL */
 
 	buf_page_cleaner_is_active = false;
 
@@ -3879,6 +3926,310 @@ DECLARE_THREAD(buf_flush_page_cleaner_worker)(
 }
 
 #ifdef UNIV_NVDIMM_IPL
+
+/******************************************************************//**
+page_cleaner thread tasked with flushing dirty pages from the buffer
+pools. As of now we'll have only one coordinator.
+@return a dummy parameter */
+extern "C"
+os_thread_ret_t
+DECLARE_THREAD(ppl_buf_flush_page_cleaner_coordinator)(
+/*===============================================*/
+	void*	arg MY_ATTRIBUTE((unused)))
+			/*!< in: a dummy parameter required by
+			os_thread_create */
+{
+	ulint 	loop_plus = 10000;
+	ulint	next_loop_time = ut_time_ms() + loop_plus;
+	ulint	ppl_next_loop_time = ut_time_ms() + loop_plus;
+	bool 	ppl_request = false;
+	ulint 	flush_page_number = 3200;
+	ulint	n_flushed = 0;
+	ulint	last_activity = srv_get_activity_count();
+	ulint	last_pages = 0;
+	srand(time(NULL));
+
+	my_thread_init();
+
+#ifdef UNIV_PFS_THREAD
+	pfs_register_thread(ppl_page_cleaner_thread_key);
+#endif /* UNIV_PFS_THREAD */
+
+#ifdef UNIV_DEBUG_THREAD_CREATION
+	ib::info() << "page_cleaner thread running, id "
+		<< os_thread_pf(os_thread_get_curr_id());
+#endif /* UNIV_DEBUG_THREAD_CREATION */
+
+#ifdef UNIV_LINUX
+	/* linux might be able to set different setting for each thread.
+	worth to try to set high priority for page cleaner threads */
+	if (buf_flush_page_cleaner_set_priority(
+		buf_flush_page_cleaner_priority)) {
+
+		ib::info() << "page_cleaner coordinator priority: "
+			<< buf_flush_page_cleaner_priority;
+	} else {
+		ib::info() << "If the mysqld execution user is authorized,"
+		" page cleaner thread priority can be changed."
+		" See the man page of setpriority().";
+	}
+#endif /* UNIV_LINUX */
+
+	ppl_buf_page_cleaner_is_active = true;
+
+	// while (!srv_read_only_mode
+	//        && srv_shutdown_state == SRV_SHUTDOWN_NONE
+	//        && recv_sys->heap != NULL) {
+	// 	/* treat flushing requests during recovery. */
+	// 	ulint	n_flushed_lru = 0;
+	// 	ulint	n_flushed_list = 0;
+
+	// 	os_event_wait(recv_sys->flush_start);
+
+	// 	if (srv_shutdown_state != SRV_SHUTDOWN_NONE
+	// 	    || recv_sys->heap == NULL) {
+	// 		break;
+	// 	}
+
+	// 	switch (recv_sys->flush_type) {
+	// 	case BUF_FLUSH_LRU:
+	// 		/* Flush pages from end of LRU if required */
+	// 		pc_request(0, LSN_MAX);
+	// 		while (pc_flush_slot() > 0) {}
+	// 		pc_wait_finished(&n_flushed_lru, &n_flushed_list);
+	// 		break;
+
+	// 	case BUF_FLUSH_LIST:
+	// 		/* Flush all pages */
+	// 		do {
+	// 			pc_request(ULINT_MAX, LSN_MAX);
+	// 			while (pc_flush_slot() > 0) {}
+	// 		} while (!pc_wait_finished(&n_flushed_lru,
+	// 					   &n_flushed_list));
+	// 		break;
+
+	// 	default:
+	// 		ut_ad(0);
+	// 	}
+
+	// 	os_event_reset(recv_sys->flush_start);
+	// 	os_event_set(recv_sys->flush_end);
+	// }
+
+	os_event_wait(ppl_buf_flush_event);
+
+	ulint		ret_sleep = 0;
+	ulint		n_evicted = 0;
+	ulint		n_flushed_last = 0;
+	ulint		warn_interval = 1;
+	ulint		warn_count = 0;
+	int64_t		sig_count = os_event_reset(ppl_buf_flush_event);
+
+	while (srv_shutdown_state == SRV_SHUTDOWN_NONE) {
+
+		/* The page_cleaner skips sleep if the server is
+		idle and there are no pending IOs in the buffer pool
+		and there is work to do. */
+		if (srv_check_activity(last_activity)
+		    || buf_get_n_pending_read_ios()
+		    || n_flushed == 0) {
+
+			ret_sleep = ppl_pc_sleep_if_needed(
+				next_loop_time, sig_count);
+
+			if (srv_shutdown_state != SRV_SHUTDOWN_NONE) {
+				break;
+			}
+		} else if (ut_time_ms() > next_loop_time) {
+			ret_sleep = OS_SYNC_TIME_EXCEEDED;
+		} else {
+			ret_sleep = 0;
+		}
+
+		sig_count = os_event_reset(ppl_buf_flush_event);
+
+		if (ret_sleep == OS_SYNC_TIME_EXCEEDED) {
+			ulint	curr_time = ut_time_ms();
+
+			if (curr_time > next_loop_time + loop_plus*3) {
+				if (warn_count == 0) {
+					ib::info() << "PPL page_cleaner: 1000ms"
+						" intended loop took "
+						<< 1000 + curr_time
+						   - next_loop_time
+						<< "ms. The settings might not"
+						" be optimal. (flushed="
+						<< n_flushed_last
+						<< " and evicted="
+						<< n_evicted
+						<< ", during the time.)";
+					if (warn_interval > 300) {
+						warn_interval = 600;
+					} else {
+						warn_interval *= 2;
+					}
+
+					warn_count = warn_interval;
+				} else {
+					--warn_count;
+				}
+			} else {
+				/* reset counter */
+				warn_interval = 1;
+				warn_count = 0;
+			}
+
+			next_loop_time = curr_time + loop_plus;
+			n_flushed_last = n_evicted = 0;
+		}
+		if (ret_sleep != OS_SYNC_TIME_EXCEEDED
+		    && srv_flush_sync) {
+			// ppl_pc_request(100, LSN_MAX);
+			// ppl_pc_wait_finished(&n_flushed);
+			if(ut_time_ms() > ppl_next_loop_time) {
+				// fprintf(stderr, "1: Flushed: %lu\n", n_flushed);
+				ppl_pc_request(flush_page_number, LSN_MAX);
+				ppl_next_loop_time = ut_time_ms() + loop_plus;
+				ppl_request = true;
+			}
+			if(ppl_request) {
+				ppl_pc_wait_finished(&n_flushed);
+				ppl_request = false;
+			}
+		} else if (srv_check_activity(last_activity)) {
+			/* Estimate pages from flush_list to be flushed */
+			ulint	n_to_flush;
+			n_flushed = 0;
+			if (ret_sleep == OS_SYNC_TIME_EXCEEDED) {
+				last_activity = srv_get_activity_count();
+				n_to_flush = flush_page_number;
+			} else {
+				n_to_flush = 0;
+			}
+			// ppl_pc_request(100, LSN_MAX);
+			// ppl_pc_wait_finished(&n_flushed);
+			if(ut_time_ms() > ppl_next_loop_time) {
+				//fprintf(stderr, "2: Flushed: %lu\n", n_flushed);
+				ppl_pc_request(flush_page_number, LSN_MAX);
+				ppl_next_loop_time = ut_time_ms() + loop_plus;
+				ppl_request = true;
+			}
+			if(ppl_request) {
+				ppl_pc_wait_finished(&n_flushed);
+				ppl_request = false;
+			}
+		} else if (ret_sleep == OS_SYNC_TIME_EXCEEDED) {
+			n_flushed = 0;
+			n_flushed_last += n_flushed;
+			//fprintf(stderr, "3: Flushed: %lu\n", n_flushed);
+		} else {
+			/* no activity, but woken up by event */
+			n_flushed = 0;
+		}
+
+		ut_d(ppl_buf_flush_page_cleaner_disabled_loop());
+	}
+
+	ut_ad(srv_shutdown_state > 0);
+	if (srv_fast_shutdown == 2
+	    || srv_shutdown_state == SRV_SHUTDOWN_EXIT_THREADS) {
+		/* In very fast shutdown or when innodb failed to start, we
+		simulate a crash of the buffer pool. We are not required to do
+		any flushing. */
+		goto thread_exit;
+	}
+
+	/* In case of normal and slow shutdown the page_cleaner thread
+	must wait for all other activity in the server to die down.
+	Note that we can start flushing the buffer pool as soon as the
+	server enters shutdown phase but we must stay alive long enough
+	to ensure that any work done by the master or purge threads is
+	also flushed.
+	During shutdown we pass through two stages. In the first stage,
+	when SRV_SHUTDOWN_CLEANUP is set other threads like the master
+	and the purge threads may be working as well. We start flushing
+	the buffer pool but can't be sure that no new pages are being
+	dirtied until we enter SRV_SHUTDOWN_FLUSH_PHASE phase. */
+
+	// do {
+	// 	pc_request(ULINT_MAX, LSN_MAX);
+
+	// 	while (pc_flush_slot() > 0) {}
+
+	// 	ulint	n_flushed_lru = 0;
+	// 	ulint	n_flushed_list = 0;
+	// 	pc_wait_finished(&n_flushed_lru, &n_flushed_list);
+
+	// 	n_flushed = n_flushed_lru + n_flushed_list;
+
+	// 	/* We sleep only if there are no pages to flush */
+	// 	if (n_flushed == 0) {
+	// 		os_thread_sleep(100000);
+	// 	}
+	// } while (srv_shutdown_state == SRV_SHUTDOWN_CLEANUP);
+
+	// /* At this point all threads including the master and the purge
+	// thread must have been suspended. */
+	// ut_a(srv_get_active_thread_type() == SRV_NONE);
+	// ut_a(srv_shutdown_state == SRV_SHUTDOWN_FLUSH_PHASE);
+
+	// /* We can now make a final sweep on flushing the buffer pool
+	// and exit after we have cleaned the whole buffer pool.
+	// It is important that we wait for any running batch that has
+	// been triggered by us to finish. Otherwise we can end up
+	// considering end of that batch as a finish of our final
+	// sweep and we'll come out of the loop leaving behind dirty pages
+	// in the flush_list */
+	// buf_flush_wait_batch_end(NULL, BUF_FLUSH_LIST);
+	// buf_flush_wait_LRU_batch_end();
+
+	// bool	success;
+
+	// do {
+	// 	pc_request(ULINT_MAX, LSN_MAX);
+
+	// 	while (pc_flush_slot() > 0) {}
+
+	// 	ulint	n_flushed_lru = 0;
+	// 	ulint	n_flushed_list = 0;
+	// 	success = pc_wait_finished(&n_flushed_lru, &n_flushed_list);
+
+	// 	n_flushed = n_flushed_lru + n_flushed_list;
+
+	// 	buf_flush_wait_batch_end(NULL, BUF_FLUSH_LIST);
+	// 	buf_flush_wait_LRU_batch_end();
+
+	// } while (!success || n_flushed > 0);
+
+	// /* Some sanity checks */
+	// ut_a(srv_get_active_thread_type() == SRV_NONE);
+	// ut_a(srv_shutdown_state == SRV_SHUTDOWN_FLUSH_PHASE);
+
+	// for (ulint i = 0; i < srv_buf_pool_instances; i++) {
+	// 	buf_pool_t* buf_pool = buf_pool_from_array(i);
+	// 	ut_a(UT_LIST_GET_LEN(buf_pool->flush_list) == 0);
+	// }
+
+	// /* We have lived our life. Time to die. */
+
+thread_exit:
+	/* All worker threads are waiting for the event here,
+	and no more access to page_cleaner structure by them.
+	Wakes worker threads up just to make them exit. */
+	ppl_page_cleaner->is_running = false;
+	os_event_set(ppl_page_cleaner->is_requested);
+	buf_flush_ppl_page_cleaner_close();
+
+	ppl_buf_page_cleaner_is_active = false;
+
+	my_thread_end();
+
+	/* We count the number of threads in os_thread_exit(). A created
+	thread should always use that to exit and not use return() to exit. */
+	os_thread_exit();
+
+	OS_THREAD_DUMMY_RETURN;
+}
 /******************************************************************//**
 Worker thread of ppl_cold_page_cleaner.
 @return a dummy parameter */
@@ -3898,7 +4249,7 @@ DECLARE_THREAD(buf_flush_ppl_page_cleaner_worker)(
 	while (true) {
 		os_event_wait(ppl_page_cleaner->is_requested);
 
-		ut_d(buf_flush_page_cleaner_disabled_loop());
+		ut_d(ppl_buf_flush_page_cleaner_disabled_loop());
 
 		if (!ppl_page_cleaner->is_running) {
 			break;

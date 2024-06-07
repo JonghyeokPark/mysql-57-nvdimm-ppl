@@ -151,7 +151,7 @@ alloc_ppl:
 		if (!alloc_nth_ppl_to_bpage(bpage)) {
 			// 6. 할당받지 못하면 에러, normalize flag
 			// fprintf(stderr, "Error : alloc_nth_ppl_to_bpage\n");
-			set_normalize_flag(bpage);
+			set_normalize_flag(bpage, 3);
 			return false;
 		}
 		// 7. 남은 길이를 다시 계산
@@ -271,7 +271,7 @@ void ipl_log_apply(byte *start_ptr, ulint apply_log_size, buf_block_t *block, mt
 		}
     }
 	block->page.ipl_write_pointer = current_ptr;
-	block->page.block_used = current_ptr - (end_ptr - 128);
+	block->page.block_used = current_ptr - (end_ptr - nvdimm_info->each_ppl_size);
 
 	// fprintf(stderr, "After ipl_log_apply(%u, %u) PPL Start Pointer: %p Write Pointer: %p Block used: %d\n", 
 	// 		block->page.id.space(), 
@@ -322,12 +322,68 @@ void insert_page_ipl_info_in_hash_table(buf_page_t * bpage){
 }
 
 /* TODO Sjmun : 한 번도 Discard되지 않은 페이지들은 사실 IPL을 사용할 필요 없이 Global redo로그로만 복구가능한데..  */
-void set_normalize_flag(buf_page_t * bpage){
+void set_normalize_flag(buf_page_t * bpage, uint normalize_cause){
+	if(bpage->normalize_cause == 0){
+		//1. Record 이동
+		//2. Max PPL Size를 넘어서는 경우
+		//3. PPL 영역이 부족한 경우
+		//4. PPL 대상 페이지가 아닌 경우
+		//5. Cleaning
+		bpage->normalize_cause = normalize_cause;
+	}
 	set_flag(&(bpage->flags), NORMALIZE);
 }
 
 /* Unset_flag를 해주지 않아도 Static_ipl이 free 되면 초기화 됨*/
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){ 
+	if(get_flag(&(bpage->flags), IN_LOOK_UP)){
+		switch (bpage->normalize_cause)
+		{
+			case 0:
+				break;
+			case 1:
+				fprintf(stderr, "Normalize_cause,%f,Record_movement\n",(double)(time(NULL) - my_start));
+				break;
+			case 2:
+				fprintf(stderr, "Normalize_cause,%f,Max_PPL_Size\n",(double)(time(NULL) - my_start));
+				break;
+			case 3:
+				fprintf(stderr, "Normalize_cause,%f,PPL_Area_Lack\n",(double)(time(NULL) - my_start));
+				break;
+			case 4:
+				fprintf(stderr, "Normalize_cause,%f,Not_PPL_Target\n",(double)(time(NULL) - my_start));
+				break;
+			case 5:
+				fprintf(stderr, "Normalize_cause,%f,Cleaning\n",(double)(time(NULL) - my_start));
+				break;
+			default:
+				break;
+		}
+	}
+	else{
+		switch (bpage->normalize_cause)
+		{
+			case 0:
+				break;
+			case 1:
+				fprintf(stderr, "Normalize_cause,%f,Direct_Record_movement\n",(double)(time(NULL) - my_start));
+				break;
+			case 2:
+				fprintf(stderr, "Normalize_cause,%f,Direct_Max_PPL_Size\n",(double)(time(NULL) - my_start));
+				break;
+			case 3:
+				fprintf(stderr, "Normalize_cause,%f,Direct_PPL_Area_Lack\n",(double)(time(NULL) - my_start));
+				break;
+			case 4:
+				fprintf(stderr, "Normalize_cause,%f,Direct_Not_PPL_Target\n",(double)(time(NULL) - my_start));
+				break;
+			case 5:
+				fprintf(stderr, "Normalize_cause,%f,Direct_Cleaning\n",(double)(time(NULL) - my_start));
+				break;
+			default:
+				break;
+		}
+	}
 	if(get_flag(&(bpage->flags), IN_LOOK_UP)){
 		buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
 		rw_lock_x_lock(&buf_pool->lookup_table_lock);
@@ -338,6 +394,7 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 	bpage->ipl_write_pointer = NULL;
 	bpage->block_used = 0;
 	bpage->trx_id = 0;
+	bpage->normalize_cause = 0;
 	if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
 		bpage->flags = 0;
 		set_flag(&(bpage->flags), IN_PPL_BUF_POOL);
@@ -356,6 +413,7 @@ void set_for_ipl_page(buf_page_t* bpage){
 	bpage->ipl_write_pointer = NULL;
 	bpage->block_used = 0;
 	bpage->flags = 0;
+	bpage->normalize_cause = 0;
 	page_id_t page_id = bpage->id;
 	buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
 	rw_lock_s_lock(&buf_pool->lookup_table_lock);
@@ -406,6 +464,7 @@ bool check_return_ppl_region(buf_page_t * bpage){
 		bpage->ipl_write_pointer = NULL;
 		bpage->trx_id = 0;
 		bpage->block_used = 0;
+		bpage->normalize_cause = 0;
 		if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
 			bpage->flags = 0;
 			set_flag(&(bpage->flags), IN_PPL_BUF_POOL);
@@ -565,7 +624,7 @@ can_page_be_pplized(
 		page_id.page_no() > 7){
 		return true;
 	}
-	set_normalize_flag(buf_page);
+	set_normalize_flag(buf_page, 4);
 	return false;
 }
 #endif

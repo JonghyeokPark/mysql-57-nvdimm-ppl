@@ -5726,7 +5726,7 @@ ppl_buf_page_init_for_read(
 		buf_page_init(buf_pool, page_id, page_size, block);
 		bpage->buf_pool_index = get_ppl_buf_pool_index(buf_pool);
 		set_flag(&(bpage->flags), IN_PPL_BUF_POOL);
-		set_flag(&(bpage->flags), NORMALIZE);
+		set_normalize_flag(bpage, 5);
 
 		/* Note: We are using the hash_lock for protection. This is
 		safe because no other thread can lookup the block from the
@@ -5826,7 +5826,7 @@ ppl_buf_page_init_for_read(
 		
 		bpage->buf_pool_index = get_ppl_buf_pool_index(buf_pool);
 		set_flag(&(bpage->flags), IN_PPL_BUF_POOL);
-		set_flag(&(bpage->flags), NORMALIZE);
+		set_normalize_flag(bpage, 5);
 
 		bpage->state = BUF_BLOCK_ZIP_PAGE;
 		bpage->id.copy_from(page_id);
@@ -7146,6 +7146,24 @@ buf_get_n_pending_read_ios(void)
 
 	return(pend_ios);
 }
+
+#ifdef UNIV_NVDIMM_IPL
+/*********************************************************************//**
+Returns the number of pending buf pool read ios.
+@return number of pending read I/O operations */
+ulint
+ppl_buf_get_n_pending_read_ios(void)
+/*============================*/
+{
+	ulint	pend_ios = 0;
+
+	for (ulint i = 0; i < srv_buf_pool_instances; i++) {
+		pend_ios += ppl_buf_pool_from_array(i)->n_pend_reads;
+	}
+
+	return(pend_ios);
+}
+#endif
 
 /*********************************************************************//**
 Returns the ratio in percents of modified pages in the buffer pool /

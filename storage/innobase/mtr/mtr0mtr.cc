@@ -977,14 +977,14 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 	
 	if(get_flag(&(buf_page->flags), PPLIZED)){
 		if(get_ipl_length_from_ipl_header(buf_page) + log_len > nvdimm_info->max_ppl_size){
-			set_normalize_flag(buf_page);
+			set_normalize_flag(buf_page, 2);
 			return;
 		}
 		copy_log_to_ppl_directly(body, log_len, type, buf_page, trx_id);
 	}
 	else{
 		if(log_len > nvdimm_info->max_ppl_size){
-			set_normalize_flag(buf_page);
+			set_normalize_flag(buf_page, 2);
 			return;
 		}
 		else{
@@ -992,7 +992,7 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 				copy_log_to_ppl_directly(body, log_len, type, buf_page, trx_id);
 			}
 			else{
-				set_normalize_flag(buf_page);
+				set_normalize_flag(buf_page, 3);
 			}
 		}
 	}

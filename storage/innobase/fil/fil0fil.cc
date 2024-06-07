@@ -5885,7 +5885,7 @@ fil_aio_wait(
 #ifdef UNIV_NVDIMM_IPL
 			//만약 DIPL Page라면 여기서 Normalize flag 처리
 			buf_page_t * bpage = static_cast<buf_page_t*>(message);
-			if((buf_page_get_io_fix(bpage) == BUF_IO_WRITE) && get_flag(&(bpage->flags), PPLIZED)){
+			if((buf_page_get_io_fix(bpage) == BUF_IO_WRITE) && (bpage->static_ipl_pointer!= NULL) && get_flag(&(bpage->flags), PPLIZED)){
 				set_normalize_flag_in_ipl_header(bpage->static_ipl_pointer);
 			}
 #endif			

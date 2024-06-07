@@ -789,7 +789,7 @@ fsp_init_file_page(
 	mtr_t*		mtr)
 {
 #ifdef UNIV_NVDIMM_IPL
-	set_normalize_flag((buf_page_t *)block);
+	set_normalize_flag((buf_page_t *)block, 1);
 #endif
 	fsp_init_file_page_low(block);
 

@@ -184,7 +184,7 @@ void apply_log_record(mlog_id_t log_type, byte* log_data, uint length, trx_id_t 
 
 //page Normalize, lookup table 함수들
 void insert_page_ipl_info_in_hash_table(buf_page_t * bpage);
-void set_normalize_flag(buf_page_t * bpage);
+void set_normalize_flag(buf_page_t * bpage, uint normalize_cause);
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
 void set_for_ipl_page(buf_page_t* bpage);
 bool check_can_be_pplized(buf_page_t * bpage);
@@ -231,7 +231,7 @@ struct mem_to_cxl_copy_t{
 /* PPL NVDIMM BUFFER FUNCTION*/
 ulint
 ppl_buf_page_read_in_area(
-	std::vector<page_id_t>	page_id_list /*Page_id List*/,
+	std::vector <std::pair<page_id_t, uint64_t> >	page_id_list /*Page_id List*/,
 	uint read_page_no,
 	buf_pool_t * buf_pool);
 

@@ -45,8 +45,8 @@ Created 11/5/1995 Heikki Tuuri
 // #include "../../boost/boost_1_59_0/boost/lockfree/queue.hpp"
 
 #ifdef UNIV_NVDIMM_IPL
-#define IN_MEMORY_PPL_BUF_MAX_SIZES 4096
-typedef dyn_buf_t<IN_MEMORY_PPL_BUF_MAX_SIZES> in_memory_ppl_buf_t;
+// #define IN_MEMORY_PPL_BUF_MAX_SIZES 4096
+// typedef dyn_buf_t<IN_MEMORY_PPL_BUF_MAX_SIZES> in_memory_ppl_buf_t;
 #endif
 
 // Forward declaration
@@ -957,6 +957,15 @@ Returns the number of pending buf pool read ios.
 @return number of pending read I/O operations */
 ulint
 buf_get_n_pending_read_ios(void);
+
+#ifdef UNIV_NVDIMM_IPL
+/*********************************************************************//**
+Returns the number of pending buf pool read ios.
+@return number of pending read I/O operations */
+ulint
+ppl_buf_get_n_pending_read_ios(void);
+#endif /* UNIV_NVDIMM_IPL */
+
 /*============================*/
 /*********************************************************************//**
 Prints info of the buffer i/o. */
@@ -1749,6 +1758,7 @@ public:
 	unsigned char * static_ipl_pointer;
 	unsigned char * ipl_write_pointer;
 	unsigned char flags; // first bit: iplized_flag, second bit: normalize_flag, third bit: dirtifed_flag
+	uint normalize_cause;
 	uint block_used;
 	trx_id_t trx_id;
 #endif

@@ -634,8 +634,8 @@ page_copy_rec_list_end(
 	mtr_log_t	log_mode = MTR_LOG_NONE;
 
 #ifdef UNIV_NVDIMM_IPL
-	set_normalize_flag((buf_page_t *)block);
-	set_normalize_flag((buf_page_t *)new_block);
+	set_normalize_flag((buf_page_t *)block, 1);
+	set_normalize_flag((buf_page_t *)new_block, 1);
 #endif
 
 	if (new_page_zip) {

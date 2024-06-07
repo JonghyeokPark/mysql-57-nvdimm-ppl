@@ -1922,8 +1922,8 @@ func_exit:
 
 #ifdef UNIV_NVDIMM_IPL
 	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+		if(bpage->newest_modification > 0)	set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification);
 		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
-		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification); 
 		// Page가 Discard되기 전에 Page_lsn IPL header에 저장
 	}
 #endif /* UNIV_NVDIMM_IPL */
