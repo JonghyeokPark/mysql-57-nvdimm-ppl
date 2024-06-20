@@ -133,6 +133,7 @@ typedef struct NVDIMM_SYSTEM
   uint64_t each_ppl_size;
   uint64_t static_ipl_page_number_per_buf_pool;
   uint64_t max_ppl_size;
+  uint64_t ppl_lack_max_ppl_size;
 
   unsigned char* dynamic_start_pointer;
   uint64_t dynamic_ipl_size;
@@ -158,7 +159,12 @@ typedef struct APPLY_LOG_INFO
 
 }apply_log_info;
 
-
+//PPL Lack
+extern bool is_ppl_lack;
+extern ulint ppl_lack_threshold;
+extern lsn_t ppl_lack_lsn_gap;
+bool check_write_hot_page(buf_page_t * bpage, lsn_t lsn);
+//PPL Lack
 
 // extern std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map; // (page_id , ipl_static_address)
 extern nvdimm_system * nvdimm_info;
@@ -221,7 +227,7 @@ struct mem_to_cxl_copy_t{
 		bpage = target_page;
 	}
 
-	bool operator()(const mtr_buf_t::block_t* block)
+	bool operator()(const ppl_mtr_buf_t::block_t* block)
 	{
 		return copy_memory_log_to_ppl((unsigned char *)(block->begin()), block->used(), bpage);
 	}

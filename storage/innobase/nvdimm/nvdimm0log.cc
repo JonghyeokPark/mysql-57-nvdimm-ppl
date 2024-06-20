@@ -30,6 +30,28 @@
 #include <assert.h>
 #include <stdint.h>
 
+bool check_write_hot_page(buf_page_t * bpage, lsn_t page_before_lsn){
+	lsn_t lsn_gap;
+	ulint log_len;
+	lsn_t ppl_before_lsn = get_page_lsn_from_ipl_header(bpage->static_ipl_pointer);
+	if(ppl_before_lsn != 0){
+		lsn_gap = bpage->oldest_modification - ppl_before_lsn;
+		// fprintf(stderr, "PPL_LSN_GAP,%u,%u,%zu,\n", bpage->id.space(), bpage->id.page_no(), lsn_gap);
+		log_len = get_ipl_length_from_ipl_header(bpage);
+	}
+	else{
+		lsn_gap = bpage->oldest_modification - page_before_lsn;
+		// fprintf(stderr, "NORMAL_LSN_GAP,%u,%u,%zu,\n", bpage->id.space(), bpage->id.page_no(), lsn_gap);
+		log_len = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
+	}
+	if((lsn_gap > ppl_lack_lsn_gap) && (log_len > nvdimm_info->ppl_lack_max_ppl_size)){
+		set_normalize_flag(bpage, 6);
+		return false;
+	}
+	return true;
+}
+
+
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
 	unsigned char * static_ipl_pointer = alloc_ppl_from_queue(normal_buf_pool_get(bpage->id));
 	unsigned char temp_buf[8] = {0};
@@ -73,25 +95,25 @@ bool alloc_nth_ppl_to_bpage(buf_page_t * bpage){
 /* SIPL 영역 공간이 부족한 경우는 2개로 나누어서 기존 IPL 영역, 새로운 IPL 영역에 작성하게 됨*/
 /* Log write atomicity를 보장하기 위해서는 두번째 파트를 다 작성하고 Length를 Flush cache*/
 
-// void copy_log_to_memory(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id){
-// 	buf_block_t * block = (buf_block_t *)bpage;
-// 	byte * write_pointer = block->in_memory_ppl_buf.open(len);
-// 	unsigned char store_type = type;
-// 	unsigned short log_body_size = len - APPLY_LOG_HDR_SIZE;
-// 	//Step1. Apply log header 작성
-// 	mach_write_to_1(write_pointer, store_type); // mtr_log type
-// 	write_pointer += 1;
-// 	mach_write_to_2(write_pointer, log_body_size); //mtr_log body
-// 	write_pointer += 2;
-// 	mach_write_to_8(write_pointer, trx_id); // mtr_log trx_id
-// 	write_pointer += 8;
+void copy_log_to_memory(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id){
+	buf_block_t * block = (buf_block_t *)bpage;
+	byte * write_pointer = block->in_memory_ppl_buf.open(len);
+	unsigned char store_type = type;
+	unsigned short log_body_size = len - APPLY_LOG_HDR_SIZE;
+	//Step1. Apply log header 작성
+	mach_write_to_1(write_pointer, store_type); // mtr_log type
+	write_pointer += 1;
+	mach_write_to_2(write_pointer, log_body_size); //mtr_log body
+	write_pointer += 2;
+	mach_write_to_8(write_pointer, trx_id); // mtr_log trx_id
+	write_pointer += 8;
 
-// 	//Step2. Apply log body 작성
-// 	memcpy(write_pointer, log, log_body_size);
-// 	write_pointer += log_body_size;
-// 	block->in_memory_ppl_buf.close(write_pointer);
-// 	// fprintf(stderr, "After copy_log_to_memory(%u, %u) Log type: %d, log_len: %lu, pointer: %p, Size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, len - 11, write_pointer, block->in_memory_ppl_buf.size());
-// }
+	//Step2. Apply log body 작성
+	memcpy(write_pointer, log, log_body_size);
+	write_pointer += log_body_size;
+	block->in_memory_ppl_buf.close(write_pointer);
+	// fprintf(stderr, "After copy_log_to_memory(%u, %u) Log type: %d, log_len: %lu, pointer: %p, Size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, len - 11, write_pointer, block->in_memory_ppl_buf.size());
+}
 
 void copy_log_to_ppl_directly(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id){
 	unsigned char write_ipl_log_buffer [11] = {0, };
@@ -108,22 +130,23 @@ void copy_log_to_ppl_directly(unsigned char *log, ulint len, mlog_id_t type, buf
 	if(!copy_memory_log_to_ppl(log, log_body_size, bpage))	return;
 
 	set_ipl_length_in_ipl_header(bpage, len + get_ipl_length_from_ipl_header(bpage));
+	set_flag(&(bpage->flags), DIRECTLY_WRITE);
 	// fprintf(stderr, "After copy_log_to_ppl_directly(%u, %u) Log type: %d, log_len: %lu, pointer: %p, Size: %lu\n", bpage->id.space(), bpage->id.page_no(), type, len - 11, bpage->ipl_write_pointer, bpage->block_used);
 }
 
-// bool copy_memory_log_to_cxl(buf_page_t * bpage){
-// 	buf_block_t * block = (buf_block_t *)bpage;
-// 	mem_to_cxl_copy_t cxl_copy;
-// 	// fprintf(stderr, "(%u, %u), copy_memory_log_to_cxl, CXL pointer %p, Write Pointer: %p size: %lu \n", bpage->id.space(), bpage->id.page_no(), bpage->static_ipl_pointer, bpage->ipl_write_pointer, block->in_memory_ppl_buf.size());
-// 	cxl_copy.init(bpage);
-// 	if(!block->in_memory_ppl_buf.for_each_block(cxl_copy)){ // PPL 영역이 부족해서, copy를 못한 경우.
-// 		// fprintf(stderr, "Error : copy_memory_log_to_cxl\n");
-// 		return false;
-// 	}
-// 	set_ipl_length_in_ipl_header(bpage, block->in_memory_ppl_buf.size() + get_ipl_length_from_ipl_header(bpage));
-// 	insert_page_ipl_info_in_hash_table(bpage);
-// 	return true;
-// }
+bool copy_memory_log_to_cxl(buf_page_t * bpage){
+	buf_block_t * block = (buf_block_t *)bpage;
+	mem_to_cxl_copy_t cxl_copy;
+	// fprintf(stderr, "(%u, %u), copy_memory_log_to_cxl, CXL pointer %p, Write Pointer: %p size: %lu \n", bpage->id.space(), bpage->id.page_no(), bpage->static_ipl_pointer, bpage->ipl_write_pointer, block->in_memory_ppl_buf.size());
+	cxl_copy.init(bpage);
+	if(!block->in_memory_ppl_buf.for_each_block(cxl_copy)){ // PPL 영역이 부족해서, copy를 못한 경우.
+		// fprintf(stderr, "Error : copy_memory_log_to_cxl\n");
+		return false;
+	}
+	set_ipl_length_in_ipl_header(bpage, block->in_memory_ppl_buf.size() + get_ipl_length_from_ipl_header(bpage));
+	insert_page_ipl_info_in_hash_table(bpage);
+	return true;
+}
 
 bool copy_memory_log_to_ppl(unsigned char *log, ulint len, buf_page_t * bpage){
 	uint left_length = nvdimm_info->each_ppl_size - bpage->block_used;
@@ -171,7 +194,7 @@ void set_apply_info_and_log_apply(buf_block_t* block) {
 	buf_page_t * apply_page = (buf_page_t *)block;
 	mtr_t temp_mtr;
 	ulint apply_log_size = get_ipl_length_from_ipl_header(apply_page);
-	// fprintf(stderr, "(%u, %u), copy_memory_log_to_cxl, CXL pointer %p, size: %lu \n",
+	// fprintf(stderr, "(%u, %u), Apply_log, CXL pointer %p, size: %lu \n",
 	// 		apply_page->id.space(), 
 	// 		apply_page->id.page_no(), 
 	// 		apply_page->static_ipl_pointer, 
@@ -191,7 +214,7 @@ void ipl_log_apply(byte *start_ptr, ulint apply_log_size, buf_block_t *block, mt
     byte *current_ptr = start_ptr + IPL_HDR_SIZE;
     byte *end_ptr = start_ptr + nvdimm_info->each_ppl_size;
     byte *next_ppl = get_addr_from_ipl_index(nvdimm_info->static_start_pointer, mach_read_from_4(start_ptr + IPL_HDR_DYNAMIC_INDEX), nvdimm_info->each_ppl_size);
-    byte temp_buffer[2048]; // Temporary buffer to handle data that spans multiple segments
+    byte temp_buffer[400] ={0, }; // Temporary buffer to handle data that spans multiple segments
 	mlog_id_t log_type;
 	ulint log_body_length;
 	trx_id_t trx_id;
@@ -329,6 +352,7 @@ void set_normalize_flag(buf_page_t * bpage, uint normalize_cause){
 		//3. PPL 영역이 부족한 경우
 		//4. PPL 대상 페이지가 아닌 경우
 		//5. Cleaning
+		//6. LSNGAP이 너무 큰 경우
 		bpage->normalize_cause = normalize_cause;
 	}
 	set_flag(&(bpage->flags), NORMALIZE);
@@ -356,6 +380,9 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 			case 5:
 				fprintf(stderr, "Normalize_cause,%f,Cleaning\n",(double)(time(NULL) - my_start));
 				break;
+			case 6:
+				fprintf(stderr, "Normalize_cause,%f,LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
+				break;
 			default:
 				break;
 		}
@@ -379,6 +406,9 @@ void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){
 				break;
 			case 5:
 				fprintf(stderr, "Normalize_cause,%f,Direct_Cleaning\n",(double)(time(NULL) - my_start));
+				break;
+			case 6:
+				fprintf(stderr, "Normalize_cause,%f,Direct_LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
 				break;
 			default:
 				break;
@@ -429,32 +459,32 @@ void set_for_ipl_page(buf_page_t* bpage){
 
 
 //Dynamic 영역을 가지고 있는 checkpoint page인지 확인하기.
-// bool check_can_be_pplized(buf_page_t *bpage) {
-//     // 플래그 검사 및 빠른 반환 조건
-//     if (get_flag(&(bpage->flags), NORMALIZE)) {
-//         return false;
-//     }
+bool check_can_be_pplized(buf_page_t *bpage) {
+    // 플래그 검사 및 빠른 반환 조건
+    if (get_flag(&(bpage->flags), NORMALIZE)) {
+        return false;
+    }
 
-//     if (get_flag(&(bpage->flags), DIRECTLY_WRITE)) {
-//         return true;
-//     }
+    if (get_flag(&(bpage->flags), DIRECTLY_WRITE)) {
+        return true;
+    }
 
-//     // in_memory_ppl_size 계산
-//     ulint in_memory_ppl_size = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
+    // in_memory_ppl_size 계산
+    ulint in_memory_ppl_size = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
 
-//     if (in_memory_ppl_size == 0) {
-//         return false;
-//     }
+    if (in_memory_ppl_size == 0) {
+        return false;
+    }
 
-//     // PPLIZED 플래그에 따른 처리
-//     if (!get_flag(&(bpage->flags), PPLIZED)) {
-//         return alloc_first_ppl_to_bpage(bpage);
-//     }
+    // PPLIZED 플래그에 따른 처리
+    if (!get_flag(&(bpage->flags), PPLIZED)) {
+        return alloc_first_ppl_to_bpage(bpage);
+    }
 
-//     // 목표 길이 계산 및 크기 검사
-//     ulint target_len = in_memory_ppl_size + get_ipl_length_from_ipl_header(bpage);
-//     return target_len <= nvdimm_info->max_ppl_size;
-// }
+    // 목표 길이 계산 및 크기 검사
+    ulint target_len = in_memory_ppl_size + get_ipl_length_from_ipl_header(bpage);
+    return target_len <= nvdimm_info->max_ppl_size;
+}
 
 
 bool check_return_ppl_region(buf_page_t * bpage){

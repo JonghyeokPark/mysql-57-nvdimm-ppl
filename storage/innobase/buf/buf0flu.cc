@@ -608,19 +608,6 @@ buf_flush_note_modification(
 	ut_ad(block->page.flush_observer == NULL
 	      || block->page.flush_observer == observer);
 	block->page.flush_observer = observer;
-#ifdef UNIV_NVDIMM_IPL
-	if (block->page.oldest_modification == 0 ) {
-		buf_page_t * bpage = (buf_page_t *)block;
-		if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
-			buf_page_mutex_exit(block);
-			return;
-		}
-		buf_pool_t*	buf_pool = buf_pool_from_block(block);
-		buf_flush_insert_into_flush_list(buf_pool, block, start_lsn);
-	} else {       
-		ut_ad(block->page.oldest_modification <= start_lsn);
-	}
-#else
 	if (block->page.oldest_modification == 0) {
 		buf_pool_t*	buf_pool = buf_pool_from_block(block);
 
@@ -628,7 +615,6 @@ buf_flush_note_modification(
 	} else {
 		ut_ad(block->page.oldest_modification <= start_lsn);
 	}
-#endif
 	buf_page_mutex_exit(block);
 
 	srv_stats.buf_pool_write_requests.inc();
@@ -1086,6 +1072,7 @@ buf_flush_write_block_low(
 	ut_ad(!buf_pool_mutex_own(buf_pool));
 #endif /* UNIV_DEBUG */
 
+	lsn_t before_lsn = mach_read_from_8(reinterpret_cast<const buf_block_t *>(bpage)->frame + FIL_PAGE_LSN);
 	DBUG_PRINT("ib_buf", ("flush %s %u page " UINT32PF ":" UINT32PF,
 			      sync ? "sync" : "async", (unsigned) flush_type,
 			      bpage->id.space(), bpage->id.page_no()));
@@ -1150,21 +1137,28 @@ buf_flush_write_block_low(
 	Given the nature and load of temporary tablespace doublewrite buffer
 	adds an overhead during flushing. */
 #ifdef UNIV_NVDIMM_IPL
-	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+	if(check_can_be_pplized(bpage)){
 		// fprintf(stderr, "Not Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
-		set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification);
-		if(!get_flag(&(bpage->flags), IN_LOOK_UP))	insert_page_ipl_info_in_hash_table(bpage);
-		
-		if(sync){
-			buf_page_io_complete(bpage, true);
+		// if(is_ppl_lack && !check_write_hot_page(bpage) ) goto normal_case;
+		if(is_ppl_lack && !check_write_hot_page(bpage, before_lsn)) goto normal_case;
+		if(get_flag(&(bpage->flags), DIRECTLY_WRITE)){
+			goto jump_to_io_complete;
 		}
-		else{
-			buf_page_io_complete(bpage, false);
+		if(copy_memory_log_to_cxl(bpage)){
+jump_to_io_complete:
+			set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification);
+			if(sync){
+				buf_page_io_complete(bpage, true);
+			}
+			else{
+				buf_page_io_complete(bpage, false);
+			}
+			return;
 		}
-		buf_LRU_stat_inc_io();
-		return;
 	}
 #endif
+normal_case:
+	set_normalize_flag(bpage, bpage->normalize_cause);
 
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL

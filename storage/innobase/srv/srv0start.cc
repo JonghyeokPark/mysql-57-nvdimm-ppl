@@ -1943,6 +1943,7 @@ innobase_start_or_create_for_mysql(void)
 	intrinsic table operations. */
 	buf_flush_page_cleaner_init();
 // #ifdef UNIV_NVDIMM_IPL
+// 	// PPL Cleaner Buffer Pool Flush
 // 	buf_flush_ppl_page_cleaner_init();
 // #endif
 
@@ -1955,6 +1956,7 @@ innobase_start_or_create_for_mysql(void)
 	}
 
 // #ifdef UNIV_NVDIMM_IPL
+// 	// PPL Cleaner Buffer Pool Flush
 // 	uint ppl_page_cleaners = 8;
 // 	os_thread_create(ppl_buf_flush_page_cleaner_coordinator,
 // 			 NULL, NULL);

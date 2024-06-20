@@ -28,6 +28,12 @@ nc_redo_buf * nc_redo_info = NULL;
 bool nvdimm_recv_running = false;
 unsigned char* nvdimm_recv_ptr = NULL;
 time_t my_start = 0;
+
+//PPL Lack
+bool is_ppl_lack = false;
+ulint ppl_lack_threshold = 0;
+lsn_t ppl_lack_lsn_gap = 0;
+
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -47,14 +53,22 @@ bool make_static_and_dynamic_ipl_region
 	nvdimm_info->overall_ppl_size = nvdimm_overall_ppl_size; // static ipl size : 1,8GB
 	nvdimm_info->each_ppl_size = nvdimm_each_ppl_size; // per page static size : 1KB
 	nvdimm_info->max_ppl_size = nvdimm_max_ppl_size - (IPL_HDR_SIZE + ((nvdimm_max_ppl_size / nvdimm_each_ppl_size) - 1) * NTH_IPL_HEADER_SIZE);
+	nvdimm_info->ppl_lack_max_ppl_size = (nvdimm_each_ppl_size - IPL_HDR_SIZE) + (nvdimm_each_ppl_size - NTH_IPL_HEADER_SIZE);
 	nvdimm_info->static_ipl_page_number_per_buf_pool = (nvdimm_info->overall_ppl_size / nvdimm_info->each_ppl_size) / number_of_buf_pool; 
 	nvdimm_info->static_start_pointer = nvdimm_ptr;
 	nvdimm_info->nvdimm_dwb_pointer = nvdimm_ptr + nvdimm_overall_ppl_size + (2 * 1024 * 1024 * 1024UL);
 	nvdimm_info->nc_redo_start_pointer = nvdimm_ptr + nvdimm_overall_ppl_size + (3 * 1024 * 1024 * 1024UL);
+
+	//PPL Lack
+	is_ppl_lack = false;
+	ppl_lack_threshold = (nvdimm_info->static_ipl_page_number_per_buf_pool * 2) / 100; // 2%
+	ppl_lack_lsn_gap = 881985436;
 	
 	fprintf(stderr, "Overall PPL Size : %luM\n", nvdimm_info->overall_ppl_size / (1024 * 1024));
 	fprintf(stderr, "Each PPL Size : %lu\n", nvdimm_info->each_ppl_size);
 	fprintf(stderr, "Max PPL Size : %lu\n", nvdimm_info->max_ppl_size);
+	fprintf(stderr, "PPL Lack Max PPL Size : %lu\n", nvdimm_info->ppl_lack_max_ppl_size);
+	fprintf(stderr, "PPL Lack Threshold : %lu\n", ppl_lack_threshold);
 
 	fprintf(stderr, "nvdimm_ptr: %p\n", nvdimm_ptr);
 	fprintf(stderr, "static_start_pointer: %p\n", nvdimm_info->static_start_pointer);

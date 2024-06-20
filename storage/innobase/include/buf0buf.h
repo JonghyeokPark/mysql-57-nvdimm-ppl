@@ -45,8 +45,8 @@ Created 11/5/1995 Heikki Tuuri
 // #include "../../boost/boost_1_59_0/boost/lockfree/queue.hpp"
 
 #ifdef UNIV_NVDIMM_IPL
-// #define IN_MEMORY_PPL_BUF_MAX_SIZES 4096
-// typedef dyn_buf_t<IN_MEMORY_PPL_BUF_MAX_SIZES> in_memory_ppl_buf_t;
+#define IN_MEMORY_PPL_BUF_MAX_SIZES 256
+typedef ppl_dyn_buf_t<IN_MEMORY_PPL_BUF_MAX_SIZES> in_memory_ppl_buf_t;
 #endif
 
 // Forward declaration
@@ -1929,6 +1929,9 @@ struct buf_block_t{
 					mutex in InnoDB-5.1 to relieve
 					contention on the buffer pool mutex */
 #endif /* !UNIV_HOTBACKUP */
+#ifdef UNIV_NVDIMM_IPL
+	in_memory_ppl_buf_t in_memory_ppl_buf;
+#endif
 };
 
 /** Check if a buf_block_t object is in a valid state
