@@ -1090,6 +1090,16 @@ buf_flush_write_block_low(
 	ut_ad(buf_page_get_io_fix(bpage) == BUF_IO_WRITE);
 	ut_ad(bpage->oldest_modification != 0);
 
+#ifdef UNIV_NVDIMM_IPL
+	if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL) && get_flag(&(bpage->flags), PPLIZED) && get_flag(&(bpage->flags), NORMALIZE)){
+		bpage->newest_modification = get_page_lsn_from_ipl_header(bpage->static_ipl_pointer);
+		fprintf(stderr, "PPL_Cleanig: Write LSN: (%u, %u): %zu\n", bpage->id.space(), bpage->id.page_no(), get_page_lsn_from_ipl_header(bpage->static_ipl_pointer));
+	}
+#else
+		mach_write_to_8(frame + FIL_PAGE_LSN,
+				bpage->newest_modification);
+#endif
+
 #ifdef UNIV_IBUF_COUNT_DEBUG
 	ut_a(ibuf_count_get(bpage->id) == 0);
 #endif /* UNIV_IBUF_COUNT_DEBUG */
@@ -3933,11 +3943,11 @@ DECLARE_THREAD(ppl_buf_flush_page_cleaner_coordinator)(
 			/*!< in: a dummy parameter required by
 			os_thread_create */
 {
-	ulint 	loop_plus = 10000;
+	ulint 	loop_plus = 5000;
 	ulint	next_loop_time = ut_time_ms() + loop_plus;
 	ulint	ppl_next_loop_time = ut_time_ms() + loop_plus;
 	bool 	ppl_request = false;
-	ulint 	flush_page_number = 3200;
+	ulint 	flush_page_number = 2400;
 	ulint	n_flushed = 0;
 	ulint	last_activity = srv_get_activity_count();
 	ulint	last_pages = 0;

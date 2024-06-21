@@ -34,6 +34,9 @@ bool is_ppl_lack = false;
 ulint ppl_lack_threshold = 0;
 lsn_t ppl_lack_lsn_gap = 0;
 
+bool flush_thread_started = false;
+ulint flush_thread_started_threshold = 0;
+
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -63,6 +66,10 @@ bool make_static_and_dynamic_ipl_region
 	is_ppl_lack = false;
 	ppl_lack_threshold = (nvdimm_info->static_ipl_page_number_per_buf_pool * 2) / 100; // 2%
 	ppl_lack_lsn_gap = 881985436;
+
+	flush_thread_started = true;
+	flush_thread_started_threshold = (nvdimm_info->static_ipl_page_number_per_buf_pool * 2) / 100; // 2%
+
 	
 	fprintf(stderr, "Overall PPL Size : %luM\n", nvdimm_info->overall_ppl_size / (1024 * 1024));
 	fprintf(stderr, "Each PPL Size : %lu\n", nvdimm_info->each_ppl_size);

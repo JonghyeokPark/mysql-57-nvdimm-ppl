@@ -39,7 +39,7 @@ ppl_buf_page_read_in_area(
 		fil_space_t*		space	= fil_space_get(cur_page_id.space());
 		const page_size_t	page_size(space->flags);
 		if(ppl_buf_read_page_background(cur_page_id, page_size, false, buf_pool)){
-			// fprintf(stderr, "ppl_buf_page_read_in_area: read page_id(%lu, %lu), buf_pool[%d]: %p\n", 
+			// fprintf(stderr, "PPL_Cleanig: ppl_buf_page_read_in_area: read page_id(%lu, %lu), buf_pool[%d]: %p\n", 
 			// 		cur_page_id.space(), cur_page_id.page_no(), buf_pool->instance_no, buf_pool);
 			n++;
 		}
@@ -77,7 +77,7 @@ ppl_buf_flush_note_modification(
 		buf_pool_t*	buf_pool = buf_pool_from_block(block);
 		buf_flush_insert_into_flush_list(
 			buf_pool, block, log_sys->lsn);
-		// fprintf(stderr, "ppl_buf_flush_note_modification[%d]: buf_pool:%p block(%u, %u): %p FLUSH_LIST_LEN: %lu\n", 
+		// fprintf(stderr, "PPL_Cleanig: ppl_buf_flush_note_modification[%d]: buf_pool:%p block(%u, %u): %p FLUSH_LIST_LEN: %lu\n", 
 		// 		buf_pool->instance_no, buf_pool, block->page.id.space(), block->page.id.page_no(), block, UT_LIST_GET_LEN(buf_pool->flush_list));
 	} else {
 		ut_ad(block->page.oldest_modification <= start_lsn);

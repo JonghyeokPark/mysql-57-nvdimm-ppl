@@ -6466,11 +6466,11 @@ corrupt:
 			set_apply_info_and_log_apply((buf_block_t*) bpage);
 			
 			// PPL Cleaner Buffer Pool Flush
-			// if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
-			// 	log_flush_order_mutex_enter();
-			// 	ppl_buf_flush_note_modification((buf_block_t*) bpage);
-			// 	log_flush_order_mutex_exit();
-			// }
+			if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
+				log_flush_order_mutex_enter();
+				ppl_buf_flush_note_modification((buf_block_t*) bpage);
+				log_flush_order_mutex_exit();
+			}
 
 			if (uncompressed) {
 				rw_lock_x_unlock_gen(&((buf_block_t*) bpage)->lock,
@@ -6504,7 +6504,7 @@ corrupt:
 		static_ipl_pointer = bpage->static_ipl_pointer;
 		is_cleaning_ppl_page = get_flag(&(bpage->flags), IN_PPL_BUF_POOL);
 		if(is_cleaning_ppl_page)	{
-			// fprintf(stderr, "After Writing page_id: (%u, %u): %p\n", bpage->id.space(), bpage->id.page_no(), static_ipl_pointer);
+			fprintf(stderr, "PPL_Cleanig: After Writing page_id: (%u, %u): %p\n", bpage->id.space(), bpage->id.page_no(), static_ipl_pointer);
 			normal_buf_pool = normal_buf_pool_get(bpage->id);
 			evict = true;
 		}
@@ -6521,8 +6521,7 @@ corrupt:
 		by the caller explicitly. */
 		if (buf_page_get_flush_type(bpage) == BUF_FLUSH_LRU) {
 			evict = true;
-			// fprintf(stderr, "evicting page page_id: (%u, %u)\n",
-				// bpage->id.space(), bpage->id.page_no());
+			//fprintf(stderr, "PPL_Cleanig: evicting page page_id: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		}
 
 		if (evict) {

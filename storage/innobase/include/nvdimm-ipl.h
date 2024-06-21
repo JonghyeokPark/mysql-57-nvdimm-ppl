@@ -163,6 +163,10 @@ typedef struct APPLY_LOG_INFO
 extern bool is_ppl_lack;
 extern ulint ppl_lack_threshold;
 extern lsn_t ppl_lack_lsn_gap;
+extern bool flush_thread_started;
+extern ulint flush_thread_started_threshold;
+
+
 bool check_write_hot_page(buf_page_t * bpage, lsn_t lsn);
 //PPL Lack
 
