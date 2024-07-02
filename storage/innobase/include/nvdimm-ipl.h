@@ -241,7 +241,7 @@ struct mem_to_cxl_copy_t{
 /* PPL NVDIMM BUFFER FUNCTION*/
 ulint
 ppl_buf_page_read_in_area(
-	std::vector <std::pair<page_id_t, uint64_t> >	page_id_list /*Page_id List*/,
+	std::vector <page_id_t>	page_id_list, /*Page_id List*/
 	uint read_page_no,
 	buf_pool_t * buf_pool);
 

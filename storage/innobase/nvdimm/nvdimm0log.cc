@@ -55,7 +55,11 @@ bool check_write_hot_page(buf_page_t * bpage, lsn_t page_before_lsn){
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
 	unsigned char * static_ipl_pointer = alloc_ppl_from_queue(normal_buf_pool_get(bpage->id));
 	unsigned char temp_buf[8] = {0};
-	if(static_ipl_pointer == NULL) return false;
+	if(static_ipl_pointer == NULL) {
+		fprintf(stderr, "Normalize_cause,%f,Direct_PPL_Area_Lack\n",(double)(time(NULL) - my_start));
+		set_normalize_flag(bpage, 3);
+		return false;
+	}
 	ulint offset = 0;
 	mach_write_to_4(((unsigned char *)temp_buf) + offset, bpage->id.space()); // Store Space id
 	offset += 4;
@@ -360,60 +364,60 @@ void set_normalize_flag(buf_page_t * bpage, uint normalize_cause){
 
 /* Unset_flag를 해주지 않아도 Static_ipl이 free 되면 초기화 됨*/
 void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id){ 
-	// if(get_flag(&(bpage->flags), IN_LOOK_UP)){
-	// 	switch (bpage->normalize_cause)
-	// 	{
-	// 		case 0:
-	// 			break;
-	// 		case 1:
-	// 			fprintf(stderr, "Normalize_cause,%f,Record_movement\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 2:
-	// 			fprintf(stderr, "Normalize_cause,%f,Max_PPL_Size\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 3:
-	// 			fprintf(stderr, "Normalize_cause,%f,PPL_Area_Lack\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 4:
-	// 			fprintf(stderr, "Normalize_cause,%f,Not_PPL_Target\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 5:
-	// 			fprintf(stderr, "Normalize_cause,%f,Cleaning\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 6:
-	// 			fprintf(stderr, "Normalize_cause,%f,LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		default:
-	// 			break;
-	// 	}
-	// }
-	// else{
-	// 	switch (bpage->normalize_cause)
-	// 	{
-	// 		case 0:
-	// 			break;
-	// 		case 1:
-	// 			fprintf(stderr, "Normalize_cause,%f,Direct_Record_movement\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 2:
-	// 			fprintf(stderr, "Normalize_cause,%f,Direct_Max_PPL_Size\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 3:
-	// 			fprintf(stderr, "Normalize_cause,%f,Direct_PPL_Area_Lack\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 4:
-	// 			fprintf(stderr, "Normalize_cause,%f,Direct_Not_PPL_Target\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 5:
-	// 			fprintf(stderr, "Normalize_cause,%f,Direct_Cleaning\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		case 6:
-	// 			fprintf(stderr, "Normalize_cause,%f,Direct_LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
-	// 			break;
-	// 		default:
-	// 			break;
-	// 	}
-	// }
+	if(get_flag(&(bpage->flags), IN_LOOK_UP)){
+		switch (bpage->normalize_cause)
+		{
+			case 0:
+				break;
+			case 1:
+				// fprintf(stderr, "Normalize_cause,%f,Record_movement\n",(double)(time(NULL) - my_start));
+				break;
+			case 2:
+				// fprintf(stderr, "Normalize_cause,%f,Max_PPL_Size\n",(double)(time(NULL) - my_start));
+				break;
+			case 3:
+				fprintf(stderr, "Normalize_cause,%f,PPL_Area_Lack\n",(double)(time(NULL) - my_start));
+				break;
+			case 4:
+				// fprintf(stderr, "Normalize_cause,%f,Not_PPL_Target\n",(double)(time(NULL) - my_start));
+				break;
+			case 5:
+				fprintf(stderr, "Normalize_cause,%f,Cleaning\n",(double)(time(NULL) - my_start));
+				break;
+			case 6:
+				// fprintf(stderr, "Normalize_cause,%f,LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
+				break;
+			default:
+				break;
+		}
+	}
+	else{
+		switch (bpage->normalize_cause)
+		{
+			case 0:
+				break;
+			case 1:
+				// fprintf(stderr, "Normalize_cause,%f,Direct_Record_movement\n",(double)(time(NULL) - my_start));
+				break;
+			case 2:
+				// fprintf(stderr, "Normalize_cause,%f,Direct_Max_PPL_Size\n",(double)(time(NULL) - my_start));
+				break;
+			case 3:
+				fprintf(stderr, "Normalize_cause,%f,Direct_PPL_Area_Lack\n",(double)(time(NULL) - my_start));
+				break;
+			case 4:
+				// fprintf(stderr, "Normalize_cause,%f,Direct_Not_PPL_Target\n",(double)(time(NULL) - my_start));
+				break;
+			case 5:
+				fprintf(stderr, "Normalize_cause,%f,Direct_Cleaning\n",(double)(time(NULL) - my_start));
+				break;
+			case 6:
+				// fprintf(stderr, "Normalize_cause,%f,Direct_LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
+				break;
+			default:
+				break;
+		}
+	}
 	if(get_flag(&(bpage->flags), IN_LOOK_UP)){
 		buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
 		rw_lock_x_lock(&buf_pool->lookup_table_lock);

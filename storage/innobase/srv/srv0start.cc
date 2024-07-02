@@ -2676,7 +2676,7 @@ files_checked:
 	/* wake main loop of page cleaner up */
 	os_event_set(buf_flush_event);
 #ifdef UNIV_NVDIMM_IPL
-    //PPL Cleaner Buffer Pool Flush
+    // PPL Cleaner Buffer Pool Flush
 	os_event_set(ppl_buf_flush_event);
 #endif
 

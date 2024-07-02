@@ -19,7 +19,7 @@ struct ppl_page_t{
 
 ulint
 ppl_buf_page_read_in_area(
-	std::vector <std::pair<page_id_t, uint64_t> >	page_id_list /*Page_id List*/,
+	std::vector <page_id_t>	page_id_list, /*Page_id List*/
 	uint read_page_no,
 	buf_pool_t * buf_pool)
 {
@@ -27,8 +27,8 @@ ppl_buf_page_read_in_area(
 
 	n = 0;
 
-	for (uint i = 0; i < page_id_list.capacity() && n < read_page_no; i++) {
-		const page_id_t cur_page_id = page_id_list[i].first;
+	for (uint i = 0; i < page_id_list.size() && n < read_page_no; i++) {
+		const page_id_t cur_page_id = page_id_list[i];
 		buf_pool_t * page_buf_pool = buf_pool_get(cur_page_id);
 		buf_page_t * buf_page = buf_page_hash_get_low(page_buf_pool, cur_page_id);
 

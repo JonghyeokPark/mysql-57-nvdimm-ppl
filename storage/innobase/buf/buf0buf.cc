@@ -312,7 +312,7 @@ the read requests for the whole area.
 static const int WAIT_FOR_READ	= 100;
 static const int WAIT_FOR_WRITE = 100;
 /** Number of attempts made to read in a page in the buffer pool */
-static const ulint	BUF_PAGE_READ_MAX_RETRIES = 100;
+static const ulint	BUF_PAGE_READ_MAX_RETRIES = 500;
 /** Number of pages to read ahead */
 static const ulint	BUF_READ_AHEAD_PAGES = 64;
 /** The maximum portion of the buffer pool that can be used for the
@@ -6504,7 +6504,7 @@ corrupt:
 		static_ipl_pointer = bpage->static_ipl_pointer;
 		is_cleaning_ppl_page = get_flag(&(bpage->flags), IN_PPL_BUF_POOL);
 		if(is_cleaning_ppl_page)	{
-			fprintf(stderr, "PPL_Cleanig: After Writing page_id: (%u, %u): %p\n", bpage->id.space(), bpage->id.page_no(), static_ipl_pointer);
+			// fprintf(stderr, "PPL_Cleanig: After Writing page_id: (%u, %u): %p\n", bpage->id.space(), bpage->id.page_no(), static_ipl_pointer);
 			normal_buf_pool = normal_buf_pool_get(bpage->id);
 			evict = true;
 		}

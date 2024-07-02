@@ -65,6 +65,7 @@ static const int buf_flush_page_cleaner_priority = -20;
 #include "nvdimm-ipl.h"
 #include "vector"
 #include "algorithm"
+#include "deque"
 #endif
 
 /** Sleep time in microseconds for loop waiting for the oldest
@@ -148,6 +149,13 @@ struct page_cleaner_slot_t {
 	ulint			flush_list_pass;
 					/*!< count to attempt flush_list
 					flushing */
+#ifdef UNIV_NVDIMM_IPL
+	bool			cleaning_finished;
+					/*!< true if cleaning finished */
+	uint			left_time;
+					/*!< number of pages left to clean */
+	
+#endif
 };
 
 /** Page cleaner structure common for all threads */
@@ -191,6 +199,12 @@ struct page_cleaner_t {
 						/*<! how many of pc threads
 						have been disabled */
 #endif /* UNIV_DEBUG */
+
+#ifdef UNIV_NVDIMM_IPL
+	ulint 			cleaning_lsn_limit;
+	bool			all_cleaning_finished;
+	uint			left_flush_count;
+#endif
 };
 
 static page_cleaner_t*	page_cleaner = NULL;
@@ -696,7 +710,6 @@ buf_flush_remove(
 /*=============*/
 	buf_page_t*	bpage)	/*!< in: pointer to the block in question */
 {
-	// fprintf(stderr, "Erase page in flush list: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
 
 	ut_ad(buf_pool_mutex_own(buf_pool));
@@ -1090,15 +1103,6 @@ buf_flush_write_block_low(
 	ut_ad(buf_page_get_io_fix(bpage) == BUF_IO_WRITE);
 	ut_ad(bpage->oldest_modification != 0);
 
-#ifdef UNIV_NVDIMM_IPL
-	if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL) && get_flag(&(bpage->flags), PPLIZED) && get_flag(&(bpage->flags), NORMALIZE)){
-		bpage->newest_modification = get_page_lsn_from_ipl_header(bpage->static_ipl_pointer);
-		fprintf(stderr, "PPL_Cleanig: Write LSN: (%u, %u): %zu\n", bpage->id.space(), bpage->id.page_no(), get_page_lsn_from_ipl_header(bpage->static_ipl_pointer));
-	}
-#else
-		mach_write_to_8(frame + FIL_PAGE_LSN,
-				bpage->newest_modification);
-#endif
 
 #ifdef UNIV_IBUF_COUNT_DEBUG
 	ut_a(ibuf_count_get(bpage->id) == 0);
@@ -1110,6 +1114,13 @@ buf_flush_write_block_low(
 	if (!srv_read_only_mode) {
 		log_write_up_to(bpage->newest_modification, true);
 	}
+
+#ifdef UNIV_NVDIMM_IPL
+	if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL) && get_flag(&(bpage->flags), PPLIZED) && get_flag(&(bpage->flags), NORMALIZE)){
+		bpage->newest_modification = get_page_lsn_from_ipl_header(bpage->static_ipl_pointer);
+		// fprintf(stderr, "PPL_Cleanig: Write LSN: (%u, %u): %zu\n", bpage->id.space(), bpage->id.page_no(), get_page_lsn_from_ipl_header(bpage->static_ipl_pointer));
+	}
+#endif
 
 	switch (buf_page_get_state(bpage)) {
 	case BUF_BLOCK_POOL_WATCH:
@@ -1149,8 +1160,7 @@ buf_flush_write_block_low(
 #ifdef UNIV_NVDIMM_IPL
 	if(check_can_be_pplized(bpage)){
 		// fprintf(stderr, "Not Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
-		// if(is_ppl_lack && !check_write_hot_page(bpage) ) goto normal_case;
-		if(is_ppl_lack && !check_write_hot_page(bpage, before_lsn)) goto normal_case;
+		// if(is_ppl_lack && !check_write_hot_page(bpage, before_lsn)) goto normal_case;
 		if(get_flag(&(bpage->flags), DIRECTLY_WRITE)){
 			goto jump_to_io_complete;
 		}
@@ -1190,7 +1200,6 @@ normal_case:
 		buf_dblwr_write_single_page(bpage, sync);
 	} else {
 		ut_ad(!sync);
-		// fprintf(stderr, "buf_dblwr_add_to_batch: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
 		buf_dblwr_add_to_batch(bpage);
 	}
 
@@ -3138,7 +3147,8 @@ static
 void
 ppl_pc_request(
 	ulint		min_n,
-	lsn_t		lsn_limit)
+	lsn_t		lsn_limit,
+	lsn_t		cleaning_lsn_limit)
 {
 
 	if (min_n != ULINT_MAX) {
@@ -3166,11 +3176,15 @@ ppl_pc_request(
 		page_cleaner_flush_pages_recommendation() */
 		slot->n_pages_requested = min_n;
 		slot->state = PAGE_CLEANER_STATE_REQUESTED;
+		slot->cleaning_finished = false;
+		slot->left_time = ppl_page_cleaner->left_flush_count;
 	}
+	ppl_page_cleaner->left_flush_count--;
 
 	ppl_page_cleaner->n_slots_requested = page_cleaner->n_slots;
 	ppl_page_cleaner->n_slots_flushing = 0;
 	ppl_page_cleaner->n_slots_finished = 0;
+	ppl_page_cleaner->cleaning_lsn_limit = cleaning_lsn_limit;
 
 	os_event_set(ppl_page_cleaner->is_requested);
 
@@ -3186,7 +3200,7 @@ ppl_pc_flush_slot(void)
 {
 	std::tr1::unordered_map<page_id_t, unsigned char * >::iterator it;
 	//page_id_list 생성
-	std::vector <std::pair<page_id_t, uint64_t> > page_id_list;
+	std::vector <page_id_t> page_id_list;
 	mutex_enter(&ppl_page_cleaner->mutex);
 
 
@@ -3234,29 +3248,45 @@ ppl_pc_flush_slot(void)
 		}
 
 		mutex_exit(&ppl_page_cleaner->mutex);
-		// 일단은 Page를 FLUSH 진행
-		/* Flush pages from flush_list if required */
-		if (ppl_page_cleaner->requested) {
-			slot->succeeded_list = buf_flush_do_batch(
-				ppl_buf_pool_from_array(i), BUF_FLUSH_LIST,
-				slot->n_pages_requested,
-				ppl_page_cleaner->lsn_limit,
-				&slot->n_flushed_list);
-			// fprintf(stderr, "slot->n_pages_requested,: %d slot->n_flushed_list : %d\n", slot->n_pages_requested, slot->n_flushed_list);
-		} else {
-			slot->n_flushed_list = 0;
-			slot->succeeded_list = true;
-		}
 		/* PPL Page 별로 접근해서  Page LSN만 읽어오기*/
-		rw_lock_s_lock(&buf_pool->lookup_table_lock);
-		for (it = buf_pool->ipl_look_up_table->begin(); it != buf_pool->ipl_look_up_table->end(); ++it) {
-			page_id_t page_id = it->first;
-			lsn_t page_lsn = get_page_lsn_from_ipl_header(it->second);
-			page_id_list.push_back(std::make_pair(page_id, page_lsn));
+		if(!slot->cleaning_finished){ // Cleaing이 끝나지 않았을 때만 Cleaning 진행
+			rw_lock_s_lock(&buf_pool->lookup_table_lock);
+			for (it = buf_pool->ipl_look_up_table->begin(); it != buf_pool->ipl_look_up_table->end(); ++it) {
+				page_id_t page_id = it->first;
+				lsn_t page_lsn = get_page_lsn_from_ipl_header(it->second);
+				if(page_lsn < ppl_page_cleaner->cleaning_lsn_limit) {
+					page_id_list.push_back(page_id);
+				}
+			}
+			rw_lock_s_unlock(&buf_pool->lookup_table_lock);
+			fprintf(stderr, "PPL_Cleaning_Target,%d,%zu,%d\n", i, ppl_page_cleaner->cleaning_lsn_limit, page_id_list.size());
+			if(page_id_list.size() == 0) {
+				slot->cleaning_finished = true;
+				goto finish;
+			}
+			slot->n_pages_requested = page_id_list.size() / slot->left_time;
+			if(slot->n_pages_requested > 400){
+				slot->n_pages_requested = 400;
+			}
+			if(slot->n_pages_requested < 125){
+				slot->n_pages_requested = 125;
+			}
+			ppl_buf_page_read_in_area(page_id_list, slot->n_pages_requested, ppl_buf_pool_from_array(i));
+
+			// 일단은 Page를 FLUSH 진행
+			/* Flush pages from flush_list if required */
+			if (ppl_page_cleaner->requested) {
+				slot->succeeded_list = buf_flush_do_batch(
+					ppl_buf_pool_from_array(i), BUF_FLUSH_LIST,
+					slot->n_pages_requested,
+					ppl_page_cleaner->lsn_limit,
+					&slot->n_flushed_list);
+				// fprintf(stderr, "slot->n_pages_requested,: %d slot->n_flushed_list : %d\n", slot->n_pages_requested, slot->n_flushed_list);
+			} else {
+				slot->n_flushed_list = 0;
+				slot->succeeded_list = true;
+			}
 		}
-		rw_lock_s_unlock(&buf_pool->lookup_table_lock);
-		std::sort(page_id_list.begin(), page_id_list.end(), compare);
-		ppl_buf_page_read_in_area(page_id_list, slot->n_pages_requested, ppl_buf_pool_from_array(i));
 		
 		if (!ppl_page_cleaner->is_running) {
 			slot->n_flushed_list = 0;
@@ -3293,6 +3323,7 @@ ppl_pc_wait_finished(
 	ulint * n_flushed)
 {
 	bool	all_succeeded = true;
+	bool 	all_cleaning = true;
 
 	os_event_wait(ppl_page_cleaner->is_finished);
 
@@ -3309,10 +3340,13 @@ ppl_pc_wait_finished(
 
 		ut_ad(slot->state == PAGE_CLEANER_STATE_FINISHED);
 		all_succeeded &= slot->succeeded_list;
+		
+		all_cleaning &= slot->cleaning_finished;
 
 		slot->state = PAGE_CLEANER_STATE_NONE;
 
 		slot->n_pages_requested = 0;
+
 	}
 
 	ppl_page_cleaner->n_slots_finished = 0;
@@ -3320,6 +3354,10 @@ ppl_pc_wait_finished(
 	os_event_reset(ppl_page_cleaner->is_finished);
 
 	mutex_exit(&ppl_page_cleaner->mutex);
+
+	if(all_cleaning) {
+		ppl_page_cleaner->all_cleaning_finished = true;
+	}
 
 	return(all_succeeded);
 }
@@ -3943,15 +3981,20 @@ DECLARE_THREAD(ppl_buf_flush_page_cleaner_coordinator)(
 			/*!< in: a dummy parameter required by
 			os_thread_create */
 {
-	ulint 	loop_plus = 5000;
+	ulint 	loop_plus = 10000;
 	ulint	next_loop_time = ut_time_ms() + loop_plus;
 	ulint	ppl_next_loop_time = ut_time_ms() + loop_plus;
 	bool 	ppl_request = false;
-	ulint 	flush_page_number = 2400;
+	ulint 	flush_page_number = 1000;
 	ulint	n_flushed = 0;
 	ulint	last_activity = srv_get_activity_count();
 	ulint	last_pages = 0;
-	srand(time(NULL));
+
+	std::deque<lsn_t> buffer;
+    const size_t maxSize = 90; // 최대 몇분까지 저장할건지
+	ulint 	ppl_lsn_loop_plus = 60000; // 1분
+	ulint 	ppl_lsn_next_loop_time = ut_time_ms() + ppl_lsn_loop_plus;
+	lsn_t 	cleaning_lsn_limit = 0;
 
 	my_thread_init();
 
@@ -4088,18 +4131,35 @@ DECLARE_THREAD(ppl_buf_flush_page_cleaner_coordinator)(
 		}
 		if (ret_sleep != OS_SYNC_TIME_EXCEEDED
 		    && srv_flush_sync) {
-			// ppl_pc_request(100, LSN_MAX);
-			// ppl_pc_wait_finished(&n_flushed);
-			if(ut_time_ms() > ppl_next_loop_time) {
-				// fprintf(stderr, "1: Flushed: %lu\n", n_flushed);
-				ppl_pc_request(flush_page_number, LSN_MAX);
+			
+			// 1분마다 LSN 값을 저장
+			if(ut_time_ms() > ppl_lsn_next_loop_time) {
+				if (buffer.size() == maxSize) {
+					cleaning_lsn_limit = buffer.front();
+					buffer.pop_front(); // 가장 오래된 값을 제거
+					ppl_page_cleaner->all_cleaning_finished = false;
+					ppl_page_cleaner->left_flush_count = 6;
+				}
+				buffer.push_back(log_sys->lsn); // 새로운 값을 추가
+				//시간과, LSN 값 출력
+				fprintf(stderr, "Save_LSN Time: %zu sec, LSN: %zu\n", (ut_time_ms() - ppl_lsn_next_loop_time) / 1000, buffer.back());
+				ppl_lsn_next_loop_time = ut_time_ms() + ppl_lsn_loop_plus;
+				
+			}
+
+			// 5초마다 페이지를 flush
+			if(ut_time_ms() > ppl_next_loop_time && !ppl_page_cleaner->all_cleaning_finished) {
+				ppl_pc_request(flush_page_number, LSN_MAX, cleaning_lsn_limit);
 				ppl_next_loop_time = ut_time_ms() + loop_plus;
 				ppl_request = true;
 			}
 			if(ppl_request) {
 				ppl_pc_wait_finished(&n_flushed);
 				ppl_request = false;
+				fprintf(stderr, "Cleaning,%zu,%lu\n",cleaning_lsn_limit, n_flushed);
 			}
+
+
 		} else if (srv_check_activity(last_activity)) {
 			/* Estimate pages from flush_list to be flushed */
 			ulint	n_to_flush;
@@ -4110,18 +4170,36 @@ DECLARE_THREAD(ppl_buf_flush_page_cleaner_coordinator)(
 			} else {
 				n_to_flush = 0;
 			}
-			// ppl_pc_request(100, LSN_MAX);
-			// ppl_pc_wait_finished(&n_flushed);
-			if(ut_time_ms() > ppl_next_loop_time) {
-				//fprintf(stderr, "2: Flushed: %lu\n", n_flushed);
-				ppl_pc_request(flush_page_number, LSN_MAX);
+
+			// 1분마다 LSN 값을 저장
+			// 1분마다 LSN 값을 저장
+			if(ut_time_ms() > ppl_lsn_next_loop_time) {
+				if (buffer.size() == maxSize) {
+					cleaning_lsn_limit = buffer.front();
+					buffer.pop_front(); // 가장 오래된 값을 제거
+					ppl_page_cleaner->all_cleaning_finished = false;
+					ppl_page_cleaner->left_flush_count = 6;
+				}
+				buffer.push_back(log_sys->lsn); // 새로운 값을 추가
+				//시간과, LSN 값 출력
+				fprintf(stderr, "Save_LSN Time: %zu sec, LSN: %zu\n", (ut_time_ms() - ppl_lsn_next_loop_time) / 1000, buffer.back());
+				ppl_lsn_next_loop_time = ut_time_ms() + ppl_lsn_loop_plus;
+				
+			}
+
+			// 5초마다 페이지를 flush
+			if(ut_time_ms() > ppl_next_loop_time && !ppl_page_cleaner->all_cleaning_finished) {
+				ppl_pc_request(flush_page_number, LSN_MAX, cleaning_lsn_limit);
 				ppl_next_loop_time = ut_time_ms() + loop_plus;
 				ppl_request = true;
 			}
 			if(ppl_request) {
 				ppl_pc_wait_finished(&n_flushed);
 				ppl_request = false;
+				fprintf(stderr, "Cleaning,%zu,%lu\n",cleaning_lsn_limit, n_flushed);
 			}
+
+
 		} else if (ret_sleep == OS_SYNC_TIME_EXCEEDED) {
 			n_flushed = 0;
 			n_flushed_last += n_flushed;
