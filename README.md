@@ -30,9 +30,9 @@ $ ./build.sh PASSWD --origin
 | :---------------------------------- | :---------- |
 | innodb_use_ipl                      | Specifies whether to enable per-page logging scheme. **true** or **false**. |
 | innodb_nvdimm_home_dir				      | NVDIMM-aware files resident directory |
-| innodb_nvdimm_size		              | The size in bytes of the NVDIMM. The default valuye is 1GB. |
-| innodb_nvdimm_static_entry_size			| The size in bytes of the each PPL block. The default value is 64B. |
-| innodb_nvdimm_max_ppl_size				  | The size in bytes of the max NVDIMM size, which can be allocated per page. The default value is 256B. |
+| innodb_nvdimm_size		              | The size in bytes of the NVDIMM. The default value is 1GB. |
+| innodb_nvdimm_static_entry_size			| The size in bytes of each PPL block. The default value is 64B. |
+| innodb_nvdimm_max_ppl_size				  | The size in bytes of the max PPL size, which can be allocated per page. The default value is 256B. |
 
 For example:
 
