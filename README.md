@@ -247,7 +247,7 @@ Second, Set read + write requests per thread
 Third, Set warmup_time to 100
 
     ...
-    # MySQL connection information
+    # Experiment Setting
     requesters = 32
     requests = 17500000
     maxtime = 10800
