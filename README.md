@@ -34,5 +34,5 @@ $ ./build.sh --origin
 2. Run MySQL server:
 
 ```bash
-$ ./bld/bin/mysqld --defaults-fele=my.cnf
+$ ./bld/bin/mysqld --defaults-file=my.cnf
 ```
