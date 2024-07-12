@@ -54,22 +54,14 @@ void free_ppl_and_push_queue(buf_pool_t * buf_pool, unsigned char * addr){
       return;
   }
 	unsigned char * next_addr = get_addr_from_ipl_index(nvdimm_info->static_start_pointer, mach_read_from_4(addr + IPL_HDR_DYNAMIC_INDEX), nvdimm_info->each_ppl_size);
-	memset_to_cxl(addr, 0, nvdimm_info->each_ppl_size);
+	memset_to_cxl(addr, 0x00, nvdimm_info->each_ppl_size);
 	mutex_enter(&buf_pool->static_allocator_mutex);
 	buf_pool->static_ipl_allocator->push(get_ipl_index_from_addr(nvdimm_info->static_start_pointer, addr, nvdimm_info->each_ppl_size));
 	mutex_exit(&buf_pool->static_allocator_mutex);
-	// fprintf(stderr, "free static address : %p\n", addr);
-	// if((uint64_t)addr % 128 != 0){
-	// 	fprintf(stderr, "Error : addr is not aligned: %p\n", addr);
-	// }
 	addr = next_addr;
 	while(addr != NULL){
-		next_addr = get_addr_from_ipl_index(nvdimm_info->static_start_pointer, mach_read_from_4(addr), nvdimm_info->each_ppl_size);
-		memset_to_cxl(addr, 0, nvdimm_info->each_ppl_size);
-		// fprintf(stderr, "free Nth static address : %p\n", addr);
-		// if((uint64_t)addr % 128 != 0){
-		// 	fprintf(stderr, "Error : Nth addr is not aligned: %p\n", addr);
-		// }
+		next_addr = get_addr_from_ipl_index(nvdimm_info->static_start_pointer, mach_read_from_4(addr + NTH_IPL_DYNAMIC_INDEX), nvdimm_info->each_ppl_size);
+		memset_to_cxl(addr, 0x00, nvdimm_info->each_ppl_size);
 		mutex_enter(&buf_pool->static_allocator_mutex);
 		buf_pool->static_ipl_allocator->push(get_ipl_index_from_addr(nvdimm_info->static_start_pointer, addr, nvdimm_info->each_ppl_size));
 		mutex_exit(&buf_pool->static_allocator_mutex);

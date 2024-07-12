@@ -100,17 +100,19 @@ void nvdimm_free(const uint64_t pool_size);
 
 /* space (4) | page_no (4) | First_Dynamic_index (4) | length (4) | LSN (8) | Normalize Flag(1) | mtr_log | mtr_log | ... */
 /* IPL_LOG_HEADER OFFSET */
-#define IPL_HDR_SPACE							0
-#define IPL_HDR_PAGE							4
-#define IPL_HDR_DYNAMIC_INDEX					8
-#define IPL_HDR_LEN								12
-#define IPL_HDR_LSN								16	
-#define IPL_HDR_FLAG							24
-#define IPL_HDR_FLUSH_MARK						25
-#define IPL_HDR_SIZE							29
+#define IPL_HDR_FIRST_MARKER					0
+#define IPL_HDR_NORMALIZE_MARKER				1
+#define IPL_HDR_SPACE							2
+#define IPL_HDR_PAGE							6
+#define IPL_HDR_DYNAMIC_INDEX					10
+#define IPL_HDR_LEN								14
+#define IPL_HDR_LSN								18	
+#define IPL_HDR_SIZE							26
 
 /* Second_Dynamic_index (4) | mtr_log | ... */
-#define NTH_IPL_HEADER_SIZE 4UL
+#define NTH_IPL_BLOCK_MARKER				0
+#define NTH_IPL_DYNAMIC_INDEX			 	1
+#define NTH_IPL_HEADER_SIZE 				5
 
 /* In apply log strucrute*/
 /* mtr_log_type(1) | mtr_body_len (2) | trx_id (8) | mtr_log_body(1 ~ 110) | */
@@ -208,7 +210,7 @@ uint get_ipl_length_from_ipl_header(buf_page_t * bpage);
 void set_page_lsn_in_ipl_header(unsigned char* static_ipl_pointer, lsn_t lsn);
 lsn_t get_page_lsn_from_ipl_header(unsigned char* static_ipl_pointer);
 void set_normalize_flag_in_ipl_header(unsigned char * static_ipl_pointer);
-unsigned char * get_flag_in_ipl_header(unsigned char * static_ipl_pointer);
+unsigned char get_normalize_flag_in_ipl_header(unsigned char * static_ipl_pointer);
 
 //page IPL flag 관련 함수
 void set_flag(unsigned char * flags, ipl_flag flag);

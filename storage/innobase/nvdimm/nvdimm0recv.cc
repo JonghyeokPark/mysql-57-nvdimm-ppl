@@ -200,15 +200,15 @@ void recv_ipl_set_flag(unsigned char* ipl_ptr, char flag) {
 }
 
 char recv_ipl_get_flag(unsigned char* ipl_ptr) {
-	return mach_read_from_1(ipl_ptr + IPL_HDR_FLAG);
+	return mach_read_from_1(ipl_ptr + IPL_HDR_NORMALIZE_MARKER);
 }
 
 void recv_ipl_set_wp(unsigned char* ipl_ptr, uint32_t cur_len) {
-	mach_write_to_4(ipl_ptr + IPL_HDR_FLUSH_MARK, cur_len);
+	mach_write_to_1(ipl_ptr + IPL_HDR_NORMALIZE_MARKER, cur_len);
 }
 
 ulint recv_ipl_get_wp(unsigned char* ipl_ptr) {
-	return mach_read_from_4(ipl_ptr + IPL_HDR_FLUSH_MARK);
+	return mach_read_from_1(ipl_ptr + IPL_HDR_NORMALIZE_MARKER);
 }
 
 
@@ -415,7 +415,7 @@ bool recv_check_normal_flag(buf_block_t* block) {
 	std::tr1::unordered_map<page_id_t, uint64_t >::iterator recv_iter;
 	recv_iter = ipl_recv_map.find(block->page.id);
 	uint64_t addr = recv_iter->second;
-	return get_flag(nvdimm_recv_ptr + addr + IPL_HDR_FLAG, NORMALIZE);
+	return get_normalize_flag_in_ipl_header(nvdimm_recv_ptr + addr + IPL_HDR_NORMALIZE_MARKER);
 }
 
 lsn_t recv_get_first_ipl_lsn(buf_block_t* block) {
@@ -429,7 +429,7 @@ bool recv_check_normal_flag_using_page_id(page_id_t page_id) {
 	std::tr1::unordered_map<page_id_t, uint64_t >::iterator recv_iter;
 	recv_iter = ipl_recv_map.find(page_id);
 	uint64_t addr = recv_iter->second;
-	return get_flag(nvdimm_recv_ptr + addr + IPL_HDR_FLAG, NORMALIZE);
+	return get_normalize_flag_in_ipl_header(nvdimm_recv_ptr + addr + IPL_HDR_NORMALIZE_MARKER);
 }
 
 lsn_t recv_get_first_ipl_lsn_using_page_id(page_id_t page_id) {

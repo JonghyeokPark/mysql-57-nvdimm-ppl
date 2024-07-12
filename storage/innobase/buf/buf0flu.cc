@@ -2319,6 +2319,12 @@ buf_flush_single_page_from_LRU(
 
 			Note: There is no guarantee that this page has actually
 			been freed, only that it has been flushed to disk */
+// #ifdef UNIV_NVDIMM_IPL
+// 			if(n_iterations <= 1 && !check_can_be_skip(bpage)) {
+// 				mutex_exit(block_mutex);
+// 				continue;
+// 			}
+// #endif
 
 			freed = buf_flush_page(
 				buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
