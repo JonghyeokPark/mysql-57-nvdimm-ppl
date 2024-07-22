@@ -67,7 +67,7 @@ $ sudo apt-get install maven
 1. Clone the source code:
 
 ```bash
-$ git clone git@github.com:facebook/linkbench.git
+$ git clone https://github.com/facebookarchive/linkbench.git
 ```
 
 2. Build LinkBench (skip all tests):
@@ -122,6 +122,8 @@ CREATE TABLE `nodetable` (
   `data` mediumtext NOT NULL,
   PRIMARY KEY(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+
+mysql>quit;
 ```
 
 5. Make a copy of the example config file:
@@ -162,6 +164,7 @@ $ ./bin/linkbench -c config/MyConfig.properties -l
 7. After Loading the data is finished, shut down the MySQL server:
 
 ```bash
+$ cd mysql-57-nvdimm-ppl
 $ ./bld/bin/mysqladmin -uroot -p shutdown
 ``````
 

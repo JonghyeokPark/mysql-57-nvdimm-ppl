@@ -21,23 +21,13 @@ requesters = 32  	#(32: # of cores in your machine)
 # read + write requests per thread
 requests = 781250 	# 32 * 781250 = 25M Requests
 
-# max duration in seconds for request phase of benchmark
-maxtime = 21600
-
 # warmup time in seconds.  The benchmark is run for a warmup period
 warmup_time = 100
 ```
 
-3. Start the NV-PPL server.
-
+3. Modify the configuration file (`my.cnf` in repository) for your `data directory`, `log directory` and `persistent memory mount directory`
 ```bash
 $ cd mysql-57-nvdimm-ppl
-$ ./bld/bin/mysqld --defaults-file=my.cnf
-```
-
-4. Modify the configuration file (`my.cnf` in repository) for your `--datadir` and `--logdir`
-
-```bash
 $ vi my.cnf
 
 #
@@ -58,11 +48,22 @@ log-error	= /path/to/logdir/mysql_error_nvdimm.log
 
 #Log group path (iblog0, iblog1)
 innodb_log_group_home_dir=/path/to/logdir/
+
+# NVDIMM-IPL settings
+innodb_nvdimm_home_dir=/mnt/pmem
+...
 ```
 
-4. Run the request phase:
+
+3. Start the NV-PPL server.
+
+```bash
+$ ./bld/bin/mysqld --defaults-file=my.cnf
+```
+
+5. Run the request phase:
 
 ```bash
 $ cd linkbench
-$  ./bin/linkbench -c config/MyConfig.properties -csvstats final-stats.csv -csvstream streaming-stats.csv -L linkbench_result.txt -r
+$ ./bin/linkbench -c config/MyConfig.properties -csvstats final-stats.csv -csvstream streaming-stats.csv -L linkbench_result.txt -r
 ```
