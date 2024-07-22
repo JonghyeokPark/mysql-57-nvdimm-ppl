@@ -61,7 +61,7 @@ Created 11/11/1995 Heikki Tuuri
 static const int buf_flush_page_cleaner_priority = -20;
 #endif /* UNIV_LINUX */
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #include "vector"
 #include "algorithm"
@@ -149,7 +149,7 @@ struct page_cleaner_slot_t {
 	ulint			flush_list_pass;
 					/*!< count to attempt flush_list
 					flushing */
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	bool			cleaning_finished;
 					/*!< true if cleaning finished */
 	uint			left_time;
@@ -200,7 +200,7 @@ struct page_cleaner_t {
 						have been disabled */
 #endif /* UNIV_DEBUG */
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	ulint 			cleaning_lsn_limit;
 	bool			all_cleaning_finished;
 	uint			left_flush_count;
@@ -209,7 +209,7 @@ struct page_cleaner_t {
 
 static page_cleaner_t*	page_cleaner = NULL;
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 mysql_pfs_key_t ppl_page_cleaner_thread_key;
 bool ppl_buf_page_cleaner_is_active = false;
 os_event_t	ppl_buf_flush_event;
@@ -870,9 +870,9 @@ buf_flush_write_complete(
 
 		os_event_set(buf_pool->no_flush[flush_type]);
 	}
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE))	return;
-#endif /* UNIV_NVDIMM_IPL */
+#endif /* UNIV_NVDIMM_PPL */
 
 	buf_dblwr_update(bpage, flush_type);
 }
@@ -1115,10 +1115,9 @@ buf_flush_write_block_low(
 		log_write_up_to(bpage->newest_modification, true);
 	}
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL) && get_flag(&(bpage->flags), PPLIZED) && get_flag(&(bpage->flags), NORMALIZE)){
-		bpage->newest_modification = get_page_lsn_from_ipl_header(bpage->static_ipl_pointer);
-		// fprintf(stderr, "PPL_Cleanig: Write LSN: (%u, %u): %zu\n", bpage->id.space(), bpage->id.page_no(), get_page_lsn_from_ipl_header(bpage->static_ipl_pointer));
+		bpage->newest_modification = get_page_lsn_from_ppl_header(bpage->first_ppl_block_ptr);
 	}
 #endif
 
@@ -1157,16 +1156,14 @@ buf_flush_write_block_low(
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
 	adds an overhead during flushing. */
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(check_can_be_pplized(bpage)){
-		// fprintf(stderr, "Not Flushed: (%u, %u), %p\n", bpage->id.space(), bpage->id.page_no(), bpage);
-		// if(is_ppl_lack && !check_write_hot_page(bpage, before_lsn)) goto normal_case;
 		if(get_flag(&(bpage->flags), DIRECTLY_WRITE)){
 			goto jump_to_io_complete;
 		}
-		if(copy_memory_log_to_cxl(bpage)){
+		if(copy_memory_log_to_nvdimm(bpage)){
 jump_to_io_complete:
-			set_page_lsn_in_ipl_header(bpage->static_ipl_pointer, bpage->newest_modification);
+			set_page_lsn_in_ppl_header(bpage->first_ppl_block_ptr, bpage->newest_modification);
 			if(sync){
 				buf_page_io_complete(bpage, true);
 			}
@@ -1176,9 +1173,9 @@ jump_to_io_complete:
 			return;
 		}
 	}
-#endif
-normal_case:
 	set_normalize_flag(bpage, bpage->normalize_cause);
+#endif
+	
 
 	if (!srv_use_doublewrite_buf
 	    || buf_dblwr == NULL
@@ -2305,9 +2302,9 @@ buf_flush_single_page_from_LRU(
 			}
 
 		} 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		// else if ((n_iterations > 1) && buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
-		else if (n_iterations > 1 && buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
+		else if (buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
 #else
 		else if (buf_flush_ready_for_flush(bpage, BUF_FLUSH_SINGLE_PAGE)) {
 #endif
@@ -2319,12 +2316,12 @@ buf_flush_single_page_from_LRU(
 
 			Note: There is no guarantee that this page has actually
 			been freed, only that it has been flushed to disk */
-// #ifdef UNIV_NVDIMM_IPL
-// 			if(n_iterations <= 1 && !check_can_be_skip(bpage)) {
-// 				mutex_exit(block_mutex);
-// 				continue;
-// 			}
-// #endif
+#ifdef UNIV_NVDIMM_PPL
+			if(n_iterations == 0 && !check_can_be_skip(bpage)) {
+				mutex_exit(block_mutex);
+				continue;
+			}
+#endif
 
 			freed = buf_flush_page(
 				buf_pool, bpage, BUF_FLUSH_SINGLE_PAGE, true);
@@ -2804,7 +2801,7 @@ pc_sleep_if_needed(
 	return(OS_SYNC_TIME_EXCEEDED);
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 static
 ulint
 ppl_pc_sleep_if_needed(
@@ -2879,7 +2876,7 @@ buf_flush_page_cleaner_close(void)
 	page_cleaner = NULL;
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /******************************************************************//**
 Initialize PPL Page Cleaner. */
 void
@@ -3137,7 +3134,7 @@ pc_wait_finished(
 	return(all_succeeded);
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 bool compare(const std::pair<page_id_t, uint64_t>& a, const std::pair<page_id_t, uint64_t>& b) {
     return a.second < b.second;
 }
@@ -3257,9 +3254,9 @@ ppl_pc_flush_slot(void)
 		/* PPL Page 별로 접근해서  Page LSN만 읽어오기*/
 		if(!slot->cleaning_finished){ // Cleaing이 끝나지 않았을 때만 Cleaning 진행
 			rw_lock_s_lock(&buf_pool->lookup_table_lock);
-			for (it = buf_pool->ipl_look_up_table->begin(); it != buf_pool->ipl_look_up_table->end(); ++it) {
+			for (it = buf_pool->ppl_look_up_table->begin(); it != buf_pool->ppl_look_up_table->end(); ++it) {
 				page_id_t page_id = it->first;
-				lsn_t page_lsn = get_page_lsn_from_ipl_header(it->second);
+				lsn_t page_lsn = get_page_lsn_from_ppl_header(it->second);
 				if(page_lsn < ppl_page_cleaner->cleaning_lsn_limit) {
 					page_id_list.push_back(page_id);
 				}
@@ -3427,7 +3424,7 @@ buf_flush_page_cleaner_disabled_loop(void)
 	page_cleaner->n_disabled_debug--;
 	mutex_exit(&page_cleaner->mutex);
 }
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /** Loop used to disable page cleaner threads. */
 static
 void
@@ -3973,7 +3970,7 @@ DECLARE_THREAD(buf_flush_page_cleaner_worker)(
 	OS_THREAD_DUMMY_RETURN;
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 
 /******************************************************************//**
 page_cleaner thread tasked with flushing dirty pages from the buffer
@@ -3994,7 +3991,6 @@ DECLARE_THREAD(ppl_buf_flush_page_cleaner_coordinator)(
 	ulint 	flush_page_number = 1000;
 	ulint	n_flushed = 0;
 	ulint	last_activity = srv_get_activity_count();
-	ulint	last_pages = 0;
 
 	std::deque<lsn_t> buffer;
     const size_t maxSize = 90; // 최대 몇분까지 저장할건지
@@ -4170,7 +4166,7 @@ DECLARE_THREAD(ppl_buf_flush_page_cleaner_coordinator)(
 			/* Estimate pages from flush_list to be flushed */
 			ulint	n_to_flush;
 			n_flushed = 0;
-			if (ret_sleep == OS_SYNC_TIME_EXCEEDED) {
+			if (ret_sleep == OS_SYNC_TIME_EXCEEDED) { 
 				last_activity = srv_get_activity_count();
 				n_to_flush = flush_page_number;
 			} else {
@@ -4355,7 +4351,7 @@ DECLARE_THREAD(buf_flush_ppl_page_cleaner_worker)(
 
 	OS_THREAD_DUMMY_RETURN;
 }
-#endif /* UNIV_NVDIMM_IPL */
+#endif /* UNIV_NVDIMM_PPL */
 
 /*******************************************************************//**
 Synchronously flush dirty blocks from the end of the flush list of all buffer

@@ -1,4 +1,4 @@
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #include "mtr0log.h"
 #include "page0page.h"

@@ -40,7 +40,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0start.h"
 #include "srv0srv.h"
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #include "page0page.h"
 #endif
@@ -924,7 +924,7 @@ buf_read_recv_pages(
 			      unsigned(n_stored)));
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 
 /** High-level function which reads a page asynchronously from a file to the
 buffer buf_pool if it is not already there. Sets the io_fix flag and sets

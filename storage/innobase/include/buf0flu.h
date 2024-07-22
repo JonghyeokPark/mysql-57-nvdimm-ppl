@@ -45,7 +45,7 @@ extern my_bool		innodb_page_cleaner_disabled_debug;
 /** Event to synchronise with the flushing. */
 extern os_event_t	buf_flush_event;
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 extern bool ppl_buf_page_cleaner_is_active;
 extern os_event_t	ppl_buf_flush_event;
 #endif
@@ -252,7 +252,7 @@ Initialize page_cleaner. */
 void
 buf_flush_page_cleaner_init(void);
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /******************************************************************//**
 page_cleaner thread tasked with flushing dirty pages from the buffer
 pools. As of now we'll have only one coordinator of this thread.

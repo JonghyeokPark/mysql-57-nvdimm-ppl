@@ -504,7 +504,7 @@ struct mtr_buf_copy_t {
 	}
 };
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 template <size_t SIZE = PPL_DYN_ARRAY_DATA_SIZE>
 class ppl_dyn_buf_t {
 public:

@@ -195,7 +195,7 @@ row_upd_check_references_constraints(
 	ulint		n_ext;
 	dberr_t		err;
 	ibool		got_s_lock	= FALSE;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_upd_check_references_constraints mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -222,7 +222,7 @@ row_upd_check_references_constraints(
 	DEBUG_SYNC_C("foreign_constraint_check_for_update");
 
 	mtr_start(mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_undo_mod_del_mark_or_remove_sec_low mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2166,7 +2166,7 @@ row_upd_sec_index_entry(
 			    "before_row_upd_sec_index_entry");
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_upd_sec_index_entry mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2501,7 +2501,7 @@ row_upd_clust_rec_by_insert(
 	dberr_t		err;
 	rec_t*		rec;
 	ulint*		offsets			= NULL;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_upd_clust_rec_by_insert mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2632,7 +2632,7 @@ row_upd_clust_rec(
 	btr_cur_t*	btr_cur;
 	dberr_t		err;
 	const dtuple_t*	rebuilt_old_pk	= NULL;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_upd_clust_rec mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2687,7 +2687,7 @@ row_upd_clust_rec(
 	down the index tree */
 
 	mtr_start(mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_upd_clust_rec mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2790,7 +2790,7 @@ row_upd_del_mark_clust_rec(
 	btr_pcur_t*	pcur;
 	btr_cur_t*	btr_cur;
 	dberr_t		err;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_upd_del_mark_clust_rec mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2862,7 +2862,7 @@ row_upd_clust_step(
 	/* We have to restore the cursor to its position */
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_upd_clust_step mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2931,7 +2931,7 @@ row_upd_clust_step(
 		mtr_commit(&mtr);
 
 		mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		if(thr != NULL){
 			// fprintf(stderr, "row_upd_clust_step mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 			(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);

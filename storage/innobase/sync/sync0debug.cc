@@ -1419,7 +1419,7 @@ sync_latch_meta_init()
 
 	LATCH_ADD_MUTEX(NOREDO_RSEG, SYNC_NOREDO_RSEG, noredo_rseg_mutex_key);
 
-	#ifdef UNIV_NVDIMM_IPL
+	#ifdef UNIV_NVDIMM_PPL
 	LATCH_ADD_MUTEX(STATIC_REGION, SYNC_STATIC_REGION, nvdimm_static_region_mutex_key);
 
 	LATCH_ADD_MUTEX(DYNAMIC_REGION, SYNC_DYNAMIC_REGION, nvdimm_dynamic_region_mutex_key);
@@ -1427,7 +1427,7 @@ sync_latch_meta_init()
 	LATCH_ADD_MUTEX(SECOND_DYNAMIC_REGION, SYNC_SECOND_DYNAMIC_REGION, nvdimm_second_dynamic_region_mutex_key);
 
 	LATCH_ADD_MUTEX(IPL_MAP_MUTEX, SYNC_IPL_MAP_MUTEX, ipl_map_mutex_key);
-	#endif /* UNIV_NVDIMM_IPL */
+	#endif /* UNIV_NVDIMM_PPL */
 
 #ifdef UNIV_DEBUG
 	/* Mutex names starting with '.' are not tracked. They are assumed

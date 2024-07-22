@@ -44,7 +44,7 @@ Created 11/5/1995 Heikki Tuuri
 #include <queue>
 // #include "../../boost/boost_1_59_0/boost/lockfree/queue.hpp"
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #define IN_MEMORY_PPL_BUF_MAX_SIZES 256
 typedef ppl_dyn_buf_t<IN_MEMORY_PPL_BUF_MAX_SIZES> in_memory_ppl_buf_t;
 #endif
@@ -99,7 +99,7 @@ struct fil_addr_t;
 extern	buf_pool_t*	buf_pool_ptr;	/*!< The buffer pools
 					of the database */
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 extern	buf_pool_t*	ppl_buf_pool_ptr;	/*!< The PPL buffer pools
 					of the database */
 #endif
@@ -336,7 +336,7 @@ private:
 	mutable ulint	m_fold;
 
 	/* Disable implicit copying. */
-#ifndef UNIV_NVDIMM_IPL
+#ifndef UNIV_NVDIMM_PPL
 	void operator=(const page_id_t&);
 #endif
 	/** Declare the overloaded global operator<< as a friend of this
@@ -958,13 +958,13 @@ Returns the number of pending buf pool read ios.
 ulint
 buf_get_n_pending_read_ios(void);
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /*********************************************************************//**
 Returns the number of pending buf pool read ios.
 @return number of pending read I/O operations */
 ulint
 ppl_buf_get_n_pending_read_ios(void);
-#endif /* UNIV_NVDIMM_IPL */
+#endif /* UNIV_NVDIMM_PPL */
 
 /*============================*/
 /*********************************************************************//**
@@ -1312,7 +1312,7 @@ buf_page_init_for_read(
 	const page_size_t&	page_size,
 	ibool			unzip);
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /********************************************************************//**
 Creates the buffer pool.
 @return DB_SUCCESS if success, DB_ERROR if not enough memory or error */
@@ -1754,9 +1754,9 @@ public:
 # endif /* UNIV_DEBUG */
 #endif /* !UNIV_HOTBACKUP */
 
-#ifdef UNIV_NVDIMM_IPL
-	unsigned char * static_ipl_pointer;
-	unsigned char * ipl_write_pointer;
+#ifdef UNIV_NVDIMM_PPL
+	unsigned char * first_ppl_block_ptr;
+	unsigned char * ppl_write_pointer;
 	unsigned char flags; // first bit: iplized_flag, second bit: normalize_flag, third bit: dirtifed_flag
 	uint normalize_cause;
 	uint block_used;
@@ -1929,7 +1929,7 @@ struct buf_block_t{
 					mutex in InnoDB-5.1 to relieve
 					contention on the buffer pool mutex */
 #endif /* !UNIV_HOTBACKUP */
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	in_memory_ppl_buf_t in_memory_ppl_buf;
 #endif
 };
@@ -2140,7 +2140,7 @@ struct buf_buddy_stat_t {
 
 NOTE! The definition appears here only for other modules of this
 directory (buf) to see it. Do not use from outside! */
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 namespace std {
     namespace tr1 {
         template <>
@@ -2163,11 +2163,11 @@ struct buf_pool_t{
 	/** @name General fields */
 	/* @{ */
 
-#ifdef UNIV_NVDIMM_IPL
-	std::tr1::unordered_map<page_id_t, unsigned char *> * ipl_look_up_table;
+#ifdef UNIV_NVDIMM_PPL
+	std::tr1::unordered_map<page_id_t, unsigned char *> * ppl_look_up_table;
 	rw_lock_t lookup_table_lock;
-	std::queue<uint> * static_ipl_allocator;
-	ib_mutex_t static_allocator_mutex;
+	std::queue<uint> * ppl_block_allocator;
+	ib_mutex_t ppl_block_allocator_mutex;
 	bool is_ppl_buf_pool;
 #endif
 

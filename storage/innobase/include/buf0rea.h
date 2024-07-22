@@ -158,7 +158,7 @@ invoked */
 
 #endif
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 ibool
 ppl_buf_read_page_background(
 	const page_id_t&	page_id,
@@ -176,4 +176,4 @@ ppl_buf_read_page_low(
 	const page_size_t&	page_size,
 	bool			unzip,
 	buf_pool_t * buf_pool);
-#endif /* UNIV_NVDIMM_IPL */
+#endif /* UNIV_NVDIMM_PPL */

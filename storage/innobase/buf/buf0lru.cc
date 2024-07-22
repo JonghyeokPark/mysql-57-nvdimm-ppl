@@ -50,7 +50,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0mon.h"
 #include "lock0lock.h"
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #endif
 /** The number of blocks from the LRU_old pointer onward, including
@@ -1337,7 +1337,7 @@ loop:
 
 		block->skip_flush_check = false;
 		block->page.flush_observer = NULL;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		if(buf_pool->is_ppl_buf_pool){
 			((buf_page_t *)block)->buf_pool_index = get_ppl_buf_pool_index(buf_pool);
 			set_flag(&((buf_page_t *)block)->flags, IN_PPL_BUF_POOL);
@@ -2141,7 +2141,7 @@ buf_LRU_block_free_non_file_page(
 	memset(block->frame + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID, 0xfe, 4);
 #endif /* UNIV_DEBUG */
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	block->in_memory_ppl_buf.erase();
 #endif
 
@@ -2547,7 +2547,7 @@ buf_LRU_old_ratio_update(
 	return(new_ratio);
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /**********************************************************************//**
 Updates buf_pool->LRU_old_ratio.
 @return updated old_pct */

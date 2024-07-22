@@ -1914,7 +1914,7 @@ trx_undo_report_row_operation(
 	changes done to UNDO logs. This is feasible given that temporary tables
 	are not restored on restart. */
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_upd_clust_step mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2019,7 +2019,7 @@ trx_undo_report_row_operation(
 
 				mtr_commit(&mtr);
 				mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 				if(thr != NULL){
 					// fprintf(stderr, "row_upd_clust_step mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 					(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2065,7 +2065,7 @@ trx_undo_report_row_operation(
 
 		ut_ad(++loop_count < 2);
 		mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		if(thr != NULL){
 			// fprintf(stderr, "row_upd_clust_step mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 			(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);

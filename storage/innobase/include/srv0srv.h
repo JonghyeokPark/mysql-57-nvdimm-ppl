@@ -338,23 +338,27 @@ extern uint	srv_change_buffer_max_size;
 /* Number of IO operations per second the server can do */
 extern ulong    srv_io_capacity;
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /** If true then enable NVDIMM IPL */
 extern my_bool srv_use_nvdimm_ipl;
 /** NVDIMM-aware file resident directory */
 extern char* srv_nvdimm_home_dir;
-/** Static PPL Overall Size*/
-extern ulonglong srv_nvdimm_static_size;
+/** Max PPL Overall Size*/
+extern ulonglong srv_nvdimm_size;
 /** Static PPL Entry Size */
-extern ulong srv_nvdimm_static_entry_size;
+extern ulong srv_nvdimm_ppl_block_size;
 /** MAX PPL Entry Size */
 extern ulong srv_nvdimm_max_ppl_size;
-
-
 /** IPLized recovery optimization */
 extern my_bool srv_use_nvdimm_ipl_recovery;
 /** Redo on NVDIMM optimization */
 extern my_bool srv_use_nvdimm_redo;
+/* DWB on NVDIMM*/
+extern my_bool srv_use_nvdimm_dwb;
+/* Cleaning PPL block for reclamation*/
+extern my_bool srv_use_ppl_cleaner;
+/* Using PPL log for making page version*/
+extern my_bool srv_use_ppl_mvcc;
 
 #endif
 

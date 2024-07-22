@@ -349,14 +349,14 @@ static buf_pool_chunk_map_t*			buf_chunk_map_reg;
 The map pointed by this should not be updated */
 static buf_pool_chunk_map_t*	buf_chunk_map_ref = NULL;
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 buf_pool_t * ppl_buf_pool_ptr;
 volatile bool ppl_buf_pool_resizing;
 volatile bool ppl_buf_pool_withdrawing;
 volatile ulint ppl_buf_withdraw_clock;
 static buf_pool_chunk_map_t*			ppl_buf_chunk_map_reg;
 static buf_pool_chunk_map_t*	ppl_buf_chunk_map_ref = NULL;
-#endif /* UNIV_NVDIMM_IPL */
+#endif /* UNIV_NVDIMM_PPL */
 
 #ifdef UNIV_DEBUG
 /** Disable resizing buffer pool to make assertion code not expensive. */
@@ -1485,7 +1485,7 @@ buf_block_init(
 
 	block->lock.is_block_lock = 1;
 // in memory PPL structure 할당
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	new(&(block->in_memory_ppl_buf)) in_memory_ppl_buf_t();
 #endif
 	ut_ad(rw_lock_validate(&(block->lock)));
@@ -1864,15 +1864,15 @@ buf_pool_init_instance(
 	/* Initialize the iterator for single page scan search */
 	new(&buf_pool->single_scan_itr) LRUItr(buf_pool, &buf_pool->mutex);
 
-#ifdef UNIV_NVDIMM_IPL
-	buf_pool->ipl_look_up_table = new std::tr1::unordered_map<page_id_t, unsigned char*>;
-	buf_pool->ipl_look_up_table->clear();
+#ifdef UNIV_NVDIMM_PPL
+	buf_pool->ppl_look_up_table = new std::tr1::unordered_map<page_id_t, unsigned char*>;
+	buf_pool->ppl_look_up_table->clear();
 	rw_lock_create(ipl_map_mutex_key, &buf_pool->lookup_table_lock, SYNC_IPL_MAP_MUTEX);
-	mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->static_allocator_mutex);
+	mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->ppl_block_allocator_mutex);
 	make_ppl_and_push_queue(buf_pool);
 	buf_pool->is_ppl_buf_pool = false;
-	fprintf(stderr, "buf_pool_init_instance: %d: %p, ipl_look_up_table: %p\n"
-			,buf_pool->instance_no, buf_pool, buf_pool->ipl_look_up_table);
+	fprintf(stderr, "buf_pool_init_instance: %d: %p, ppl_look_up_table: %p\n"
+			,buf_pool->instance_no, buf_pool, buf_pool->ppl_look_up_table);
 #endif
 
 	buf_pool_mutex_exit(buf_pool);
@@ -1946,11 +1946,11 @@ buf_pool_free_instance(
 	hash_table_free(buf_pool->page_hash);
 	hash_table_free(buf_pool->zip_hash);
 
-#ifdef UNIV_NVDIMM_IPL
-	free(buf_pool->ipl_look_up_table);
+#ifdef UNIV_NVDIMM_PPL
+	free(buf_pool->ppl_look_up_table);
 	rw_lock_free(&buf_pool->lookup_table_lock);
-	free(buf_pool->static_ipl_allocator);
-	mutex_free(&buf_pool->static_allocator_mutex);
+	free(buf_pool->ppl_block_allocator);
+	mutex_free(&buf_pool->ppl_block_allocator_mutex);
 #endif
 
 	buf_pool->allocator.~ut_allocator();
@@ -2023,7 +2023,7 @@ buf_pool_free(
 	buf_pool_ptr = NULL;
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /********************************************************************//**
 Initialize a buffer pool instance.
 @return DB_SUCCESS if all goes well. */
@@ -2304,7 +2304,7 @@ ppl_buf_pool_free(
 	ut_free(ppl_buf_pool_ptr);
 	ppl_buf_pool_ptr = NULL;
 }
-#endif /* UNIV_NVDIMM_IPL */
+#endif /* UNIV_NVDIMM_PPL */
 
 /** Reallocate a control block.
 @param[in]	buf_pool	buffer pool instance
@@ -5314,8 +5314,8 @@ buf_page_init_low(
 	bpage->oldest_modification = 0;
 	HASH_INVALIDATE(bpage, hash);
 
-#ifdef UNIV_NVDIMM_IPL
-	set_for_ipl_page(bpage);
+#ifdef UNIV_NVDIMM_PPL
+	set_for_ppled_page(bpage);
 #endif
 
 	ut_d(bpage->file_page_was_freed = FALSE);
@@ -5652,7 +5652,7 @@ func_exit:
 
 	return(bpage);
 }
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 buf_page_t*
 ppl_buf_page_init_for_read(
 	dberr_t*		err,
@@ -5890,7 +5890,7 @@ func_exit:
 
 	return(bpage);
 }
-
+#endif
 /******************************************************************//**
 Returns the buffer pool instance given a page instance
 @return buf_pool */
@@ -5902,14 +5902,13 @@ buf_pool_from_bpage(
 	ulint	i;
 	i = bpage->buf_pool_index;
 	ut_ad(i < srv_buf_pool_instances);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(get_flag((unsigned char *)(&(bpage->flags)), IN_PPL_BUF_POOL)) {
 		return(&ppl_buf_pool_ptr[i]);
 	}
 #endif
 	return(&buf_pool_ptr[i]);
 }
-#endif
 
 /** Initializes a page to the buffer buf_pool. The page is usually not read
 from a file even if it cannot be found in the buffer buf_pool. This is one
@@ -6437,8 +6436,8 @@ corrupt:
 	buf_page_set_io_fix(bpage, BUF_IO_NONE);
 	buf_page_monitor(bpage, io_type);
 
-#ifdef UNIV_NVDIMM_IPL
-	unsigned char *static_ipl_pointer = NULL;
+#ifdef UNIV_NVDIMM_PPL
+	unsigned char *first_ppl_block_ptr= NULL;
 	bool return_ipl = false;
 	bool is_cleaning_ppl_page = false;
 	buf_pool_t * normal_buf_pool = NULL;
@@ -6454,7 +6453,7 @@ corrupt:
 		ut_ad(buf_pool->n_pend_reads > 0);
 		buf_pool->n_pend_reads--;
 		buf_pool->stat.n_pages_read++;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		// (jhpark): recovery
 		//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
 		//	recv_ipl_apply((buf_block_t*)bpage);
@@ -6499,12 +6498,11 @@ corrupt:
 			rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
 					      BUF_IO_WRITE);
 		}
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		((buf_block_t *)bpage)->in_memory_ppl_buf.erase();
-		static_ipl_pointer = bpage->static_ipl_pointer;
+		first_ppl_block_ptr = bpage->first_ppl_block_ptr;
 		is_cleaning_ppl_page = get_flag(&(bpage->flags), IN_PPL_BUF_POOL);
 		if(is_cleaning_ppl_page)	{
-			// fprintf(stderr, "PPL_Cleanig: After Writing page_id: (%u, %u): %p\n", bpage->id.space(), bpage->id.page_no(), static_ipl_pointer);
 			normal_buf_pool = normal_buf_pool_get(bpage->id);
 			evict = true;
 		}
@@ -6521,7 +6519,6 @@ corrupt:
 		by the caller explicitly. */
 		if (buf_page_get_flush_type(bpage) == BUF_FLUSH_LRU) {
 			evict = true;
-			//fprintf(stderr, "PPL_Cleanig: evicting page page_id: (%u, %u)\n", bpage->id.space(), bpage->id.page_no());
 		}
 
 		if (evict) {
@@ -6542,13 +6539,13 @@ corrupt:
 			      bpage->id.space(), bpage->id.page_no()));
 
 	buf_pool_mutex_exit(buf_pool);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(!nvdimm_recv_running && return_ipl){
 		if(is_cleaning_ppl_page){
-			free_ppl_and_push_queue(normal_buf_pool, static_ipl_pointer); 
+			free_ppl_and_push_queue(normal_buf_pool, first_ppl_block_ptr); 
 		}
 		else{
-			free_ppl_and_push_queue(buf_pool, static_ipl_pointer);
+			free_ppl_and_push_queue(buf_pool, first_ppl_block_ptr);
 		}
 	}
 #endif
@@ -7159,7 +7156,7 @@ buf_get_n_pending_read_ios(void)
 	return(pend_ios);
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /*********************************************************************//**
 Returns the number of pending buf pool read ios.
 @return number of pending read I/O operations */

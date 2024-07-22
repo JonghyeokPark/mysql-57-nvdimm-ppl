@@ -5897,7 +5897,7 @@ lock_rec_insert_check_and_lock(
 				LOCK_GAP type locks from the successor
 				record */
 {
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "lock_rec_insert_check_and_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -6206,7 +6206,7 @@ lock_sec_rec_modify_check_and_lock(
 {
 	dberr_t	err;
 	ulint	heap_no;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "lock_rec_insert_check_and_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);

@@ -80,7 +80,7 @@ row_undo_ins_remove_clust_rec(
 	ut_ad(node->trx->in_rollback);
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	// fprintf(stderr, "row_undo_ins_remove_clust_rec mtr: %p, trx_id: %zu\n",&mtr, node->trx->id);
 	(&mtr)->set_mtr_ipl_trx_id(node->trx->id);
 #endif
@@ -135,7 +135,7 @@ row_undo_ins_remove_clust_rec(
 		mtr_commit(&mtr);
 
 		mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		// fprintf(stderr, "row_undo_ins_remove_clust_rec mtr: %p, trx_id: %zu\n",&mtr, node->trx->id);
 		(&mtr)->set_mtr_ipl_trx_id(node->trx->id);
 #endif
@@ -154,7 +154,7 @@ row_undo_ins_remove_clust_rec(
 retry:
 	/* If did not succeed, try pessimistic descent to tree */
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	// fprintf(stderr, "row_undo_ins_remove_clust_rec mtr: %p, trx_id: %zu\n",&mtr, node->trx->id);
 	(&mtr)->set_mtr_ipl_trx_id(node->trx->id);
 #endif
@@ -214,7 +214,7 @@ row_undo_ins_remove_sec_low(
 	log_free_check();
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_undo_ins_remove_sec_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -483,14 +483,14 @@ row_undo_ins(
 	dict_locked = node->trx->dict_operation_lock_mode == RW_X_LATCH;
 
 	row_undo_ins_parse_undo_rec(node, dict_locked);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
   // (jhpark): ipl-undonow, we parsed undo records, and we know the 
   if (node->pcur.btr_cur.page_cur.block != NULL) {
     if(recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {
       return(DB_SUCCESS);
     }
   }   
-#endif // UNIV_NVDIMM_IPL
+#endif // UNIV_NVDIMM_PPL
 
 
 	if (node->table == NULL) {

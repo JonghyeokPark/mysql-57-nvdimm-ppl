@@ -32,7 +32,7 @@ Created 2011/12/19 Inaam Rana
 #include "buf0types.h"
 #include "log0recv.h"
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #endif
 

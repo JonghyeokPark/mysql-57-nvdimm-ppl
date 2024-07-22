@@ -46,7 +46,7 @@ mlog_open(
 	    || mtr_get_log_mode(mtr) == MTR_LOG_NO_REDO) {
 		return(NULL);
 	}
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	byte * mtr_ipl_start_pointer = mtr->get_log()->open(size);
 	mtr->set_mtr_ipl_start_pointer(mtr_ipl_start_pointer);
 	mtr->set_mtr_ipl_before_log_count(mtr->get_log_count());
@@ -69,7 +69,7 @@ mlog_close(
 	ut_ad(mtr_get_log_mode(mtr) != MTR_LOG_NONE);
 	ut_ad(mtr_get_log_mode(mtr) != MTR_LOG_NO_REDO);	
 	mtr->get_log()->close(ptr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	byte * mtr_ipl_start_pointer = mtr->get_mtr_ipl_start_pointer();
 	if(mtr_ipl_start_pointer != NULL && (mtr->get_mtr_ipl_before_log_count() + 1) == mtr->get_log_count()){
 		mlog_id_t type = (mlog_id_t) *mtr_ipl_start_pointer;

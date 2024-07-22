@@ -1109,7 +1109,7 @@ trx_undo_truncate_end_func(
 
 	for (;;) {
 		mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		// fprintf(stderr, "trx_undo_truncate_end_func mtr: %p, trx_id: %zu\n",&mtr, undo->trx_id);
 		(&mtr)->set_mtr_ipl_trx_id(undo->trx_id);
 #endif
@@ -1784,7 +1784,7 @@ trx_undo_assign_undo(
 	ut_ad(mutex_own(&(trx->undo_mutex)));
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	// fprintf(stderr, "trx_undo_create mtr: %p, trx_id: %zu\n",&mtr, trx->id);
 	(&mtr)->set_mtr_ipl_trx_id(trx->id);
 #endif

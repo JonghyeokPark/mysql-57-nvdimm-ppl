@@ -242,22 +242,28 @@ srv_printf_innodb_monitor() will request mutex acquisition
 with mutex_enter(), which will wait until it gets the mutex. */
 #define MUTEX_NOWAIT(mutex_skipped)	((mutex_skipped) < MAX_MUTEX_NOWAIT)
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /** If true then enable NVDIMM IPL */
 my_bool srv_use_nvdimm_ipl = FALSE;
 /** NVDIMM-aware file resident directory */
 char* srv_nvdimm_home_dir = NULL;
+/** NVDIMM Size */
+ulonglong srv_nvdimm_size = 0;
+/** PPL Block size */
+ulong srv_nvdimm_ppl_block_size = 0;
 
-/** Static PPL Overall Size*/
-ulonglong srv_nvdimm_static_size = 0;
-/** Static PPL Entry Size */
-ulong srv_nvdimm_static_entry_size = 0;
 /** MAX PPL Size Per Page */
 ulong srv_nvdimm_max_ppl_size = 0;
 /** IPLizatio recovery optimization **/
 my_bool srv_use_nvdimm_ipl_recovery = FALSE;
 /** Redo on NVDIMM optimization */
-my_bool srv_use_nvdimm_redo = FALSE;
+my_bool srv_use_nvdimm_redo = TRUE;
+/** Redo on NVDIMM optimization */
+my_bool srv_use_nvdimm_dwb = TRUE;
+/* Cleaning PPL block for reclamation*/
+my_bool srv_use_ppl_cleaner = FALSE;
+/* Using PPL log for making page version*/
+my_bool srv_use_ppl_mvcc = FALSE;
 #endif
 
 /** Requested size in bytes */
@@ -1024,7 +1030,7 @@ srv_init(void)
 		srv_buf_dump_event = os_event_create(0);
 
 		buf_flush_event = os_event_create("buf_flush_event");
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		ppl_buf_flush_event = os_event_create("ppl_buf_flush_event");
 #endif
 
@@ -1080,7 +1086,7 @@ srv_free(void)
 		os_event_destroy(srv_monitor_event);
 		os_event_destroy(srv_buf_dump_event);
 		os_event_destroy(buf_flush_event);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		os_event_destroy(ppl_buf_flush_event);
 #endif
 	}

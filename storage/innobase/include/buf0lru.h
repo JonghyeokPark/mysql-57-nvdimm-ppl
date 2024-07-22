@@ -196,7 +196,7 @@ buf_LRU_old_ratio_update(
 			FALSE=just assign buf_pool->LRU_old_ratio
 			during the initialization of InnoDB */
 			
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /**********************************************************************//**
 Updates buf_pool->LRU_old_ratio.
 @return updated old_pct */

@@ -525,7 +525,7 @@ trx_sys_init_at_db_start(void)
 
 		ib::info() << "Trx id counter is " << trx_sys->max_trx_id;
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	// (jhpark): active transaction at crash !!!
 	for(trx_t* tx = UT_LIST_GET_FIRST(trx_sys->rw_trx_list);
 			tx != NULL;
@@ -533,7 +533,7 @@ trx_sys_init_at_db_start(void)
 		ib::info() << "Active trx ids at crash " << tx->id;
 				ipl_active_trx_ids.insert(std::pair<uint64_t, uint64_t>(tx->id, 0));
 		}
-#endif // UNIV_NVDIMM_IPL
+#endif // UNIV_NVDIMM_PPL
 	}
 
 	trx_sys_mutex_exit();

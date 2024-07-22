@@ -252,7 +252,7 @@ row_ins_sec_index_entry_by_modify(
 	upd_t*		update;
 	rec_t*		rec;
 	dberr_t		err;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_ins_sec_index_entry_by_modify mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -356,7 +356,7 @@ row_ins_clust_index_entry_by_modify(
 	btr_cur_t*	cursor	= btr_pcur_get_btr_cur(pcur);
 	TABLE*		mysql_table = NULL;
 	ut_ad(dict_index_is_clust(cursor->index));
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_ins_clust_index_entry_by_modify mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1087,7 +1087,7 @@ row_ins_foreign_check_on_constraint(
 	mem_heap_t*	tmp_heap	= NULL;
 	doc_id_t	doc_id = FTS_NULL_DOC_ID;
 	ibool		fts_col_affacted = FALSE;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_ins_foreign_check_on_constraint mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1682,7 +1682,7 @@ row_ins_check_foreign_constraint(
 	}
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_ins_check_foreign_constraint mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2069,7 +2069,7 @@ row_ins_scan_sec_index_for_duplicate(
 	ulint		allow_duplicates;
 	ulint*		offsets		= NULL;
 	DBUG_ENTER("row_ins_scan_sec_index_for_duplicate");
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_ins_scan_sec_index_for_duplicate mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2296,7 +2296,7 @@ row_ins_duplicate_error_in_clust(
 	mem_heap_t*heap		= NULL;
 	ulint	offsets_[REC_OFFS_NORMAL_SIZE];
 	ulint*	offsets		= offsets_;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_ins_duplicate_error_in_clust mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2510,7 +2510,7 @@ row_ins_clust_index_entry_low(
 	ut_ad(!thr_get_trx(thr)->in_rollback);
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_ins_clust_index_entry_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2747,7 +2747,7 @@ row_ins_sorted_clust_index_entry(
 	btr_cur_t	cursor;
 	cursor.thr = thr;
 	mtr = &index->last_ins_cur->mtr;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_ins_sorted_clust_index_entry mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2764,7 +2764,7 @@ row_ins_sorted_clust_index_entry(
 		index->last_ins_cur->release();
 
 		mtr_start(mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		if(thr != NULL){
 			// fprintf(stderr, "row_ins_sorted_clust_index_entry mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 			mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -2956,7 +2956,7 @@ row_ins_sec_index_entry_low(
 	      || dict_table_is_intrinsic(index->table));
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_ins_sec_index_entry_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -3028,7 +3028,7 @@ row_ins_sec_index_entry_low(
 					  index, false);
 			rtr_info_update_btr(&cursor, &rtr_info);
 			mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 			if(thr != NULL){
 				// fprintf(stderr, "row_ins_sec_index_entry_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 				(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);

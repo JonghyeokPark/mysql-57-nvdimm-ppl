@@ -1,7 +1,7 @@
 // Copyright 2022 VLDB Lab. (http://vldb.skku.ac.kr/)
 // Author: Jonghyeok Park
 // E-mail: akindo19@skku.edu
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -30,10 +30,6 @@ unsigned char* nvdimm_recv_ptr = NULL;
 time_t my_start = 0;
 
 //PPL Lack
-bool is_ppl_lack = false;
-ulint ppl_lack_threshold = 0;
-lsn_t ppl_lack_lsn_gap = 0;
-
 bool flush_thread_started = false;
 ulint flush_thread_started_threshold = 0;
 
@@ -55,30 +51,23 @@ bool make_static_and_dynamic_ipl_region
 	nvdimm_info = static_cast<nvdimm_system *>(ut_zalloc_nokey(sizeof(*nvdimm_info)));
 	nvdimm_info->overall_ppl_size = nvdimm_overall_ppl_size; // static ipl size : 1,8GB
 	nvdimm_info->each_ppl_size = nvdimm_each_ppl_size; // per page static size : 1KB
-	nvdimm_info->max_ppl_size = nvdimm_max_ppl_size - (IPL_HDR_SIZE + ((nvdimm_max_ppl_size / nvdimm_each_ppl_size) - 1) * NTH_IPL_HEADER_SIZE);
-	nvdimm_info->ppl_lack_max_ppl_size = (nvdimm_each_ppl_size - IPL_HDR_SIZE) + (nvdimm_each_ppl_size - NTH_IPL_HEADER_SIZE);
-	nvdimm_info->static_ipl_page_number_per_buf_pool = (nvdimm_info->overall_ppl_size / nvdimm_info->each_ppl_size) / number_of_buf_pool; 
-	nvdimm_info->static_start_pointer = nvdimm_ptr;
+	nvdimm_info->max_ppl_size = nvdimm_max_ppl_size - (PPL_BLOCK_HDR_SIZE + ((nvdimm_max_ppl_size / nvdimm_each_ppl_size) - 1) * NTH_PPL_BLOCK_HEADER_SIZE);
+	nvdimm_info->ppl_block_number_per_buf_pool = (nvdimm_info->overall_ppl_size / nvdimm_info->each_ppl_size) / number_of_buf_pool; 
+	nvdimm_info->ppl_start_pointer = nvdimm_ptr;
 	nvdimm_info->nvdimm_dwb_pointer = nvdimm_ptr + nvdimm_overall_ppl_size + (2 * 1024 * 1024 * 1024UL);
 	nvdimm_info->nc_redo_start_pointer = nvdimm_ptr + nvdimm_overall_ppl_size + (3 * 1024 * 1024 * 1024UL);
 
 	//PPL Lack
-	is_ppl_lack = false;
-	ppl_lack_threshold = (nvdimm_info->static_ipl_page_number_per_buf_pool * 2) / 100; // 2%
-	ppl_lack_lsn_gap = 881985436;
-
 	flush_thread_started = true;
-	flush_thread_started_threshold = (nvdimm_info->static_ipl_page_number_per_buf_pool * 2) / 100; // 2%
+	flush_thread_started_threshold = (nvdimm_info->ppl_block_number_per_buf_pool * 5) / 100; // 5%
 
 	
 	fprintf(stderr, "Overall PPL Size : %luM\n", nvdimm_info->overall_ppl_size / (1024 * 1024));
 	fprintf(stderr, "Each PPL Size : %lu\n", nvdimm_info->each_ppl_size);
 	fprintf(stderr, "Max PPL Size : %lu\n", nvdimm_info->max_ppl_size);
-	fprintf(stderr, "PPL Lack Max PPL Size : %lu\n", nvdimm_info->ppl_lack_max_ppl_size);
-	fprintf(stderr, "PPL Lack Threshold : %lu\n", ppl_lack_threshold);
 
 	fprintf(stderr, "nvdimm_ptr: %p\n", nvdimm_ptr);
-	fprintf(stderr, "static_start_pointer: %p\n", nvdimm_info->static_start_pointer);
+	fprintf(stderr, "static_start_pointer: %p\n", nvdimm_info->ppl_start_pointer);
 	fprintf(stderr, "nc_redo_start_pointer: %p\n", nvdimm_info->nc_redo_start_pointer);
 
 	my_start = time(NULL);

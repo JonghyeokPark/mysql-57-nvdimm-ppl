@@ -25,7 +25,6 @@ extern struct timeval start, end;
 
 #define NVDIMM_MMAP_FILE_NAME         			"nvdimm_mmap_file"
 #define NVDIMM_MMAP_MAX_FILE_NAME_LENGTH    10000
-#define CXL_SIMULATION_DELAY 500 // 500ns
 
 #define NVDIMM_INFO_PRINT(fmt, args...)              \
   fprintf(stderr, "[NVDIMM_INFO]: %s:%d:%s():" fmt,  \
@@ -85,8 +84,8 @@ void make_ppl_and_push_queue(buf_pool_t * buf_pool);
 unsigned char * alloc_ppl_from_queue(buf_pool_t * buf_pool);
 void free_ppl_and_push_queue(buf_pool_t * buf_pool, unsigned char * addr);
 
-unsigned char * get_addr_from_ipl_index(unsigned char * start_ptr, uint index, uint64_t ipl_per_page_size);
-uint get_ipl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr, uint64_t ipl_per_page_size);
+unsigned char * get_addr_from_ppl_index(unsigned char * start_ptr, uint index, uint64_t ipl_per_page_size);
+uint get_ppl_index_from_addr(unsigned char * start_ptr, unsigned char * ret_addr, uint64_t ipl_per_page_size);
 
 /* IPL mapping */
 bool make_static_and_dynamic_ipl_region
@@ -100,19 +99,19 @@ void nvdimm_free(const uint64_t pool_size);
 
 /* space (4) | page_no (4) | First_Dynamic_index (4) | length (4) | LSN (8) | Normalize Flag(1) | mtr_log | mtr_log | ... */
 /* IPL_LOG_HEADER OFFSET */
-#define IPL_HDR_FIRST_MARKER					0
-#define IPL_HDR_NORMALIZE_MARKER				1
+#define PPL_HDR_FIRST_MARKER					0
+#define PPL_HDR_NORMALIZE_MARKER				1
 #define IPL_HDR_SPACE							2
 #define IPL_HDR_PAGE							6
-#define IPL_HDR_DYNAMIC_INDEX					10
-#define IPL_HDR_LEN								14
-#define IPL_HDR_LSN								18	
-#define IPL_HDR_SIZE							26
+#define PPL_HDR_DYNAMIC_INDEX					10
+#define PPL_HDR_LEN								14
+#define PPL_HDR_LSN								18	
+#define PPL_BLOCK_HDR_SIZE							26
 
 /* Second_Dynamic_index (4) | mtr_log | ... */
 #define NTH_IPL_BLOCK_MARKER				0
-#define NTH_IPL_DYNAMIC_INDEX			 	1
-#define NTH_IPL_HEADER_SIZE 				5
+#define NTH_PPL_DYNAMIC_INDEX			 	1
+#define NTH_PPL_BLOCK_HEADER_SIZE 				5
 
 /* In apply log strucrute*/
 /* mtr_log_type(1) | mtr_body_len (2) | trx_id (8) | mtr_log_body(1 ~ 110) | */
@@ -130,12 +129,11 @@ enum ipl_flag {
 
 typedef struct NVDIMM_SYSTEM
 {
-  unsigned char* static_start_pointer;
+  unsigned char* ppl_start_pointer;
   uint64_t overall_ppl_size;
   uint64_t each_ppl_size;
-  uint64_t static_ipl_page_number_per_buf_pool;
+  uint64_t ppl_block_number_per_buf_pool;
   uint64_t max_ppl_size;
-  uint64_t ppl_lack_max_ppl_size;
 
   unsigned char* dynamic_start_pointer;
   uint64_t dynamic_ipl_size;
@@ -162,9 +160,6 @@ typedef struct APPLY_LOG_INFO
 }apply_log_info;
 
 //PPL Lack
-extern bool is_ppl_lack;
-extern ulint ppl_lack_threshold;
-extern lsn_t ppl_lack_lsn_gap;
 extern bool flush_thread_started;
 extern ulint flush_thread_started_threshold;
 
@@ -182,12 +177,12 @@ bool alloc_first_ppl_to_bpage(buf_page_t * bpage);
 bool alloc_nth_ppl_to_bpage(buf_page_t * bpage);
 void copy_log_to_memory(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id);
 void copy_log_to_ppl_directly(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id);
-bool copy_memory_log_to_cxl(buf_page_t * bpage);
+bool copy_memory_log_to_nvdimm(buf_page_t * bpage);
 bool copy_memory_log_to_ppl(unsigned char *log, ulint len, buf_page_t * bpage);
 
 //page ipl log apply 관련 함수들
 void set_apply_info_and_log_apply(buf_block_t* block);
-void ipl_log_apply(byte *start_ptr, ulint apply_log_size, buf_block_t *block, mtr_t *temp_mtr);
+void all_ppl_apply_to_page(byte *start_ptr, ulint apply_log_size, buf_block_t *block, mtr_t *temp_mtr);
 byte* fetch_next_segment(byte* current_end, byte** new_end, byte** next_ppl);
 void apply_log_record(mlog_id_t log_type, byte* log_data, uint length, trx_id_t trx_id, buf_block_t* block, mtr_t* temp_mtr);
 // byte * ipl_complete_log_apply(byte * apply_ptr, uint * ppl_left_size, buf_block_t * block, mtr_t * temp_mtr);
@@ -195,37 +190,38 @@ void apply_log_record(mlog_id_t log_type, byte* log_data, uint length, trx_id_t 
 
 
 //page Normalize, lookup table 함수들
-void insert_page_ipl_info_in_hash_table(buf_page_t * bpage);
+void insert_page_ppl_info_in_hash_table(buf_page_t * bpage);
 void set_normalize_flag(buf_page_t * bpage, uint normalize_cause);
-void normalize_ipl_page(buf_page_t * bpage, page_id_t page_id);
-void set_for_ipl_page(buf_page_t* bpage);
+void normalize_ppled_page(buf_page_t * bpage, page_id_t page_id);
+void set_for_ppled_page(buf_page_t* bpage);
 bool check_can_be_pplized(buf_page_t * bpage);
+bool check_can_be_skip(buf_page_t *bpage);
 bool check_return_ppl_region(buf_page_t * bpage);
 unsigned char * get_last_block_address_index(buf_page_t * bpage);
 
 
 //ipl metadata set, get 함수들
-void set_ipl_length_in_ipl_header(buf_page_t * bpage, ulint length);
-uint get_ipl_length_from_ipl_header(buf_page_t * bpage);
-void set_page_lsn_in_ipl_header(unsigned char* static_ipl_pointer, lsn_t lsn);
-lsn_t get_page_lsn_from_ipl_header(unsigned char* static_ipl_pointer);
-void set_normalize_flag_in_ipl_header(unsigned char * static_ipl_pointer);
-unsigned char get_normalize_flag_in_ipl_header(unsigned char * static_ipl_pointer);
+void set_ppl_length_in_ppl_header(buf_page_t * bpage, ulint length);
+uint get_ppl_length_from_ppl_header(buf_page_t * bpage);
+void set_page_lsn_in_ppl_header(unsigned char* first_ppl_block_ptr, lsn_t lsn);
+lsn_t get_page_lsn_from_ppl_header(unsigned char* first_ppl_block_ptr);
+void set_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr);
+unsigned char get_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr);
 
 //page IPL flag 관련 함수
 void set_flag(unsigned char * flags, ipl_flag flag);
 void unset_flag(unsigned char * flags, ipl_flag flag);
 bool get_flag(unsigned char * flags, ipl_flag flag);
 
-//CXL 관련 함수
-void memcpy_to_cxl(void *dest, void *src, size_t size);
-// void memcpy_to_cxl(void *__restrict dst, const void * __restrict src, size_t n);
-void memset_to_cxl(void* dest, int value, size_t size);
+//Copy to NVDIMM and flush cache 
+void memcpy_to_nvdimm(void *dest, void *src, size_t size);
+// void memcpy_to_nvdimm(void *__restrict dst, const void * __restrict src, size_t n);
+void memset_to_nvdimm(void* dest, int value, size_t size);
 
 //PPL시킬 수 있는지 판별하는 함수
 bool can_page_be_pplized(const byte* ptr, const byte* end_ptr);
 
-struct mem_to_cxl_copy_t{
+struct mem_to_nvdimm_copy_t{
 
 	buf_page_t * bpage;
 
@@ -265,7 +261,7 @@ struct nc_redo_buf{
 extern nc_redo_buf* nc_redo_info;
 
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 unsigned char* 
 recv_parse_or_apply_log_rec_body(
 	mlog_id_t type,

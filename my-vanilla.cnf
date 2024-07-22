@@ -1,4 +1,4 @@
-
+#
 # The MySQL database server configuration file.
 #
 [client]
@@ -18,10 +18,10 @@ socket          = /tmp/mysql.sock
 #nice           = 0
 
 [mysqld]
+user=root
 #
 # * Basic Settings
 #
-user=root
 default-storage-engine = innodb
 skip-grant-tables
 pid-file        = /test_data_960/mysql.pid
@@ -36,6 +36,8 @@ log-error	= /log_data/mysql_error_nvdimm.log
 #Log group path (iblog0, iblog1)
 innodb_log_group_home_dir=/log_data/
 
+
+
 #innodb page size
 innodb_page_size=4KB
 
@@ -43,25 +45,14 @@ innodb_page_size=4KB
 # * InnoDB
 #
 
-# NVDIMM-IPL settings
-innodb_use_nvdimm_ipl=true
-innodb_nvdimm_home_dir=/pmem
-innodb_nvdimm_size=1G
-innodb_nvdimm_ppl_block_size=64
-innodb_nvdimm_max_ppl_size=256
-innodb_use_nvdimm_ipl_recovery=false
-innodb_use_nvdimm_redo=true
-innodb_use_nvdimm_dwb=true
-innodb_use_ppl_cleaner=false
-innodb_use_ppl_mvcc=false
-
 #file per table ON
 innodb_file_per_table=1
 
 #buffer settings
-innodb_buffer_pool_size=2G
+innodb_buffer_pool_size=5G
 innodb_buffer_pool_instances=8
 innodb_max_dirty_pages_pct_lwm=0
+
 
 #etc
 log_error_verbosity=3
@@ -88,21 +79,3 @@ innodb_lru_scan_depth=1024
 # etc settings
 max_connections = 1024
 open_files_limit = 24000
-
-
-# io settings
-#innodb_io_capacity = 500
-#innodb_io_capacity_max = 1000
-#innodb_write_io_threads = 8
-#innodb_read_io_threads = 8
-
-# monitoring settings
-#innodb_monitor_enable = all
-#performance-schema-instrument='wait/synch/mutex/innodb/%=ON'
-#performance-schema-instrument='wait/synch/sxlock/innodb/%=ON'
-#performance-schema-instrument='wait/io/file/%=ON'
-#performance-schema-instrument='wait/lock/%=ON'
-#performance-schema-instrument='buffer_LRU_get_free_waits=ON'
-#performance-schema-instrument='wait/synch/rwlock/innodb/%=ON'
-#innodb_status_output = ON
-#innodb_status_output_locks = ON

@@ -158,7 +158,7 @@ dict_hdr_flush_row_id(trx_id_t trx_id)
 	id = dict_sys->row_id;
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	(&mtr)->set_mtr_ipl_trx_id(trx_id);
 #endif
 

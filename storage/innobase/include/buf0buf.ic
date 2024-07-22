@@ -82,7 +82,7 @@ buf_pool_index(
 	return(i);
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /********************************************************************//**
 Calculates the index of a buffer pool to the buf_pool[] array.
 @return the position of the buffer pool in buf_pool[] */
@@ -97,7 +97,7 @@ get_ppl_buf_pool_index(
 	ut_ad(i < srv_buf_pool_instances);
 	return(i);
 }
-#endif /* UNIV_NVDIMM_IPL */
+#endif /* UNIV_NVDIMM_PPL */
 
 /******************************************************************//**
 Returns the buffer pool instance given a block instance
@@ -1014,7 +1014,7 @@ buf_pool_get(
 
         ulint		i = id.fold() % srv_buf_pool_instances;
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		if (buf_page_hash_get_low(&ppl_buf_pool_ptr[i], page_id)) {
 			// fprintf(stderr, "ppl_buf_pool [%lu] is used: (%u, %u)\n", i, page_id.space(), page_id.page_no());
 			return(&ppl_buf_pool_ptr[i]);
@@ -1038,7 +1038,7 @@ buf_pool_from_array(
 	return(&buf_pool_ptr[index]);
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /******************************************************************//**
 Returns the buffer pool instance given its array index
 @return buffer pool */

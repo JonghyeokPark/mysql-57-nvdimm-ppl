@@ -891,7 +891,7 @@ ibuf_set_free_bits_func(
 	}
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	// fprintf(stderr, "ibuf_set_free_bits_func mtr: %p, trx_id: %zu\n",&mtr, ((buf_page_t *)block)->trx_id);
 	(&mtr)->set_mtr_ipl_trx_id(((buf_page_t *)block)->trx_id);
 #endif
@@ -3439,7 +3439,7 @@ ibuf_insert_low(
 	}
 
 	ibuf_mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "rtr_ins_enlarge_mbr mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
