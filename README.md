@@ -74,5 +74,5 @@ $ ./bld/bin/mysqld --defaults-fele=my.cnf
 ## Run Benchmark
 
 This repository includes experiment guidelines for the benchmarks(TPC-C, Linkbench)
-* TPC-C Benchmark: under tpcc-benchmark
-* Linkbench Benchmark: under linkbench-benchmark
+* TPC-C Benchmark: under `tpcc-benchmark` directory
+* Linkbench Benchmark: under `linkbench-benchmark` directory
