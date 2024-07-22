@@ -24,17 +24,17 @@ user=root
 #
 default-storage-engine = innodb
 skip-grant-tables
-pid-file        = /test_data_960/mysql.pid
+pid-file        = /path/to/datadir/mysql.pid
 socket          = /tmp/mysql.sock
 port            = 3306
-datadir         = /test_data_960/
-log-error	= /log_data/mysql_error_nvdimm.log
+datadir         = /path/to/datadir/
+log-error	= /path/to/logdir/mysql_error_nvdimm.log
 
 ##################################################
 # Need to Modify
 ##################################################
 #Log group path (iblog0, iblog1)
-innodb_log_group_home_dir=/log_data/
+innodb_log_group_home_dir=/path/to/logdir/
 
 
 
