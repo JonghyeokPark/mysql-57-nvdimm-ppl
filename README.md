@@ -1,6 +1,8 @@
-# Per-Page Logging on NVDIMM for MySQL 5.7
+# Boosting Transaction Performance using Per-Page Logging on NVDIMM
 
-Boosting Transaction Performance using Per-Page Logging on NVDIMM
+* NV-PPL is a novel database architecture that leverages NVDIMM as a durable log cache so as to avoid the durability overhead in flash-based databases.
+* NV-PPL captures per-page redo logs and stores them on NVDIMM, thus avoiding a significant fraction of page writes to the storage and boosting the performance of OLTP workloads dramatically.
+* NV-PPL is implemented on MySQL 5.7/InnoDB with moderate code changes.
 
 ## Build and install
 
@@ -68,3 +70,7 @@ innodb_use_ppl_mvcc=false
 ```bash
 $ ./bld/bin/mysqld --defaults-fele=my.cnf
 ```
+
+## Run Benchmark
+
+This repository
