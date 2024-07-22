@@ -145,13 +145,13 @@ row_purge_remove_clust_if_poss_low(
 
 	log_free_check();
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	// fprintf(stderr, "row_purge_remove_clust_if_poss_low mtr: %p trx_id: %zu\n",&mtr, node->trx_id);
 	(&mtr)->set_mtr_ipl_trx_id(node->trx_id);
 #endif
 	mtr.set_named_space(index->space);
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	// (jhpark): ipl-undo
 	if (node->pcur.btr_cur.page_cur.block != NULL) {
 		//ib::info() << "purge undo " << node->pcur.btr_cur.page_cur.block->page.id.space()

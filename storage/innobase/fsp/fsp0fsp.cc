@@ -788,8 +788,8 @@ fsp_init_file_page(
 	buf_block_t*	block,
 	mtr_t*		mtr)
 {
-#ifdef UNIV_NVDIMM_IPL
-	set_normalize_flag((buf_page_t *)block);
+#ifdef UNIV_NVDIMM_PPL
+	set_normalize_flag((buf_page_t *)block, 1);
 #endif
 	fsp_init_file_page_low(block);
 
@@ -1678,7 +1678,7 @@ fsp_fill_free_list(
 				mtr_t	ibuf_mtr;
 
 				mtr_start(&ibuf_mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 				(&ibuf_mtr)->set_mtr_ipl_trx_id(mtr->get_mtr_ipl_trx_id());
 #endif
 				ibuf_mtr.set_named_space(space);

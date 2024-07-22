@@ -1397,7 +1397,7 @@ row_explicit_rollback(
 	ulint*		offsets;
 	mem_heap_t*	heap = NULL;
 	dberr_t		err;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_explicit_rollback mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1621,7 +1621,7 @@ row_insert_for_mysql_using_cursor(
 		node->entry = UT_LIST_GET_FIRST(node->entry_list);
 
 		mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		if(thr != NULL){
 			// fprintf(stderr, "row_insert_for_mysql_using_cursor mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 			(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);

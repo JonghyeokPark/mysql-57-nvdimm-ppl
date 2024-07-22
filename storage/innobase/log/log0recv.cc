@@ -68,7 +68,7 @@ bool	recv_replay_file_ops	= true;
 #include "fut0lst.h"
 #endif /* !UNIV_HOTBACKUP */
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #endif
 
@@ -1671,7 +1671,7 @@ or if it is a MLOG_FILE_ operation
 @param[in,out]	mtr		mini-transaction, or NULL if
 a page log record should not be applied
 @return log record end, NULL if not a complete record */
-#ifndef UNIV_NVDIMM_IPL
+#ifndef UNIV_NVDIMM_PPL
 static
 #endif
 byte*
@@ -2436,7 +2436,7 @@ recv_recover_page_func(
   // case3. page_lsn > recv->start_lsn  
   //  - skip wal redo apply 
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
   bool is_ipl = (recv_check_iplized(block->page.id) != NORMAL);
 
 	// (jhpark): calculate skipped apply count for IPL
@@ -2740,7 +2740,7 @@ recv_read_in_area(
 			mutex_enter(&(recv_sys->mutex));
 
 			if (recv_addr->state == RECV_NOT_PROCESSED) {
-#ifdef UNIV_NVDIMM_IPL				
+#ifdef UNIV_NVDIMM_PPL				
 				if(recv_check_iplized(cur_page_id) != NORMAL && !recv_check_normal_flag_using_page_id(cur_page_id)){
 					recv_addr->state = RECV_PROCESSED;
 					recv_sys->n_addrs--;
@@ -2863,7 +2863,7 @@ loop:
 					buf_block_dbg_add_level(
 						block, SYNC_NO_ORDER_CHECK);
 
-#ifdef UNIV_NVDIMM_IPL					
+#ifdef UNIV_NVDIMM_PPL					
 					// (jhpark): recovery
 					// this is rare cases, somehow pages are fetched in the buffer pool
 					// without applying using IPL log
@@ -4009,7 +4009,7 @@ recv_group_scan_log_recs(
 	if (recv_sys->found_corrupt_log || recv_sys->found_corrupt_fs) {
 		DBUG_RETURN(false);
 	}
-// #ifdef UNIV_NVDIMM_IPL
+// #ifdef UNIV_NVDIMM_PPL
   
 //   // (jhpark): so far we scan from log files; now we read from persistent log buffer
 //   memcpy(log_sys->buf, nvdimm_info->nc_redo_start_pointer, log_sys->buf_size);

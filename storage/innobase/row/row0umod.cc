@@ -98,7 +98,7 @@ row_undo_mod_clust_low(
 	btr_pcur_t*	pcur;
 	btr_cur_t*	btr_cur;
 	dberr_t		err;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_undo_mod_clust_low mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -278,7 +278,7 @@ row_undo_mod_clust(
 	index = btr_cur_get_index(btr_pcur_get_btr_cur(pcur));
 
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_undo_mod_clust mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -315,7 +315,7 @@ row_undo_mod_clust(
 		descent down the index tree */
 
 		mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		if(thr != NULL){
 			// fprintf(stderr, "row_undo_mod_clust mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 			(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -372,7 +372,7 @@ row_undo_mod_clust(
 	if (err == DB_SUCCESS && node->rec_type == TRX_UNDO_UPD_DEL_REC) {
 
 		mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 		if(thr != NULL){
 			// fprintf(stderr, "row_undo_mod_clust mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 			(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -442,7 +442,7 @@ row_undo_mod_del_mark_or_remove_sec_low(
 
 	log_free_check();
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_undo_mod_del_mark_or_remove_sec_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -517,7 +517,7 @@ row_undo_mod_del_mark_or_remove_sec_low(
 	we should delete mark the record. */
 
 	mtr_start(&mtr_vers);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_undo_mod_del_mark_or_remove_sec_low mtr: %p undo thr: %p trx_id: %zu\n",&mtr_vers, thr, thr_get_trx(thr)->id);
 		(&mtr_vers)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -659,7 +659,7 @@ row_undo_mod_del_unmark_sec_and_undo_update(
 try_again:
 	log_free_check();
 	mtr_start(&mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_undo_mod_del_unmark_sec_and_undo_update mtr: %p undo thr: %p trx_id: %zu\n",&mtr, thr, thr_get_trx(thr)->id);
 		(&mtr)->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1237,7 +1237,7 @@ row_undo_mod(
 	ut_ad(thr_get_trx(thr) == node->trx);
 
 	row_undo_mod_parse_undo_rec(node, dict_locked);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
   // (jhpark): ipl-undo
 	if (node->pcur.btr_cur.page_cur.block != NULL) {
 		if(recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {

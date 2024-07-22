@@ -57,7 +57,7 @@ Created 12/9/1995 Heikki Tuuri
 #include "sync0sync.h"
 #endif /* !UNIV_HOTBACKUP */
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #endif
 
@@ -222,7 +222,7 @@ log_buffer_extend(
 
 	log_sys->buf_free -= move_start;
 	log_sys->buf_next_to_write -= move_start;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if (srv_use_nvdimm_redo) {
 		srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
 		log_sys->buf_size = LOG_BUFFER_SIZE;
@@ -239,7 +239,7 @@ log_buffer_extend(
 		// update lsn
 		nc_redo_info->nc_lsn = log_sys->lsn;
 		nc_redo_info->nc_buf_free = log_sys->buf_free;
-		memcpy_to_cxl(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
+		memcpy_to_nvdimm(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
 	} else {
 		/* reallocate log buffer */
 		srv_log_buffer_size = len / UNIV_PAGE_SIZE + 1;
@@ -470,9 +470,9 @@ part_loop:
 			- (log->buf_free % OS_FILE_LOG_BLOCK_SIZE)
 			- LOG_BLOCK_TRL_SIZE;
 	}
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if (srv_use_nvdimm_redo) {
-		memcpy_to_cxl(log->buf + log->buf_free, (void *)str, len);
+		memcpy_to_nvdimm(log->buf + log->buf_free, (void *)str, len);
 	} else {
 		ut_memcpy(log->buf + log->buf_free, str, len);
 	}
@@ -505,11 +505,11 @@ part_loop:
 	}
 
 	log->buf_free += len;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if (srv_use_nvdimm_redo) {
 		nc_redo_info->nc_lsn = log_sys->lsn;
 		nc_redo_info->nc_buf_free = log_sys->buf_free;
-		memcpy_to_cxl(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
+		memcpy_to_nvdimm(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
 	}
 #endif
 
@@ -864,14 +864,14 @@ log_init(void)
 
 	log_sys->buf_size = LOG_BUFFER_SIZE;
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	fprintf(stderr, "srv_use_nvdimm_redo: %d\n", srv_use_nvdimm_redo);
 	if (srv_use_nvdimm_redo) {
     // initialize nc_redo_info
 		nc_redo_info = static_cast<nc_redo_buf*> (malloc(sizeof(nc_redo_buf)));
 		nc_redo_info->nc_lsn = 0;
 		nc_redo_info->nc_buf_free = 0;
-		memcpy_to_cxl(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
+		memcpy_to_nvdimm(nvdimm_info->nc_redo_start_pointer + REDO_INFO_OFFSET, nc_redo_info, sizeof(nc_redo_info));
 
 		log_sys->buf_ptr = static_cast<byte*>(nvdimm_info->nc_redo_start_pointer);
 		log_sys->buf = static_cast<byte*>(
@@ -1955,7 +1955,7 @@ log_checkpoint(
 
 		return(false);
 	}
-// #ifdef UNIV_NVDIMM_IPL
+// #ifdef UNIV_NVDIMM_PPL
   // 이 부분은 nv-sql을 위해서 존재하는 것 같은데 나중에 추후 확인 필요
 //   lsn_t nvdimm_lsn = buf_pool_get_oldest_modification();
 //   if ( (nvdimm_lsn < oldest_lsn) 
@@ -2566,7 +2566,7 @@ log_shutdown(void)
 {
 	log_group_close_all();
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if (!srv_use_nvdimm_redo) {
 		ut_free(log_sys->buf_ptr);
 	}

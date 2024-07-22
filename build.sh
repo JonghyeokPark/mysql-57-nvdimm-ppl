@@ -1,10 +1,10 @@
 #!/bin/bash
 
-if [ $# -ne 2] 
-then
-	echo "usage: ./build.sh PASSWORD --ipl"
-	exit 1
-fi
+# if [ $# -ne 2];
+# then
+# 	echo "usage: ./build.sh PASSWORD --ppl"
+# 	exit 1
+# fi
 
 BASE_DIR=`pwd -P`
 BUILD_DIR=$BASE_DIR/bld
@@ -25,11 +25,11 @@ echo $PASSWD | sudo -S rm -rf CMakeFiles/*
 if [ "$2" = "--origin" ]; then
   # No caching
   BUILD_FLAGS=""
-elif [ "$2" = "--ipl" ]; then
+elif [ "$2" = "--ppl" ]; then
   # Enable Flash-Friendly Checkpoint
-  BUILD_FLAGS="-DUNIV_NVDIMM_IPL"
+  BUILD_FLAGS="-DUNIV_NVDIMM_PPL"
 else
-  BUILD_FLAGS="-DUNIV_NVDIMM_IPL"
+  BUILD_FLAGS="-DUNIV_NVDIMM_PPL"
 fi
 
 echo "Start build using $BUILD_FLAGS"

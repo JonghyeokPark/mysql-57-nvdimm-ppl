@@ -157,3 +157,23 @@ invoked */
 /* @} */
 
 #endif
+
+#ifdef UNIV_NVDIMM_PPL
+ibool
+ppl_buf_read_page_background(
+	const page_id_t&	page_id,
+	const page_size_t&	page_size,
+	bool				sync,
+	buf_pool_t *		buf_pool);
+
+ulint
+ppl_buf_read_page_low(
+	dberr_t*		err,
+	bool			sync,
+	ulint			type,
+	ulint			mode,
+	const page_id_t&	page_id,
+	const page_size_t&	page_size,
+	bool			unzip,
+	buf_pool_t * buf_pool);
+#endif /* UNIV_NVDIMM_PPL */

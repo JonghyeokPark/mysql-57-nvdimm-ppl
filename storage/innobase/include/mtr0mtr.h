@@ -577,7 +577,7 @@ struct mtr_t {
 		return(&m_impl.m_log);
 	}
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 
 	void set_mtr_ipl_start_pointer(byte * ptr)
 	{
@@ -645,7 +645,7 @@ private:
 	/** true if it is synchronous mini-transaction */
 	bool			m_sync;
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	//IPL Start pointer
 	byte * mtr_ipl_start_ptr;
 	//IPL Log count

@@ -39,7 +39,7 @@ Created 11/26/1995 Heikki Tuuri
 #include "mtr0mtr.ic"
 #endif /* UNIV_NONINL */
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #endif
 
@@ -430,7 +430,7 @@ public:
 	@param[in]	len	number of bytes to write */
 	void finish_write(ulint len);
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
   /** Write the mtr log (undo + redo of undo) record,and release the resorces */
   void execute_nvm();
 #endif
@@ -440,7 +440,7 @@ private:
 	@return number of bytes to write in finish_write() */
 	ulint prepare_write();
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	/** Prepare to write the mini-transaction log to the NVDIMM mtr log buffer.
 	@return number of bytes to write in finish_write() */
 	ulint prepare_write_nvm();
@@ -476,7 +476,7 @@ mtr_t::is_block_dirtied(const buf_block_t* block)
 	is only during write that the value is reset to 0. */
 	return(block->page.oldest_modification == 0);
 }
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 ulint
 ipl_recv_parse_log_rec(
 	mlog_id_t*	type,
@@ -516,7 +516,7 @@ ipl_recv_parse_log_rec(
 	}
 	return(new_ptr - ptr);
 }
-#endif /* UNIV_NVDIMM_IPL */
+#endif /* UNIV_NVDIMM_PPL */
 
 /** Write the block contents to the REDO log */
 struct mtr_write_log_t {
@@ -563,7 +563,7 @@ mtr_t::start(bool sync, bool read_only)
 	m_sync =  sync;
 
 	m_commit_lsn = 0;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	mtr_ipl_start_ptr = NULL;
 	// mtr_ipl_before_log_count = 0;
 	mtr_ipl_trx_id = 0;
@@ -634,7 +634,7 @@ mtr_t::commit()
 
 		ut_ad(!srv_read_only_mode
 		      || m_impl.m_log_mode == MTR_LOG_NO_REDO);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(srv_use_nvdimm_redo){
 		cmd.execute_nvm();
 	}
@@ -871,7 +871,7 @@ mtr_t::release_page(const void* ptr, mtr_memo_type_t type)
 	/* The page was not found! */
 	ut_ad(0);
 }
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 /** Prepare to write the mini-transaction log to the NVDIMM mtr log buffer.
 @return number of bytes to write in finish_write() */
 ulint
@@ -974,22 +974,21 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
 	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
 	log_len = (ptr + len) - body + APPLY_LOG_HDR_SIZE;
-	
+
 	if(get_flag(&(buf_page->flags), PPLIZED)){
-		if(get_ipl_length_from_ipl_header(buf_page) + log_len > nvdimm_info->max_ppl_size){
-			set_normalize_flag(buf_page);
+		if(get_ppl_length_from_ppl_header(buf_page) + log_len > nvdimm_info->max_ppl_size){
+			set_normalize_flag(buf_page, 2);
 			return;
 		}
 		copy_log_to_ppl_directly(body, log_len, type, buf_page, trx_id);
 	}
 	else{
 		if(((buf_block_t *)buf_page)->in_memory_ppl_buf.size() + log_len > nvdimm_info->max_ppl_size){
-			set_normalize_flag(buf_page);
+			set_normalize_flag(buf_page, 2);
 			return;
 		}
 		copy_log_to_memory(body, log_len, type, buf_page, trx_id);
 	}
-	
 }
 #endif 
 
@@ -1177,7 +1176,7 @@ mtr_t::Command::execute()
 	release_resources();
 }
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 void mtr_t::Command::execute_nvm() {
   ut_ad(m_impl->m_log_mode != MTR_LOG_NONE);
 

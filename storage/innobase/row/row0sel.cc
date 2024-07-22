@@ -900,7 +900,7 @@ row_sel_get_clust_rec(
 	mem_heap_t*	heap		= NULL;
 	ulint		offsets_[REC_OFFS_NORMAL_SIZE];
 	ulint*		offsets		= offsets_;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "row_sel_get_clust_rec mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1082,7 +1082,7 @@ sel_set_rtr_rec_lock(
 	rec_t*		rec = const_cast<rec_t*>(first_rec);
 	rtr_rec_vector*	match_rec;
 	rtr_rec_vector::iterator end;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "sel_set_rtr_rec_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1119,7 +1119,7 @@ re_scan:
 			&err, trx, thr, NULL)) {
 			thr->lock_state = QUE_THR_LOCK_NOLOCK;
 			mtr_start(mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 			if(thr != NULL){
 				// fprintf(stderr, "sel_set_rtr_rec_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 				mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1145,7 +1145,7 @@ re_scan:
 				__FILE__, __LINE__, mtr);
 		} else {
 			mtr_start(mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 			if(thr != NULL){
 				// fprintf(stderr, "sel_set_rtr_rec_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 				mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1160,7 +1160,7 @@ re_scan:
 			/* Page got deleted */
 			mtr_commit(mtr);
 			mtr_start(mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 			if(thr != NULL){
 				// fprintf(stderr, "sel_set_rtr_rec_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 				mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1185,7 +1185,7 @@ re_scan:
 			page and ask for a re-search */
 			mtr_commit(mtr);
 			mtr_start(mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 			if(thr != NULL){
 				// fprintf(stderr, "sel_set_rtr_rec_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 				mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1204,7 +1204,7 @@ re_scan:
 		if (page_rec_is_supremum(rec) || !match->valid) {
 			mtr_commit(mtr);
 			mtr_start(mtr);
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 			if(thr != NULL){
 				// fprintf(stderr, "sel_set_rtr_rec_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 				mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);
@@ -1278,7 +1278,7 @@ sel_set_rec_lock(
 	trx_t*			trx;
 	dberr_t			err = DB_SUCCESS;
 	const buf_block_t*	block;
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 	if(thr != NULL){
 		// fprintf(stderr, "sel_set_rec_lock mtr: %p undo thr: %p trx_id: %zu\n",mtr, thr, thr_get_trx(thr)->id);
 		mtr->set_mtr_ipl_trx_id(thr_get_trx(thr)->id);

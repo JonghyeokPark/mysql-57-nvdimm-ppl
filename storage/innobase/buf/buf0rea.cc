@@ -40,7 +40,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0start.h"
 #include "srv0srv.h"
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #include "page0page.h"
 #endif
@@ -126,14 +126,6 @@ buf_read_page_low(
 {
 	buf_page_t*	bpage;
 	*err = DB_SUCCESS;
-
-	// if(buf_page_peek(page_id)){
-	// 	fprintf(stderr, "page is in hash (%u, %u)\n", page_id.space(), page_id.page_no());
-	// }
-	// else{
-	// 	fprintf(stderr, "Not in hash (%u, %u)\n", page_id.space(), page_id.page_no());
-	// }
-
 	if (page_id.space() == TRX_SYS_SPACE
 	    && buf_dblwr_page_inside(page_id.page_no())) {
 
@@ -932,3 +924,163 @@ buf_read_recv_pages(
 			      unsigned(n_stored)));
 }
 
+#ifdef UNIV_NVDIMM_PPL
+
+/** High-level function which reads a page asynchronously from a file to the
+buffer buf_pool if it is not already there. Sets the io_fix flag and sets
+an exclusive lock on the buffer frame. The flag is cleared and the x-lock
+released by the i/o-handler thread.
+@param[in]	page_id		page id
+@param[in]	page_size	page size
+@param[in]	sync		true if synchronous aio is desired
+@return TRUE if page has been read in, FALSE in case of failure */
+ibool
+ppl_buf_read_page_background(
+	const page_id_t&	page_id,
+	const page_size_t&	page_size,
+	bool			sync,
+	buf_pool_t*		buf_pool)
+{
+	ulint		count;
+	dberr_t		err;
+
+	count = ppl_buf_read_page_low(
+		&err, sync,
+		IORequest::DO_NOT_WAKE | IORequest::IGNORE_MISSING,
+		BUF_READ_ANY_PAGE,
+		page_id, page_size, false, buf_pool);
+
+	srv_stats.buf_pool_reads.add(count);
+
+	/* We do not increment number of I/O operations used for LRU policy
+	here (buf_LRU_stat_inc_io()). We use this in heuristics to decide
+	about evicting uncompressed version of compressed pages from the
+	buffer pool. Since this function is called from buffer pool load
+	these IOs are deliberate and are not part of normal workload we can
+	ignore these in our heuristics. */
+
+	return(count > 0);
+}
+
+ulint
+ppl_buf_read_page_low(
+	dberr_t*		err,
+	bool			sync,
+	ulint			type,
+	ulint			mode,
+	const page_id_t&	page_id,
+	const page_size_t&	page_size,
+	bool			unzip,
+	buf_pool_t * buf_pool)
+{
+	buf_page_t*	bpage;
+	*err = DB_SUCCESS;
+
+
+	if (page_id.space() == TRX_SYS_SPACE
+	    && buf_dblwr_page_inside(page_id.page_no())) {
+		fprintf(stderr, "Trying to read doublewrite buffer page "
+			"%u:%u\n", page_id.space(), page_id.page_no());
+		// ib::error() << "Trying to read doublewrite buffer page "
+		// 	<< page_id;
+		return(0);
+	}
+
+	if (ibuf_bitmap_page(page_id, page_size) || trx_sys_hdr_page(page_id)) {
+
+		/* Trx sys header is so low in the latching order that we play
+		safe and do not leave the i/o-completion to an asynchronous
+		i/o-thread. Ibuf bitmap pages must always be read with
+		syncronous i/o, to make sure they do not get involved in
+		thread deadlocks. */
+
+		sync = true;
+	}
+
+	/* The following call will also check if the tablespace does not exist
+	or is being dropped; if we succeed in initing the page in the buffer
+	pool for read, then DISCARD cannot proceed until the read has
+	completed */
+	bpage = ppl_buf_page_init_for_read(err, mode, page_id, page_size, unzip, buf_pool);
+	if (bpage == NULL) {
+		return(0);
+	}
+
+	DBUG_PRINT("ib_buf", ("read page %u:%u size=%u unzip=%u,%s",
+			      (unsigned) page_id.space(),
+			      (unsigned) page_id.page_no(),
+			      (unsigned) page_size.physical(),
+			      (unsigned) unzip,
+			      sync ? "sync" : "async"));
+
+	ut_ad(buf_page_in_file(bpage));
+	if (sync) {
+		thd_wait_begin(NULL, THD_WAIT_DISKIO);
+	}
+
+	void*	dst;
+
+	if (page_size.is_compressed()) {
+		dst = bpage->zip.data;
+	} else {
+		ut_a(buf_page_get_state(bpage) == BUF_BLOCK_FILE_PAGE);
+
+		dst = ((buf_block_t*) bpage)->frame;
+	}
+
+	/* This debug code is only for 5.7. In trunk, with newDD,
+	the space->name is no longer same as table name. */
+	DBUG_EXECUTE_IF("innodb_invalid_read_after_truncate",
+		fil_space_t*	space = fil_space_get(page_id.space());
+
+		if (space != NULL && strcmp(space->name, "test/t1") == 0
+		    && page_id.page_no() == space->size - 1) {
+			type = IORequest::READ;
+			sync = true;
+		}
+	);
+
+
+
+	IORequest	request(type | IORequest::READ);
+	*err = fil_io(
+		request, sync, page_id, page_size, 0, page_size.physical(),
+		dst, bpage);
+
+	if (sync) {
+		thd_wait_end(NULL);
+	}
+
+	if (*err != DB_SUCCESS) {
+		if (*err == DB_TABLESPACE_TRUNCATED) {
+			/* Remove the page which is outside the
+			truncated tablespace bounds when recovering
+			from a crash happened during a truncation */
+			buf_read_page_handle_error(bpage);
+			if (recv_recovery_on) {
+				mutex_enter(&recv_sys->mutex);
+				ut_ad(recv_sys->n_addrs > 0);
+				recv_sys->n_addrs--;
+				mutex_exit(&recv_sys->mutex);
+			}
+			return(0);
+		} else if (IORequest::ignore_missing(type)
+			   || *err == DB_TABLESPACE_DELETED) {
+			buf_read_page_handle_error(bpage);
+			return(0);
+		}
+
+		ut_error;
+	}
+
+	if (sync) {
+		/* The i/o is already completed when we arrive from
+		fil_read */
+		if (!buf_page_io_complete(bpage)) {
+			return(0);
+		}
+	}
+
+	return(1);
+}
+#endif

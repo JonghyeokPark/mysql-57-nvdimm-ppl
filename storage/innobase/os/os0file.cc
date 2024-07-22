@@ -144,6 +144,9 @@ static const ulint	OS_AIO_MERGE_N_CONSECUTIVE = 64;
 
 /** Flag indicating if the page_cleaner is in active state. */
 extern bool buf_page_cleaner_is_active;
+#ifdef UNIV_NVDIMM_PPL
+extern bool ppl_buf_page_cleaner_is_active;
+#endif
 
 /**********************************************************************
 

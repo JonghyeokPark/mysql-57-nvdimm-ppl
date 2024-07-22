@@ -33,8 +33,9 @@ Created 2013-03-16 Sunny Bains
 this must be > MLOG_BUF_MARGIN + 30! */
 
 
-#ifdef UNIV_NVDIMM_IPL
+#ifdef UNIV_NVDIMM_PPL
 #define	DYN_ARRAY_DATA_SIZE	4096
+#define	PPL_DYN_ARRAY_DATA_SIZE	256
 #else
 #define	DYN_ARRAY_DATA_SIZE	512
 #endif

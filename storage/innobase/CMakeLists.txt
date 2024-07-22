@@ -22,6 +22,7 @@ SET(INNOBASE_SOURCES
 	nvdimm/nvdimm0log.cc
 	nvdimm/nvdimm0iplalloc.cc
 	nvdimm/nvdimm0recv.cc
+	nvdimm/nvdimm0buf.cc
 	api/api0api.cc
 	api/api0misc.cc
 	btr/btr0btr.cc
