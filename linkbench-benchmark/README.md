@@ -1,78 +1,155 @@
-# Boosting Transaction Performance using Per-Page Logging on NVDIMM
+#Linkbench Benchmark for Experiment
 
-* NV-PPL is a novel database architecture that leverages NVDIMM as a durable log cache so as to avoid the durability overhead in flash-based databases.
-* NV-PPL captures per-page redo logs and stores them on NVDIMM, thus avoiding a significant fraction of page writes to the storage and boosting the performance of OLTP workloads dramatically.
-* NV-PPL is implemented on MySQL 5.7/InnoDB with moderate code changes.
+> This experiment guideline is cited from <https://github.com/facebookarchive/linkbench>
 
-## Build and install
+## Prerequisites:
+--------------
+These instructions assume you are using a UNIX-like system such as a Linux distribution
+or Mac OS X.
 
-1. Clone the source code:
+**Java**: You will need a Java 7+ runtime environment.  LinkBench by default
+      uses the version of Java on your path.  You can override this by setting the
+      JAVA\_HOME environment variable to the directory of the desired
+      Java runtime version.  You will also need a Java JDK to compile from source.
 
-```bash
-$ git clone https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl
-```
+**Maven**: To build LinkBench, you will need the Apache Maven build tool. If
+    you do not have it already, it is available from http://maven.apache.org .
 
-2. Pass your sudo password (`PASSWD`) as a first parameter of the build script and run:
+**MySQL Connector**:  To benchmark MySQL with LinkBench, you need MySQL
+    Connector/J, A version of the MySQL connector is bundled with
+    LinkBench.  If you wish to use a more recent version, replace the
+    mysql jar under lib/.  See http://dev.mysql.com/downloads/connector/j/
 
-```bash
-$ ./build.sh PASSWD
-```
-The above command will compile and build the source code with the default option (i.e., per-page-logging on NVDIMM). The available options are:
+**MySQL Server**: To benchmark MySQL you will need a running MySQL
+    server with free disk space.
 
-| Option     | Description |
-| :--------- | :---------- |
-| --origin   | No per-page-logging (Vanilla version)  |
-| --ppl      | Per-Page-Logging on NVDIMM (default)  |
+## Getting and Building LinkBench
+----------------------------
+First get the source code
 
-For the vanilla version, you can run the script as follows:
+    git clone git@github.com:facebook/linkbench.git
 
-```bash
-$ ./build.sh PASSWD --origin
-```
+Then enter the directory and build LinkBench
 
-## Run MySQL Server
+    cd linkbench
+    mvn clean package
 
-1. Modify the following server variables to the `my.cnf` file:
+## MySQL Setup
+-----------
+We need to create a new database and tables on the MySQL server.
+We'll create a new database called `linkdb` and
+the needed tables to store graph nodes, links and link counts.
+Run the following commands in the MySQL console:
 
-| System Variable                     | Description | 
-| :---------------------------------- | :---------- |
-| innodb_use_nvdimm_ipl               | Specifies whether to enable per-page logging scheme. **true** or **false**. |
-| innodb_nvdimm_home_dir              | NVDIMM-aware files resident directory |
-| innodb_nvdimm_size		        | The size in bytes of the NVDIMM. The default value is 1GB. |
-| innodb_nvdimm_ppl_block_size	  | The size in bytes of each PPL block. The default value is 64B. |
-| innodb_nvdimm_max_ppl_size	        | The size in bytes of the max PPL size, which can be allocated per page. The default value is 256B. |
-| innodb_use_nvdimm_redo	        | Specifies whether to place redo log buffer on NVDIMM. **true** or **false**.|
-| innodb_use_nvdimm_dwb	              | Specifies whether to place the double write buffer on NVDIMM. **true** or **false**.|
-| innodb_use_nvdimm_ipl_recovery	  | Specifies whether to enable per-page logging recovery. **true** or **false**.|
-| innodb_use_ppl_cleaner	        | Specifies whether to enable PPL cleaner on NVDIMM. **true** or **false**.|
-| innodb_use_ppl_mvcc	              | Specifies whether to make page version with PPL in NVDIMM. **true** or **false**.|
+    create database linkdb;
+    use linkdb;
 
-For example:
+    CREATE TABLE `linktable` (
+      `id1` bigint(20) unsigned NOT NULL DEFAULT '0',
+      `id2` bigint(20) unsigned NOT NULL DEFAULT '0',
+      `link_type` bigint(20) unsigned NOT NULL DEFAULT '0',
+      `visibility` tinyint(3) NOT NULL DEFAULT '0',
+      `data` varchar(255) NOT NULL DEFAULT '',
+      `time` bigint(20) unsigned NOT NULL DEFAULT '0',
+      `version` int(11) unsigned NOT NULL DEFAULT '0',
+      PRIMARY KEY (link_type, `id1`,`id2`),
+      KEY `id1_type` (`id1`,`link_type`,`visibility`,`time`,`id2`,`version`,`data`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=latin1 PARTITION BY key(id1) PARTITIONS 16;
 
-```bash
-$ vi my.cnf
-...
-innodb_use_nvdimm_ipl=true
-innodb_nvdimm_home_dir=/pmem
-innodb_nvdimm_size=1G
-innodb_nvdimm_ppl_block_size=64
-innodb_nvdimm_max_ppl_size=256
-innodb_use_nvdimm_redo=true
-innodb_use_nvdimm_dwb=true
-innodb_use_nvdimm_ipl_recovery=false
-innodb_use_ppl_cleaner=false
-innodb_use_ppl_mvcc=false
-...
-```
+    CREATE TABLE `counttable` (
+      `id` bigint(20) unsigned NOT NULL DEFAULT '0',
+      `link_type` bigint(20) unsigned NOT NULL DEFAULT '0',
+      `count` int(10) unsigned NOT NULL DEFAULT '0',
+      `time` bigint(20) unsigned NOT NULL DEFAULT '0',
+      `version` bigint(20) unsigned NOT NULL DEFAULT '0',
+      PRIMARY KEY (`id`,`link_type`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
-2. Run MySQL server:
+    CREATE TABLE `nodetable` (
+      `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      `type` int(10) unsigned NOT NULL,
+      `version` bigint(20) unsigned NOT NULL,
+      `time` int(10) unsigned NOT NULL,
+      `data` mediumtext NOT NULL,
+      PRIMARY KEY(`id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
-```bash
-$ ./bld/bin/mysqld --defaults-fele=my.cnf
-```
 
-## Run Benchmark
+## Configuration Files
+-------------------
+Before benchmarking you will want to make a copy of the example config file:
 
-This repository includes experiment guidelines for the benchmarks(TPC-C, Linkbench)
-* TPC-C Benchmark: under `tpcc-benchmark` directory
-* Linkbench Benchmark: under `linkbench-benchmark` directory
+    cp config/LinkConfigMysql.properties config/MyConfig.properties
+
+Open MyConfig.properties.  At a minimum you will need to fill in the
+settings under *MySQL Connection Information* to match the server, user
+and database you set up earlier. E.g.
+
+    # MySQL connection information
+    host = localhost
+    user = linkbench
+    password = your_password
+    port = 3306
+    dbid = linkdb
+
+Notice that MyConfig.properties references another file in this line:
+
+    workload_file = config/FBWorkload.properties
+
+The included workload file has been tuned to match our production workload in query mix.  
+If you want to change the scale of the benchmark (the default graph is quite small for
+benchmarking purposes), you should look at the maxid1 setting.  This
+controls the number of nodes in the initial graph created in the load
+phase: increase it to get a larger database.
+
+      # start node id (inclusive)
+      startid1 = 1
+
+      # end node id for initial load (exclusive)
+      # With default config and MySQL/InnoDB, 1M ids ~= 1GB
+      # We set 50M ids ~= 64GB
+      maxid1 = 50000001
+
+## Loading Data
+------------
+First we need to do an initial load of data using our new config file:
+
+    ./bin/linkbench -c config/MyConfig.properties -l
+
+This will take a while to load, and you should get frequent progress updates.
+At the end LinkBench reports a range of statistics on load time that are
+of limited interest at this stage.
+
+### Request Phase
+-------------
+Open MyConfig.properties. 
+First, Set a Thread Number as same as CPU cores in your environment
+Second, Set read + write requests per thread
+Third, Set warmup_time to 100
+
+    ...
+    # Experiment Setting
+    requesters = 32
+    requests = 17500000
+    maxtime = 10800
+    warmup_time = 100
+    ...
+
+Run the request phase using the below command:
+
+    ./bin/linkbench -c config/MyConfig.properties -r
+
+LinkBench will log progress to the console, along with statistics.
+Once all requests have been sent, or the time limit has elapsed, LinkBench
+will notify you of completion:
+
+    REQUEST PHASE COMPLETED. 25000000 requests done in 2266 seconds.
+      Requests/second = 11029
+
+You can also inspect the latency statistics. For example, the following line tells us the mean latency
+for link range scan operations, along with latency ranges for median (p50), 99th percentile (p99) and
+so on.
+
+    GET_LINKS_LIST count = 12678653  p25 = [0.7,0.8]ms  p50 = [1,2]ms
+                   p75 = [1,2]ms  p95 = [10,11]ms  p99 = [15,16]ms
+                   max = 2064.476ms  mean = 2.427ms
