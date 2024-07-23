@@ -38,13 +38,13 @@ $ ./build.sh PASSWD --origin
 | :---------------------------------- | :---------- |
 | innodb_use_nvdimm_ipl               | Specifies whether to enable per-page logging scheme. **true** or **false**. |
 | innodb_nvdimm_home_dir              | NVDIMM-aware files resident directory |
-| innodb_nvdimm_size		        | The size in bytes of the NVDIMM. The default value is 1GB. |
-| innodb_nvdimm_ppl_block_size	  | The size in bytes of each PPL block. The default value is 64B. |
-| innodb_nvdimm_max_ppl_size	        | The size in bytes of the max PPL size, which can be allocated per page. The default value is 256B. |
-| innodb_use_nvdimm_redo	        | Specifies whether to place redo log buffer on NVDIMM. **true** or **false**.|
+| innodb_nvdimm_size		          | The size in bytes of the NVDIMM. The default value is 1GB. |
+| innodb_nvdimm_ppl_block_size	  	  | The size in bytes of each PPL block. The default value is 64B. |
+| innodb_nvdimm_max_ppl_size	      | The size in bytes of the max PPL size, which can be allocated per page. The default value is 256B. |
+| innodb_use_nvdimm_redo	          | Specifies whether to place redo log buffer on NVDIMM. **true** or **false**.|
 | innodb_use_nvdimm_dwb	              | Specifies whether to place the double write buffer on NVDIMM. **true** or **false**.|
 | innodb_use_nvdimm_ipl_recovery	  | Specifies whether to enable per-page logging recovery. **true** or **false**.|
-| innodb_use_ppl_cleaner	        | Specifies whether to enable PPL cleaner on NVDIMM. **true** or **false**.|
+| innodb_use_ppl_cleaner	          | Specifies whether to enable PPL cleaner on NVDIMM. **true** or **false**.|
 | innodb_use_ppl_mvcc	              | Specifies whether to make page version with PPL in NVDIMM. **true** or **false**.|
 
 For example:
@@ -73,6 +73,6 @@ $ ./bld/bin/mysqld --defaults-fele=my.cnf
 
 ## Run Benchmark
 
-This repository includes experiment guidelines for the benchmarks(TPC-C, Linkbench)
-* TPC-C Benchmark: under `tpcc-benchmark` directory
-* Linkbench Benchmark: under `linkbench-benchmark` directory
+This repository includes experiment guidelines for the benchmarks(TPC-C, Linkbench) with NV-PPL
+* TPC-C: under `tpcc-benchmark` directory
+* Linkbench: under `linkbench-benchmark` directory

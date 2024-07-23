@@ -55,7 +55,7 @@ innodb_nvdimm_home_dir=/mnt/pmem
 ```
 
 
-3. Start the NV-PPL server.
+4. Start the NV-PPL server.
 
 ```bash
 $ ./bld/bin/mysqld --defaults-file=my.cnf
@@ -65,5 +65,5 @@ $ ./bld/bin/mysqld --defaults-file=my.cnf
 
 ```bash
 $ cd linkbench
-$ ./bin/linkbench -c config/MyConfig.properties -csvstats final-stats.csv -csvstream streaming-stats.csv -L linkbench_result.txt -r
+$ ./bin/linkbench -c config/MyConfig.properties -csvstats final-stats.csv -csvstream streaming-stats.csv -L linkbench-result.txt -r
 ```

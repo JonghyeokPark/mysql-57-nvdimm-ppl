@@ -60,8 +60,6 @@ Java HotSpot(TM) 64-Bit Server VM (build 13.0.2+8, mixed mode, sharing)
 $ sudo apt-get install maven
 ```
 
-- MySQL Connector / Server
-
 ## Installation
 
 1. Clone the source code:
@@ -77,7 +75,8 @@ $ cd linkbench
 $ mvn clean package -DskipTests
 ```
 
-3. Start the MySQL server (if MySQL server is on, skip this step).
+3. Start the MySQL server .
+> NOTE: If MySQL server is already on, skip this step.
 
 ```bash
 $ cd mysql-57-nvdimm-ppl
@@ -155,13 +154,13 @@ If you want to change the scale of the benchmark, open `FBWorkload.properties` a
   maxid1 = 50000001
 ```
 
-6. Load the data:
+7. Load the data:
 
 ```bash
 $ ./bin/linkbench -c config/MyConfig.properties -l
 ```
 
-7. After Loading the data is finished, shut down the MySQL server:
+8. After Loading the data is finished, shut down the MySQL server:
 
 ```bash
 $ cd mysql-57-nvdimm-ppl

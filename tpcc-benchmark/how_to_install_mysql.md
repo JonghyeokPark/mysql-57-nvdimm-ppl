@@ -1,6 +1,6 @@
 # How to install MySQL 5.7
 
-Building MySQL 5.7 from the source code enables you to customize build parameters, compiler optimizations, and installation location.
+Building MySQL 5.7 from the source code enables you to load the TPC-C data
 
 ## Prerequisites
 
