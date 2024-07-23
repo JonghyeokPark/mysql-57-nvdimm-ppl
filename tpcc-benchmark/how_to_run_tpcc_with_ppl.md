@@ -1,4 +1,4 @@
-# Run Linkbench with NV-PPL
+# Run TPC-C with NV-PPL
 
 1. Pass your sudo password (PASSWD) as a first parameter of the build script and build with NV-PPL version:
 
@@ -37,7 +37,7 @@ innodb_nvdimm_home_dir=/mnt/pmem
 ```
 
 
-3. Start the MySQL server with NV-PPL version.
+3. Start the MySQL server with NV-PPL.
 
 ```bash
 $ ./bld/bin/mysqld --defaults-file=my.cnf
@@ -46,6 +46,7 @@ $ ./bld/bin/mysqld --defaults-file=my.cnf
 4. Run the TPC-C test:
 
 ```bash
+$ cd tpcc-mysql
 $ ./tpcc_start -h 127.0.0.1 -S /tmp/mysql.sock -d tpcc -u root -p "yourPassword" -w 500 -c 32 -r 300 -l 1800 -i 1 | tee tpcc-result.txt
 ```
 
