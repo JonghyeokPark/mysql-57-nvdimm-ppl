@@ -359,7 +359,7 @@ Note the `TpmC` value. The metric for evaluating TPC-C performance is the number
 
 # Testing other performances
 For testing the other performances, experiment guidelines are below:
-* [Testing NV-PPL with the Linkbench benchmark](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/5e87740726faba7d87d0201891665d12d403331f/how_to_nvppl_with_linkbench.md)
+* [Testing NV-PPL with the Linkbench benchmark](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/paper_version/how_to_test_with_linkbench.md)
 * Testing NV-PPL recovery performance(?)
 * Testing NV-PPL HTAP performance(?)
 
