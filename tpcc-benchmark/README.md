@@ -1,4 +1,4 @@
-# How to run Linkbench for Experiment
+# How to run TPC-C benchmark with NV-PPL for experiment
 
 Follow the steps below to run TPC-C benchmark with NV-PPL:
 1. [Build and initialize MySQL 5.7 using Vanilla build](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/692380efb38f0f8bb0ca5db480279b6ef09a2b3a/tpcc-benchmark/how_to_install_mysql.md)

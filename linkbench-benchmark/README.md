@@ -1,4 +1,4 @@
-# How to run Linkbench for Experiment
+# How to run Linkbench benchmark with NV-PPL for experiment
 
 Follow the steps below to run Linkbench benchmark with NV-PPL:
 1. [Build and initialize MySQL 5.7 using Vanilla build](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/da609468158d48ec918f6aece1ed88af74ff6d4c/linkbench-benchmark/how_to_install_mysql.md)
