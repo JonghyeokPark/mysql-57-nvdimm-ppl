@@ -21,6 +21,7 @@ void recv_ipl_parse_log() {
 	fprintf(stderr, "[DEBUG] printf_nvidmm_info: static_page_size: %lu\n"
 			 , nvdimm_info->each_ppl_size);	
 
+	byte first_ppl_marker = 0;
 	uint64_t space_no = -1, page_no = -1, dynamic_addr= -1;
 	nvdimm_recv_ptr = nvdimm_ptr;
 
@@ -28,9 +29,13 @@ void recv_ipl_parse_log() {
 	byte hdr[PPL_BLOCK_HDR_SIZE];
 	for (uint64_t i = 0; i < nvdimm_info->overall_ppl_size; i+= nvdimm_info->each_ppl_size) {
 		// step2. Get the header information
-		memcpy(hdr, nvdimm_recv_ptr + i, PPL_BLOCK_HDR_SIZE);
-		space_no = mach_read_from_4(hdr);
-		page_no = mach_read_from_4(hdr + 4);
+		memcpy(hdr, nvdimm_recv_ptr + i, PPL_HDR_FIRST_MARKER);
+		first_ppl_marker = mach_read_from_1(hdr + PPL_HDR_FIRST_MARKER);
+		if(!first_ppl_marker){
+			continue;
+		}
+		space_no = mach_read_from_4(hdr + IPL_HDR_SPACE);
+		page_no = mach_read_from_4(hdr + IPL_HDR_PAGE);
 	
 		// skip deleted IPL log
 		// SIPL > DIPL > SDIPL 작성된 IPL 로그가 있는 page가 normalize 된 경우, 
@@ -44,7 +49,7 @@ void recv_ipl_parse_log() {
 		}
     */
 
-		// // PPL Page 출력해보기
+		// PPL Page 출력해보기
 		// uint64_t space, page_no, ppl_length, page_lsn;
 		// unsigned char * dynamic_pointer, * second_dynamic_pointer;
 		// dynamic_pointer = NULL;

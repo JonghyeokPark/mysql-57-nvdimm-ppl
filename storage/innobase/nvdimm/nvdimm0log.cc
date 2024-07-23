@@ -62,7 +62,7 @@ bool alloc_nth_ppl_to_bpage(buf_page_t * bpage){
 	unsigned char * new_ppl_block = alloc_ppl_from_queue(normal_buf_pool_get(bpage->id));
 	if(new_ppl_block == NULL) return false;
 
-	mach_write_to_1(new_ppl_block + NTH_IPL_BLOCK_MARKER, 0); // Store Nth PPL Flag
+	mach_write_to_1(new_ppl_block + NTH_PPL_BLOCK_MARKER, 0); // Store Nth PPL Flag
 	flush_cache(new_ppl_block, 1);
 
 	//현재 PPL의 다음 PPL을 가리키는 포인터를 현재 PPL에 기록

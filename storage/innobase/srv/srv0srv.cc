@@ -244,7 +244,7 @@ with mutex_enter(), which will wait until it gets the mutex. */
 
 #ifdef UNIV_NVDIMM_PPL
 /** If true then enable NVDIMM IPL */
-my_bool srv_use_nvdimm_ipl = FALSE;
+my_bool srv_use_nvdimm_ppl = FALSE;
 /** NVDIMM-aware file resident directory */
 char* srv_nvdimm_home_dir = NULL;
 /** NVDIMM Size */
@@ -255,7 +255,7 @@ ulong srv_nvdimm_ppl_block_size = 0;
 /** MAX PPL Size Per Page */
 ulong srv_nvdimm_max_ppl_size = 0;
 /** IPLizatio recovery optimization **/
-my_bool srv_use_nvdimm_ipl_recovery = FALSE;
+my_bool srv_use_nvdimm_ppl_recovery = FALSE;
 /** Redo on NVDIMM optimization */
 my_bool srv_use_nvdimm_redo = TRUE;
 /** Redo on NVDIMM optimization */

@@ -109,7 +109,7 @@ void nvdimm_free(const uint64_t pool_size);
 #define PPL_BLOCK_HDR_SIZE							26
 
 /* Second_Dynamic_index (4) | mtr_log | ... */
-#define NTH_IPL_BLOCK_MARKER				0
+#define NTH_PPL_BLOCK_MARKER				0
 #define NTH_PPL_DYNAMIC_INDEX			 	1
 #define NTH_PPL_BLOCK_HEADER_SIZE 				5
 

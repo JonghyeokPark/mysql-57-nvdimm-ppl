@@ -95,7 +95,7 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 
   } else {
   	// TODO(jhpark): recovery process!   
-		if (srv_use_nvdimm_ipl_recovery) {\
+		if (srv_use_nvdimm_ppl_recovery) {\
 			ib::info() << "We use IPLzied recovery mode!";
 		}
 		

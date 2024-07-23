@@ -20295,7 +20295,7 @@ static MYSQL_SYSVAR_BOOL(sync_debug, srv_sync_debug,
 #endif /* UNIV_DEBUG */
 
 #ifdef UNIV_NVDIMM_PPL
-static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl, srv_use_nvdimm_ipl,
+static MYSQL_SYSVAR_BOOL(use_nvdimm_ppl, srv_use_nvdimm_ppl,
   PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
   "Enable NVDIMM IPL mode (disabled by default).",
   NULL, NULL, FALSE);
@@ -20319,7 +20319,7 @@ static MYSQL_SYSVAR_ULONG(nvdimm_max_ppl_size, srv_nvdimm_max_ppl_size,
   "Max PPL Size Per Page",
   NULL, NULL, 384, 64, 4096, 0);
 
-static MYSQL_SYSVAR_BOOL(use_nvdimm_ipl_recovery, srv_use_nvdimm_ipl_recovery,
+static MYSQL_SYSVAR_BOOL(use_nvdimm_ppl_recovery, srv_use_nvdimm_ppl_recovery,
   PLUGIN_VAR_NOCMDARG | PLUGIN_VAR_READONLY,
   "Enable NVDIMM IPL recovery mode (disabled by default).",
   NULL, NULL, FALSE);
@@ -20521,12 +20521,12 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
 #endif /* UNIV_DEBUG */
 
 #ifdef UNIV_NVDIMM_PPL
-	MYSQL_SYSVAR(use_nvdimm_ipl),
+	MYSQL_SYSVAR(use_nvdimm_ppl),
 	MYSQL_SYSVAR(nvdimm_home_dir),
 	MYSQL_SYSVAR(nvdimm_size),
 	MYSQL_SYSVAR(nvdimm_ppl_block_size),
 	MYSQL_SYSVAR(nvdimm_max_ppl_size),
-	MYSQL_SYSVAR(use_nvdimm_ipl_recovery),
+	MYSQL_SYSVAR(use_nvdimm_ppl_recovery),
 	MYSQL_SYSVAR(use_nvdimm_redo),
 	MYSQL_SYSVAR(use_nvdimm_dwb),
 	MYSQL_SYSVAR(use_ppl_cleaner),

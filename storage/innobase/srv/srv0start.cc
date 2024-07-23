@@ -1829,7 +1829,7 @@ innobase_start_or_create_for_mysql(void)
 #ifdef UNIV_NVDIMM_PPL
 	// TODO(jhpark): add configuration variable
 	// 앞으로 옮긴 이유는, Buf_pool instance에 대한 allocator를 할당하기 위해서는 먼저 nvdimm_info가 생성 필요
-	if (srv_use_nvdimm_ipl) {
+	if (srv_use_nvdimm_ppl) {
 		char nvdimm_file_path[NVDIMM_MMAP_MAX_FILE_NAME_LENGTH];
 		sprintf(nvdimm_file_path, "%s/%s", srv_nvdimm_home_dir, NVDIMM_MMAP_FILE_NAME);
 		//const char* nvdimm_file_path = "/mnt/pmem/nvdimm_mmap_file";

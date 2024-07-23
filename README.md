@@ -36,14 +36,14 @@ $ ./build.sh PASSWD --origin
 
 | System Variable                     | Description | 
 | :---------------------------------- | :---------- |
-| innodb_use_nvdimm_ipl               | Specifies whether to enable per-page logging scheme. **true** or **false**. |
+| innodb_use_nvdimm_ppl               | Specifies whether to enable per-page logging scheme. **true** or **false**. |
 | innodb_nvdimm_home_dir              | NVDIMM-aware files resident directory |
 | innodb_nvdimm_size		          | The size in bytes of the NVDIMM. The default value is 1GB. |
 | innodb_nvdimm_ppl_block_size	  	  | The size in bytes of each PPL block. The default value is 64B. |
 | innodb_nvdimm_max_ppl_size	      | The size in bytes of the max PPL size, which can be allocated per page. The default value is 256B. |
 | innodb_use_nvdimm_redo	          | Specifies whether to place redo log buffer on NVDIMM. **true** or **false**.|
 | innodb_use_nvdimm_dwb	              | Specifies whether to place the double write buffer on NVDIMM. **true** or **false**.|
-| innodb_use_nvdimm_ipl_recovery	  | Specifies whether to enable per-page logging recovery. **true** or **false**.|
+| innodb_use_nvdimm_ppl_recovery	  | Specifies whether to enable per-page logging recovery. **true** or **false**.|
 | innodb_use_ppl_cleaner	          | Specifies whether to enable PPL cleaner on NVDIMM. **true** or **false**.|
 | innodb_use_ppl_mvcc	              | Specifies whether to make page version with PPL in NVDIMM. **true** or **false**.|
 
@@ -52,14 +52,14 @@ For example:
 ```bash
 $ vi my.cnf
 ...
-innodb_use_nvdimm_ipl=true
-innodb_nvdimm_home_dir=/pmem
+innodb_use_nvdimm_ppl=true
+innodb_nvdimm_home_dir=/mnt/pmem
 innodb_nvdimm_size=1G
 innodb_nvdimm_ppl_block_size=64
 innodb_nvdimm_max_ppl_size=256
+innodb_use_nvdimm_ppl_recovery=false
 innodb_use_nvdimm_redo=true
 innodb_use_nvdimm_dwb=true
-innodb_use_nvdimm_ipl_recovery=false
 innodb_use_ppl_cleaner=false
 innodb_use_ppl_mvcc=false
 ...

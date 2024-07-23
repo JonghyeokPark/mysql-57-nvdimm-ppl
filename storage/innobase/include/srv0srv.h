@@ -340,7 +340,7 @@ extern ulong    srv_io_capacity;
 
 #ifdef UNIV_NVDIMM_PPL
 /** If true then enable NVDIMM IPL */
-extern my_bool srv_use_nvdimm_ipl;
+extern my_bool srv_use_nvdimm_ppl;
 /** NVDIMM-aware file resident directory */
 extern char* srv_nvdimm_home_dir;
 /** Max PPL Overall Size*/
@@ -350,7 +350,7 @@ extern ulong srv_nvdimm_ppl_block_size;
 /** MAX PPL Entry Size */
 extern ulong srv_nvdimm_max_ppl_size;
 /** IPLized recovery optimization */
-extern my_bool srv_use_nvdimm_ipl_recovery;
+extern my_bool srv_use_nvdimm_ppl_recovery;
 /** Redo on NVDIMM optimization */
 extern my_bool srv_use_nvdimm_redo;
 /* DWB on NVDIMM*/
