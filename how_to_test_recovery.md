@@ -22,7 +22,7 @@ $ ./tpcc_start -h 127.0.0.1 -S /tmp/mysql.sock -d tpcc -u root -p "yourPassword"
 4. After **`10 minutes`**, shutdown the MySQL server with `SIGKILL`:
 ```bash
 $ ps -ef | grep mysqld # Check the MySQL server pid
-$ sudo pkill -9 -ef mysqld
+$ sudo pkill -9 -ef mysqld
 ```
 5. Change the value of `innodb_use_nvdimm_ppl_recovery` to `true` in the `my.cnf` file:
 ```bash
