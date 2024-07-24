@@ -117,7 +117,7 @@ $ ./build.sh PASSWD --origin
 $ ./bld/bin/mysqld --initialize --innodb_page_size=4k --user=mysql --datadir=/path/to/datadir --basedir=/path/to/basedir
 ```
 
-3. Modify the configuration file (`my-vanilla.cnf` in repository) for your `--datadir` and `--logdir`
+3. Modify the configuration file (`my-vanilla.cnf` in repository) for your `datadir` and `logdir`
 
 ```bash
 $ vi my-vanilla.cnf
@@ -227,7 +227,7 @@ $ sudo rm -rf bld
 $ ./build.sh PASSWD --ppl
 ```
 
-2. Modify the configuration file (`my.cnf` in repository) for your `data directory`, `log directory` and `persistent memory mount directory`
+2. Modify the configuration file (`my.cnf` in repository) for your `datadir`, `logdir` and `persistent memory mount directory`
 ```bash
 $ vi my.cnf
 ...
@@ -260,8 +260,33 @@ $ ./tpcc_start -h 127.0.0.1 -S /tmp/mysql.sock -d tpcc -u root -p "yourPassword"
 # Testing other performances
 For testing the other performances, experiment guidelines are below:
 * [Testing NV-PPL with the Linkbench benchmark](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/paper_version/how_to_test_with_linkbench.md)
-* Testing NV-PPL recovery performance(?)
+* [Testing NV-PPL recovery performance](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/paper_version/how_to_test_recovery.md)
 * Testing NV-PPL HTAP performance(?)
+
+# Plotting graph scripts
+> Note: Before plotting the graph, run the experiment first. Then, execute the script with the following parameter:
+## Prerequisite
+
+- gnuplot
+
+```bash
+$ sudo apt-get install gnuplot
+```
+
+## Plotting TPS graph for TPC-C
+- `tpcc-result-path`: The absolute path to the `tpcc-result.txt` file
+
+```bash
+$ python3 ./plots/plot_tpcc_tps_graph.py /tpcc-result-path
+```
+
+## Plotting OPS graph for Linkbench
+
+- `linkbench-result-path`: The absolute path to the `linkbench-result.txt` file
+
+```bash
+$ python3 ./plots/plot_linkbench_ops_graph.py /linkbench-result-path
+```
 
 
 
