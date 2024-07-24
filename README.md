@@ -168,7 +168,7 @@ $ ./bld/bin/mysqld --defaults-file=./my-vanilla.cnf
 ```
 
 ## How to install tpcc-mysql and load the data
-> Note: tpcc-mysql is an implementation of the TPC-C benchmark specifically designed to work with MySQL databases.
+> Note: tpcc-mysql from the [Percona GitHub repository](https://github.com/Percona-Lab/tpcc-mysql) is an implementation of the TPC-C benchmark specifically designed to work with MySQL databases.
 ### Prerequisite
 
 - libmysqlclient-dev
@@ -179,13 +179,7 @@ $ sudo apt-get install libmysqlclient-dev
 ---
 ### Installation
 
-1. Clone tpcc-mysql from the [Percona GitHub repository](https://github.com/Percona-Lab/tpcc-mysql):
-
-```bash
-$ git clone https://github.com/Percona-Lab/tpcc-mysql.git
-```
-
-2. Go to the tpcc-mysql directory and build binaries:
+Go to the tpcc-mysql directory and build binaries:
 
 ```bash
 $ cd tpcc-mysql/src
