@@ -1316,6 +1316,187 @@ page_cur_parse_insert_rec(
 	return(const_cast<byte*>(ptr + end_seg_len));
 }
 
+#ifdef UNIV_NVDIMM_PPL
+/* mvcc-ppl */
+/***********************************************************//**
+Parses a log record of a record insert on a IPL page.
+@return end of log record or NULL */
+byte*
+ipl_page_cur_parse_insert_rec(
+/*======================*/
+	ibool		is_short,/*!< in: TRUE if short inserts */
+	const byte*	ptr,	/*!< in: buffer */
+	const byte*	end_ptr,/*!< in: buffer end */
+	page_t*	page,	/*!< in: page or NULL */
+	dict_index_t*	index,	/*!< in: record descriptor */
+	mtr_t*		mtr)	/*!< in: mtr or NULL */
+{
+	ulint	origin_offset		= 0; /* remove warning */
+	ulint	end_seg_len;
+	ulint	mismatch_index		= 0; /* remove warning */
+	rec_t*	cursor_rec;
+	byte	buf1[1024];
+	byte*	buf;
+	const byte*	ptr2		= ptr;
+	ulint		info_and_status_bits = 0; /* remove warning */
+	page_cur_t	cursor;
+	mem_heap_t*	heap		= NULL;
+	ulint		offsets_[REC_OFFS_NORMAL_SIZE];
+	ulint*		offsets		= offsets_;
+	rec_offs_init(offsets_);
+
+	if (is_short) {
+		cursor_rec = page_rec_get_prev(page_get_supremum_rec(page));
+	} else {
+		ulint	offset;
+
+		/* Read the cursor rec offset as a 2-byte ulint */
+
+		if (UNIV_UNLIKELY(end_ptr < ptr + 2)) {
+
+			return(NULL);
+		}
+
+		offset = mach_read_from_2(ptr);
+		ptr += 2;
+
+		cursor_rec = page + offset;
+
+		if (offset >= UNIV_PAGE_SIZE) {
+
+			recv_sys->found_corrupt_log = TRUE;
+
+			return(NULL);
+		}
+	}
+
+	end_seg_len = mach_parse_compressed(&ptr, end_ptr);
+
+	if (ptr == NULL) {
+
+		return(NULL);
+	}
+
+	if (end_seg_len >= UNIV_PAGE_SIZE << 1) {
+		recv_sys->found_corrupt_log = TRUE;
+
+		return(NULL);
+	}
+
+	if (end_seg_len & 0x1UL) {
+		/* Read the info bits */
+
+		if (end_ptr < ptr + 1) {
+
+			return(NULL);
+		}
+
+		info_and_status_bits = mach_read_from_1(ptr);
+		ptr++;
+
+		origin_offset = mach_parse_compressed(&ptr, end_ptr);
+
+		if (ptr == NULL) {
+
+			return(NULL);
+		}
+
+		ut_a(origin_offset < UNIV_PAGE_SIZE);
+
+		mismatch_index = mach_parse_compressed(&ptr, end_ptr);
+
+		if (ptr == NULL) {
+
+			return(NULL);
+		}
+
+		ut_a(mismatch_index < UNIV_PAGE_SIZE);
+	}
+
+	if (end_ptr < ptr + (end_seg_len >> 1)) {
+
+		return(NULL);
+	}
+
+	if (!page) {
+
+		return(const_cast<byte*>(ptr + (end_seg_len >> 1)));
+	}
+
+	ut_ad(!!page_is_comp(page) == dict_table_is_comp(index->table));
+
+	/* Read from the log the inserted index record end segment which
+	differs from the cursor record */
+
+	offsets = rec_get_offsets(cursor_rec, index, offsets,
+				  ULINT_UNDEFINED, &heap);
+
+	if (!(end_seg_len & 0x1UL)) {
+		info_and_status_bits = rec_get_info_and_status_bits(
+			cursor_rec, page_is_comp(page));
+		origin_offset = rec_offs_extra_size(offsets);
+		mismatch_index = rec_offs_size(offsets) - (end_seg_len >> 1);
+	}
+
+	end_seg_len >>= 1;
+
+	if (mismatch_index + end_seg_len < sizeof buf1) {
+		buf = buf1;
+	} else {
+		buf = static_cast<byte*>(
+			ut_malloc_nokey(mismatch_index + end_seg_len));
+	}
+
+	/* Build the inserted record to buf */
+
+        if (UNIV_UNLIKELY(mismatch_index >= UNIV_PAGE_SIZE)) {
+
+		ib::fatal() << "is_short " << is_short << ", "
+			<< "info_and_status_bits " << info_and_status_bits
+			<< ", offset " << page_offset(cursor_rec) << ","
+			" o_offset " << origin_offset << ", mismatch index "
+			<< mismatch_index << ", end_seg_len " << end_seg_len
+			<< " parsed len " << (ptr - ptr2);
+	}
+
+	ut_memcpy(buf, rec_get_start(cursor_rec, offsets), mismatch_index);
+	ut_memcpy(buf + mismatch_index, ptr, end_seg_len);
+
+	if (page_is_comp(page)) {
+		rec_set_info_and_status_bits(buf + origin_offset,
+					     info_and_status_bits);
+	} else {
+		rec_set_info_bits_old(buf + origin_offset,
+				      info_and_status_bits);
+	}
+
+
+	offsets = rec_get_offsets(buf + origin_offset, index, offsets,
+				  ULINT_UNDEFINED, &heap);
+	if (UNIV_UNLIKELY(!page_cur_rec_insert(&cursor,
+					       buf + origin_offset,
+					       index, offsets, mtr))) {
+		/* The redo log record should only have been written
+		after the write was successful. */
+		ut_error;
+	}
+
+	if (buf != buf1) {
+
+		ut_free(buf);
+	}
+
+	if (UNIV_LIKELY_NULL(heap)) {
+		mem_heap_free(heap);
+	}
+
+	return(const_cast<byte*>(ptr + end_seg_len));
+}
+/* end */
+
+
+#endif
+
 /***********************************************************//**
 Inserts a record next to page cursor on an uncompressed page.
 Returns pointer to inserted record if succeed, i.e., enough

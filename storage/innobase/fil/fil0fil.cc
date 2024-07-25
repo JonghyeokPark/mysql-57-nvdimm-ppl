@@ -54,6 +54,7 @@ Created 10/25/1995 Heikki Tuuri
 #include "ut0new.h"
 #include "btr0sea.h"
 #include "log0log.h"
+#include "srv0srv.h"
 
 /** Tries to close a file in the LRU list. The caller must hold the fil_sys
 mutex.
@@ -906,6 +907,18 @@ add_size:
 		UT_LIST_ADD_FIRST(fil_system->LRU, node);
 	}
 
+	if(srv_use_ppl_mvcc){
+	/* mvcc-ppl for TPC-C benchmark */
+
+	if (strstr(node->name, "stock.ibd") != NULL) {
+		fprintf(stderr, "setting %s to %lu\n", node->name, space->id);
+		llt_space_id = space->id;
+	}else{
+		fprintf(stderr, "setting %s to %lu\n", node->name, space->id);
+	}
+
+	/* end */
+	}
 	return(true);
 }
 

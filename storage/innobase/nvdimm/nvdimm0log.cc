@@ -26,6 +26,9 @@
 #include <assert.h>
 #include <stdint.h>
 
+std::vector<buf_page_t*> prebuilt_page_list;
+buf_page_t * prebuilt_page_start_ptr = NULL;
+
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
 	unsigned char * first_ppl_block_ptr = alloc_ppl_from_queue(normal_buf_pool_get(bpage->id));
 	unsigned char temp_buf[10] = {0, };
@@ -43,9 +46,9 @@ bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
 	mach_write_to_4(((unsigned char *)temp_buf) + offset, bpage->id.page_no());// Store Page_no
 	offset += 4;
 
-	//nvdimm에 작성
+	//write to nvdimm
 	memcpy_to_nvdimm(first_ppl_block_ptr, temp_buf, 10);
-	//IPL Pointer 설정
+	//Set PPL Pointer 
 	bpage->first_ppl_block_ptr = first_ppl_block_ptr;
 	bpage->ppl_write_pointer = first_ppl_block_ptr + PPL_BLOCK_HDR_SIZE;
 	bpage->block_used = PPL_BLOCK_HDR_SIZE;
@@ -69,10 +72,6 @@ bool alloc_nth_ppl_to_bpage(buf_page_t * bpage){
 	bpage->block_used = NTH_PPL_BLOCK_HEADER_SIZE;
 	return true;
 }
-
-/* Sjmun IPL Log를 쓸때의 핵심*/
-/* SIPL 영역 공간이 부족한 경우는 2개로 나누어서 기존 IPL 영역, 새로운 IPL 영역에 작성하게 됨*/
-/* Log write atomicity를 보장하기 위해서는 두번째 파트를 다 작성하고 Length를 Flush cache*/
 
 void copy_log_to_memory(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id){
 	buf_block_t * block = (buf_block_t *)bpage;
@@ -115,7 +114,7 @@ bool copy_memory_log_to_nvdimm(buf_page_t * bpage){
 	buf_block_t * block = (buf_block_t *)bpage;
 	mem_to_nvdimm_copy_t ppl_copy;
 	ppl_copy.init(bpage);
-	if(!block->in_memory_ppl_buf.for_each_block(ppl_copy)){ // PPL 영역이 부족해서, copy를 못한 경우.
+	if(!block->in_memory_ppl_buf.for_each_block(ppl_copy)){ 
 		return false;
 	}
 	set_ppl_length_in_ppl_header(bpage, block->in_memory_ppl_buf.size());
@@ -353,7 +352,6 @@ check_normalize_cause(buf_page_t * bpage){
 	}
 }
 
-/* Unset_flag를 해주지 않아도 Static_ipl이 free 되면 초기화 됨*/
 void normalize_ppled_page(buf_page_t * bpage, page_id_t page_id){ 
 	if(get_flag(&(bpage->flags), IN_LOOK_UP)){
 		buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
@@ -580,5 +578,404 @@ can_page_be_pplized(
 	}
 	set_normalize_flag(buf_page, 4);
 	return false;
+}
+
+
+void 
+init_prebuilt_page_cache(std::vector<buf_page_t*> prebuilt_page_list){
+    prebuilt_page_list.clear();
+}
+
+buf_page_t* 
+add_prebuilt_page(buf_page_t* bpage){
+
+    byte * buf = NULL;
+    buf_page_t* prebuilt_page = NULL;
+
+
+    buf = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
+    prebuilt_page = static_cast<buf_page_t*>(ut_align(buf, UNIV_PAGE_SIZE));
+
+    // copy current version to  prebuilt_page
+    memcpy(prebuilt_page, bpage, UNIV_PAGE_SIZE);
+    buf_block_t* block = buf_page_get_block(prebuilt_page); 
+
+    // apply all the ipl log inside nvdimm 
+    set_apply_info_and_log_apply(block);
+
+    // add prebuilt page to the list
+    prebuilt_page_list.push_back(prebuilt_page);
+
+    // set start_ptr 
+    if(prebuilt_page_list.size()==1){
+        prebuilt_page_start_ptr=prebuilt_page;
+    }
+    return prebuilt_page;
+}
+
+
+void 
+remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*> prebuilt_page_list){  
+    for(int idx=0; idx<prebuilt_page_list.size(); idx++){
+        if(prebuilt_page_list[idx]==prebuilt_page){
+            prebuilt_page_list.erase(prebuilt_page_list.begin()+idx);
+        }
+    }
+}
+
+buf_page_t* 
+find_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*> prebuilt_page_list){
+    int idx = 0;
+    int found_cnt = 0;
+    int found_idx = 0;
+
+    for(idx=0; idx<prebuilt_page_list.size(); idx++){
+        if(prebuilt_page_list[idx]==prebuilt_page){
+            found_idx = idx;
+            found_cnt++;
+        }
+    }
+    if(found_idx>1){
+        fprintf(stderr, "MVCC WARNING: there are multiple prebuilt page for this pid...\n");
+    }
+    if(idx==prebuilt_page_list.size()){
+        return NULL;
+    }else{
+        return prebuilt_page_list[idx];
+    }
+}
+
+dberr_t
+nvdimm_build_prev_vers_with_redo(
+	const rec_t*	rec,		/*!< in: record in a clustered index */
+	mtr_t*		mtr,
+	dict_index_t*	clust_index,	/*!< in: clustered index */
+	ulint**		offsets,	/*!< in/out: offsets returned by
+					rec_get_offsets(rec, clust_index) */
+	ReadView*	read_view,	/*!< in: read view */
+	mem_heap_t**	offset_heap,	/*!< in/out: memory heap from which
+					the offsets are allocated */
+	mem_heap_t*	in_heap,/*!< in: memory heap from which the memory for
+				*old_vers is allocated; memory for possible
+				intermediate versions is allocated and freed
+				locally within the function */
+	rec_t**		old_vers,	/*!< out: old version, or NULL if the
+					record does not exist in the view:
+					i.e., it was freshly inserted
+					afterwards */
+	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
+					column data */
+	buf_page_t* bpage ){
+
+	page_id_t page_id = bpage->id; // cur bpage 
+	buf_block_t* block = buf_page_get_block(bpage); // cur block
+	
+	
+	//fprintf(stderr, "Start version build with IPL space_id: %d page_no: %lu bpage: %lu\n", bpage->id.space(), bpage->id.page_no(), bpage);
+	
+	/* 0. Get the IPL info of the page that transaction is about to read */
+
+
+	
+	// apply_log_info apply_info;
+	// apply_info.static_start_pointer = bpage->static_ipl_pointer;
+	// apply_info.dynamic_start_pointer = get_dynamic_ipl_pointer(bpage);
+	// apply_info.block = block;
+
+	/* 1. Read the old data page from the disk for page-level version build */
+
+	page_t* page = block->frame;
+	UNIV_MEM_ASSERT_RW(page, UNIV_PAGE_SIZE);
+	ulint id = dict_index_get_space(clust_index);
+	bool			found;
+	const page_size_t	page_size(fil_space_get_page_size(id, &found));
+
+	byte*	buf2;
+	byte*	temp_page;
+	dberr_t		err = DB_SUCCESS;
+	buf_block_t* temp_block;
+	bool resuse_prev_built_page = false;
+	trx_id_t	old_page_max_trx_id;
+	trx_id_t	cur_page_max_trx_id;
+	trx_id_t temp_trx_id;
+	mtr_t temp_mtr;
+	byte* start_ptr;
+	byte* end_ptr;
+	ulint cur_len = 0;
+	int IPL_apply_cnt = 0;
+	byte* temp_old_page_ptr = nvdimm_info->old_page;
+	byte* buf1;
+	byte* old_page;
+	ulint final_ipl_log;
+	ulint ipl_log_offset;
+	rec_t* final_ipl_rec = NULL;
+	ulint* final_ipl_rec_offset;
+	rec_t* ipl_log_to_rec;
+	mem_heap_t* ipl_rec_heap = mem_heap_create(256);
+	buf_page_t* temp_bpage;
+	ulint apply_log_size;
+
+
+	ulint			clust_pos = 0;
+	ulint			clust_len;
+	const dict_col_t*	col;
+	const byte*	clust_field;
+	ulint		clust_offsets_[REC_OFFS_NORMAL_SIZE];
+	ulint*		clust_offs	= clust_offsets_;
+	mem_heap_t*	heap		= NULL;
+	const byte* rec1_b_ptr;
+	const byte* rec2_b_ptr;
+	bool ret = false;
+	int apply_rec_cnt = 0;
+
+	apply_log_size = get_ppl_length_from_ppl_header(bpage);
+	start_ptr = bpage->first_ppl_block_ptr;
+	byte *current_ptr = start_ptr + PPL_BLOCK_HDR_SIZE;
+    end_ptr = start_ptr + nvdimm_info->each_ppl_size;
+    byte *next_ppl = get_addr_from_ppl_index(nvdimm_info->ppl_start_pointer, mach_read_from_4(start_ptr + PPL_HDR_DYNAMIC_INDEX), nvdimm_info->each_ppl_size);
+    byte temp_buffer[400] ={0, }; // Temporary buffer to handle data that spans multiple segments
+	mlog_id_t log_type;
+	ulint log_body_length;
+	trx_id_t trx_id;
+
+
+	buf2 = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
+	temp_page = static_cast<byte*>(ut_align(buf2, UNIV_PAGE_SIZE));
+
+
+	if(nvdimm_info->old_page==NULL){
+		nvdimm_info->old_page = (byte *)calloc(UNIV_PAGE_SIZE, sizeof(char));
+		buf_frame_copy(nvdimm_info->old_page, page);
+	}
+
+
+	// same page built right before -> reuse it
+	if(page_get_page_no(nvdimm_info->old_page)==page_get_page_no(page) && temp_old_page_ptr!=NULL){
+		resuse_prev_built_page = true;
+		goto get_rec_offset;
+	}
+
+	// check prebuilt page list
+	temp_bpage = find_prebuilt_page_from_list(bpage, prebuilt_page_list);
+	if(temp_bpage!=NULL){
+		memcpy(bpage, temp_bpage, UNIV_PAGE_SIZE);
+		remove_prebuilt_page_from_list(temp_bpage, prebuilt_page_list);
+		fprintf(stderr, "prebuilt page list size: %d\n", prebuilt_page_list.size());
+	}
+	
+	/* 1. Copy PPL region to memory */
+
+	if(final_ipl_rec==NULL){
+		*old_vers = NULL;
+		return DB_SUCCESS;
+	}
+	if(apply_log_size<64){
+		return DB_FAIL;
+	}
+
+read_old_page:
+	/* Read the old page from the disk */
+
+	buf1 = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
+	old_page = static_cast<byte*>(ut_align(buf1, UNIV_PAGE_SIZE));
+
+
+	//fprintf(stderr, "Before locking space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
+	//mutex_enter(buf_page_get_mutex(bpage));
+	//rw_lock_s_lock_gen(&((buf_block_t*) bpage)->lock,BUF_IO_READ);
+
+	bpage = buf_page_init_for_read(&err, BUF_READ_ANY_PAGE, page_id, page_size, false);
+
+	if (bpage == NULL) {
+		return(DB_FAIL);
+	}
+
+	//fprintf(stderr, "Before fil_io space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
+	//thd_wait_begin(NULL, THD_WAIT_DISKIO);
+	
+	err = fil_io(IORequestRead, true, page_id, page_size, 0, page_size.physical(), 
+			old_page, NULL);
+
+	//rw_lock_s_unlock_gen(&((buf_block_t*) bpage)->lock,BUF_IO_READ);
+	//mutex_exit(buf_page_get_mutex(bpage));		
+
+	if(err!=DB_SUCCESS){
+		bpage->io_fix==BUF_IO_NONE;
+		fprintf(stderr, "failed to read an old page from the disk. space_id: %d page_no: %lu\n", page_id.space(), page_id.page_no());
+		return DB_FAIL;	
+	}
+
+	//fprintf(stderr, "After fil_io space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
+	//fprintf(stderr, "After lock release space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
+
+	old_page_max_trx_id = page_get_max_trx_id(nvdimm_info->old_page);
+	cur_page_max_trx_id = page_get_max_trx_id(page);
+	
+
+	mtr_start(&temp_mtr);
+	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+
+
+	/* 3. Traverse all the log records inside IPL region to find until which redo log we should apply based on trx_id
+	 Apply the redo log and find compare the max_trx_id of the old bpage with the readview trx_id */
+	 
+	 while (apply_log_size != 0 && read_view->changes_visible(old_page_max_trx_id, clust_index->table->name)  ) {
+		/* Copy the old page to temporary space */
+		buf_frame_copy(temp_page, nvdimm_info->old_page);
+
+		temp_trx_id = old_page_max_trx_id;
+
+        if ((end_ptr - current_ptr) < APPLY_LOG_HDR_SIZE) {
+            size_t remaining = end_ptr - current_ptr;
+            memcpy(temp_buffer, current_ptr, remaining); // Copy the partial header to the temporary buffer
+			apply_log_size -= remaining;
+            current_ptr = fetch_next_segment(current_ptr, &end_ptr, &next_ppl);
+            if (!current_ptr) {
+                break; // If no more segments, exit loop
+            }
+            memcpy(temp_buffer + remaining, current_ptr, APPLY_LOG_HDR_SIZE - remaining);
+            current_ptr += (APPLY_LOG_HDR_SIZE - remaining); // Update current_ptr beyond the header
+			apply_log_size -= APPLY_LOG_HDR_SIZE - remaining;
+            // Process the full header from temp_buffer
+            log_type = (mlog_id_t)mach_read_from_1(temp_buffer);
+            log_body_length = mach_read_from_2(temp_buffer + 1);
+            trx_id = mach_read_from_8(temp_buffer + 3);
+
+        }else{
+			// Read log record header
+			log_type = (mlog_id_t)mach_read_from_1(current_ptr);
+			current_ptr += 1;
+			apply_log_size -= 1;
+
+			// Read log body length
+			log_body_length = mach_read_from_2(current_ptr);
+			current_ptr += 2;
+			apply_log_size -= 2;
+
+			// Read transaction ID
+			trx_id = mach_read_from_8(current_ptr);
+			current_ptr += 8;
+			apply_log_size -= 8;
+		}
+
+		if ((end_ptr - current_ptr) < log_body_length) {
+			size_t remaining = end_ptr - current_ptr;
+			memcpy(temp_buffer, current_ptr, remaining);
+			apply_log_size -= remaining;
+
+			size_t copied_length = remaining;
+
+			while (copied_length < log_body_length) {
+				current_ptr = fetch_next_segment(current_ptr, &end_ptr, &next_ppl);
+
+				if (!current_ptr) {
+					// If there is no next segment, stop the loop
+					fprintf(stderr, "Error: Unable to fetch the next segment. Incomplete log body read. Expected: %zu, Got: %zu\n", log_body_length, copied_length);
+					return DB_ERROR;
+				}
+
+				size_t segment_length = (log_body_length - copied_length <= end_ptr - current_ptr) ? (log_body_length - copied_length) : (end_ptr - current_ptr);
+				memcpy(temp_buffer + copied_length, current_ptr, segment_length);
+				copied_length += segment_length;
+				current_ptr += segment_length;
+				apply_log_size -= segment_length;
+			}
+
+			if (copied_length == log_body_length) {
+				old_page_max_trx_id = nvdimm_recv_parse_or_apply_log_rec_body(log_type, current_ptr, current_ptr + log_body_length, block->page.id.space(), block->page.id.page_no(), &temp_mtr, old_page, temp_trx_id);
+				IPL_apply_cnt++;
+			} else {
+				// Exception handling: When not all segments are fetched
+				fprintf(stderr, "Error: Incomplete log body read. Expected: %zu, Got: %zu\n", log_body_length, copied_length);
+				break;
+			}
+		} else {
+			old_page_max_trx_id = nvdimm_recv_parse_or_apply_log_rec_body(log_type, current_ptr, current_ptr + log_body_length, block->page.id.space(), block->page.id.page_no(), &temp_mtr, old_page, temp_trx_id);
+			IPL_apply_cnt++;
+			current_ptr += log_body_length; // Move past the log body
+			apply_log_size -= log_body_length;
+		}
+		old_page_max_trx_id = page_get_max_trx_id(nvdimm_info->old_page);
+    }
+	
+	if(start_ptr < end_ptr){  // all built version visible to the read trx -> provide old_page instead of temp_page
+		buf_frame_copy(temp_page, old_page);
+		temp_trx_id = old_page_max_trx_id;
+	}
+
+	//fprintf(stderr, "finished apply: space_id: %d page_no: %lu IPL_apply_cnt: %d bpage: %lu\n", page_id.space(), page_id.page_no(), IPL_apply_cnt, bpage);
+
+	/* 4. After getting the right version of the IPL page, store the right record to the old_vers record */
+
+get_rec_offset:
+	if(resuse_prev_built_page==true){
+		fprintf(stderr, "reuse_prev_built_page: %d bpage: %lu \n", resuse_prev_built_page, bpage);
+		buf_frame_copy(temp_page, nvdimm_info->old_page);
+	}
+
+	*offsets = rec_get_offsets(
+			rec, clust_index, *offsets, ULINT_UNDEFINED,
+			offset_heap);
+
+	//page_rec_print(rec, *offsets);
+
+
+	if(*offsets==NULL){
+		fprintf(stderr, "offset NULL during redo version creation\n");
+		return DB_FAIL;
+	}
+
+	// cannot access old_vers -> need to
+
+	const rec_t* temp_page_rec;
+	ulint rec_slot_index = page_dir_find_owner_slot(rec);
+	ulint heap_no = page_rec_get_heap_no(rec);
+
+	temp_page_rec = page_find_rec_with_heap_no(temp_page, heap_no);
+
+	//fprintf(stderr,"temp_page_rec: %lu rec: %lu\n", temp_page_resc, rec);
+
+	ulint*		temp_offsets;
+	mem_heap_t*	temp_offset_heap		= NULL;
+
+	temp_offset_heap = mem_heap_create(1024);
+
+	temp_offsets = rec_get_offsets(
+			temp_page_rec, clust_index, temp_offsets, ULINT_UNDEFINED,
+			&temp_offset_heap);
+
+	if(temp_page_rec==NULL){
+		return DB_FAIL;
+		//return DB_FAIL;
+	}else{
+		//page_rec_print(temp_page_rec, *offsets);
+	}
+
+	byte* buf = static_cast<byte*>(
+				mem_heap_alloc(
+					in_heap, rec_offs_size(temp_offsets)));
+	
+
+	*old_vers = rec_copy(buf, temp_page_rec, *offsets); // copy old vers to buf
+	rec_offs_make_valid(*old_vers, clust_index, *offsets);
+
+	if(rec_get_deleted_flag(*old_vers, true)){
+		return DB_FAIL;
+	}
+
+	if(resuse_prev_built_page==false){
+		buf_frame_copy(nvdimm_info->old_page, temp_page);
+	}
+
+	if (vrow && *vrow) {
+		*vrow = dtuple_copy(*vrow, in_heap);
+		dtuple_dup_v_fld(*vrow, in_heap);
+	}
+
+	//fprintf(stderr, "End of func space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
+
+
+
+	return DB_SUCCESS;
 }
 #endif

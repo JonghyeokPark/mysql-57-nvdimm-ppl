@@ -3769,6 +3769,15 @@ btr_cur_parse_update_in_place(
 func_exit:
 	mem_heap_free(heap);
 
+	/* mvcc */
+	if(page!=NULL){
+		if( page_is_leaf(page)&& (dict_index_get_space(index) ==llt_space_id)){
+			mtr_t* mtr;
+			ipl_page_set_max_trx_id(page, page_zip, trx_id, mtr); //rec_get_trx_id(*rec, index)
+		/* end */
+		}
+	}
+
 	return(ptr);
 }
 
@@ -4007,6 +4016,12 @@ func_exit:
 	    && page_is_leaf(buf_block_get_frame(block))) {
 		/* Update the free bits in the insert buffer. */
 		ibuf_update_free_bits_zip(block, mtr);
+	}
+
+	/* mvcc-ppl */
+	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(block->frame)){ // check iplized or not
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
+		//fprintf(stderr, "update max_trx_id for update in place\n");
 	}
 
 	return(err);
@@ -4286,6 +4301,11 @@ func_exit:
 		operation. */
 		btr_cur_prefetch_siblings(block);
 	}
+
+	/* mvcc-ppl */
+	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(page))
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
+	/* end */
 
 	return(err);
 }
@@ -4763,6 +4783,10 @@ return_after_reservations:
 
 #ifdef UNIV_NVDIMM_PPL
 	set_normalize_flag((buf_page_t *)(btr_cur_get_block(cursor)), 1);
+	/* mvcc-ppl */
+	if( page_is_leaf(page)&& (dict_index_get_space(cursor->index) ==llt_space_id))
+		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
+	/* end */
 #endif
 
 
