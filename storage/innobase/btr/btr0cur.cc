@@ -1465,7 +1465,7 @@ retry_page_get:
 		   && !dict_index_is_spatial(index)) {
 	  
 #ifdef UNIV_NVDIMM_PPL
-		// (jhpark): ipl-undo
+		// (anonymous): ipl-undo
 		if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
 		//ib::info() << "we skip traveersing because it is a IPLed page";
 		} else {
@@ -1487,7 +1487,7 @@ retry_page_get:
 	} else {
 		/* Search for complete index fields. */
 #ifdef UNIV_NVDIMM_PPL
-    	// (jhpark): ipl-undo
+    	// (anonymous): ipl-undo
 		if (nvdimm_recv_running && recv_check_iplized(block->page.id)!=NORMAL) {
 		//ib::info() << "we skip traveersing because it is a IPLed page";
 		} else {
@@ -5553,7 +5553,7 @@ return_after_reservations:
 				"number being\n" << page_get_page_no(page) <<
 				"Index name\n" << index->name;
 			ut_ad(false);
-		// (jhpark): we avoid merge b-tree due to IPLed pages in recvoery process
+		// (anonymous): we avoid merge b-tree due to IPLed pages in recvoery process
 		} else if (do_merge && !nvdimm_recv_running) {
 
 			ret = btr_cur_compress_if_useful(cursor, FALSE, mtr);

@@ -2768,7 +2768,7 @@ recv_recover_page_func(
 
 	recv = UT_LIST_GET_FIRST(recv_addr->rec_list);
 
-	// (jhpark): check IPLed page to require to prepare IPL apply 
+	// (anonymous): check IPLed page to require to prepare IPL apply 
   // from WAL redo logs
   // case1. recv->start_lsn < first IPLed LSN (static IPL lsn)
   //  - we need to apply WAL redo log to apply IPL log
@@ -2780,14 +2780,14 @@ recv_recover_page_func(
 #ifdef UNIV_NVDIMM_PPL
   bool is_ipl = (recv_check_iplized(block->page.id) != NORMAL);
 
-	// (jhpark): calculate skipped apply count for IPL
+	// (anonymous): calculate skipped apply count for IPL
 	//uint64_t tmp_cnt = 0;
 	//uint64_t total_len = UT_LIST_GET_LEN(recv_addr->rec_list);
 	//ipl_org_apply_cnt += total_len;
 	
 	while (recv) {
 
-    // (jhpark): ignore IPLed page (case 3)
+    // (anonymous): ignore IPLed page (case 3)
 		if (is_ipl) {
 			//ib::info() << "IPled page apply redo logs! " <<block->page.id.space() << ":"
 			//					 << block->page.id.page_no() <<  " start_lsn: " 
@@ -3205,7 +3205,7 @@ loop:
 						block, SYNC_NO_ORDER_CHECK);
 
 #ifdef UNIV_NVDIMM_PPL					
-					// (jhpark): recovery
+					// (anonymous): recovery
 					// this is rare cases, somehow pages are fetched in the buffer pool
 					// without applying using IPL log
 					if (nvdimm_recv_running
@@ -4352,7 +4352,7 @@ recv_group_scan_log_recs(
 	}
 // #ifdef UNIV_NVDIMM_PPL
   
-//   // (jhpark): so far we scan from log files; now we read from persistent log buffer
+//   // (anonymous): so far we scan from log files; now we read from persistent log buffer
 //   memcpy(log_sys->buf, nvdimm_info->nc_redo_start_pointer, log_sys->buf_size);
 
 //   fprintf(stderr, "[DEBUG] begin scan and parse persist redo log buffer size: %d\n", log_sys->buf_size);
@@ -4383,7 +4383,7 @@ recv_group_scan_log_recs(
 // 	ib::info() << "nc redo log : " << space 
 // 		<< ":" << page_no << " len: " << nc_len;
 
-// 	// jhpark: add parsing buffer
+// 	// anonymous: add parsing buffer
 // 	if (type != MLOG_MULTI_REC_END) {
 
 // 		if (space == 0) {

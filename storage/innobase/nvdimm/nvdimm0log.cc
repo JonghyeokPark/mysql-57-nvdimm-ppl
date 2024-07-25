@@ -1,3 +1,20 @@
+
+// 1. REDO Log based log applier (Merge)
+// 2. Convert LSN-based Redo log -> Per-page Redo log
+// 3. Utilize Change buffer "merge" operation (`ibuf_merge_or_delete_for_page()`)
+// 	- when index page is read from a disk to buffer pool, 
+//	this function applies any buffered operations to the page and deletes the entries from the change buffer
+// 	how to handle doropped pages ( operation is NOT read but page is created ) ??
+
+// 	At least, we may know the appropriate position for perfect timing for merge operation
+//  + Get the idea from data structures to managin per-page log
+
+// Log applier is actually identical to recovery process
+// Call recv_recover_page() function on the fly in normal process  ... ? 
+
+// step1. collect/manage pages's modification into NVDIMM region per-page manner
+// step2. apply per-page log when 
+// step3. for split pages do not invoke IPLization process
 #ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #include "mtr0log.h"
@@ -476,7 +493,7 @@ uint get_ppl_length_from_ppl_header(buf_page_t * bpage){
 }
 
 void set_page_lsn_in_ppl_header(unsigned char* first_ppl_block_ptr, lsn_t lsn){
-  // (jhpark): recovery
+  // (anonymous): recovery
 	if (nvdimm_recv_running) return;
 	mach_write_to_8(first_ppl_block_ptr + PPL_HDR_LSN, lsn);
 	flush_cache(first_ppl_block_ptr + PPL_HDR_LSN, 8);

@@ -484,7 +484,7 @@ row_undo_ins(
 
 	row_undo_ins_parse_undo_rec(node, dict_locked);
 #ifdef UNIV_NVDIMM_PPL
-  // (jhpark): ipl-undonow, we parsed undo records, and we know the 
+  // (anonymous): ipl-undonow, we parsed undo records, and we know the 
   if (node->pcur.btr_cur.page_cur.block != NULL) {
     if(recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {
       return(DB_SUCCESS);

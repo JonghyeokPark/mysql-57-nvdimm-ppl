@@ -152,7 +152,7 @@ row_purge_remove_clust_if_poss_low(
 	mtr.set_named_space(index->space);
 
 #ifdef UNIV_NVDIMM_PPL
-	// (jhpark): ipl-undo
+	// (anonymous): ipl-undo
 	if (node->pcur.btr_cur.page_cur.block != NULL) {
 		//ib::info() << "purge undo " << node->pcur.btr_cur.page_cur.block->page.id.space()
 		//					 << ":" << node->pcur.btr_cur.page_cur.block->page.id.page_no();

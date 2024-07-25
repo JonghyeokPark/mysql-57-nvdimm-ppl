@@ -957,7 +957,7 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 	
 	end_ptr = ptr + log_len;
 
-  // (jhpark): recovery
+  // (anonymous): recovery
   if (nvdimm_recv_running) return;
 
 	if(ptr == end_ptr){
@@ -1180,7 +1180,7 @@ mtr_t::Command::execute()
 void mtr_t::Command::execute_nvm() {
   ut_ad(m_impl->m_log_mode != MTR_LOG_NONE);
 
-  // (jhpark): pull prepare_write() fucntion here
+  // (anonymous): pull prepare_write() fucntion here
   ulint len, n_recs;
   fil_space_t*  space;
 
@@ -1205,7 +1205,7 @@ void mtr_t::Command::execute_nvm() {
     ut_ad(len > 0);
     ut_ad(n_recs > 0);
 
-    // (jhpark): call log_buffer_extend here!!!
+    // (anonymous): call log_buffer_extend here!!!
     if (len > log_sys->buf_size / 2) {
       log_buffer_extend((len + 1) * 2);
     }
@@ -1257,8 +1257,8 @@ void mtr_t::Command::execute_nvm() {
     log_margin_checkpoint_age(len);
   }
 
-  // (jhpark): end-of-prepare_write()
-  // (jhpark): pull finish_write()
+  // (anonymous): end-of-prepare_write()
+  // (anonymous): pull finish_write()
   if (len > 0) {
     ut_ad(m_impl->m_log_mode == MTR_LOG_ALL);
     ut_ad(log_mutex_own());
@@ -1284,7 +1284,7 @@ void mtr_t::Command::execute_nvm() {
 
     m_end_lsn = log_close();
   }
-  // (jhpark): end-of-finish_write()
+  // (anonymous): end-of-finish_write()
 
 skip_redo:
   if (m_impl->m_made_dirty) {
