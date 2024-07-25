@@ -1,6 +1,3 @@
-// Copyright 2023 VLDB Lab. (http://vldb.skku.ac.kr/)
-// Author: Jonghyeok Park
-// E-mail: jonghyeok.park@hufs.ac.kr
 #ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #include <sys/mman.h>
