@@ -109,13 +109,13 @@ typedef struct
   int port;
 } thread_arg;
 int thread_main(thread_arg*);
-// jhpark
+// anonymous
 int thread_long_tx(thread_arg*);
 
 void alarm_handler(int signum);
 void alarm_dummy();
 
-// jhpark:
+// anonymous:
 struct timeval long_start, long_end;
 int is_long_running;
 
@@ -132,7 +132,7 @@ int main( int argc, char *argv[] )
   int port= 3306;
   int fd, seed;
 
-  // jhpark
+  // anonymous
   is_long_running = 0;
 
   printf("***************************************\n");
@@ -417,7 +417,7 @@ int main( int argc, char *argv[] )
 	      atoi(argv[12 + arg_offset]), atoi(argv[13 + arg_offset]) );
   }
 
-  // (jhpark): add 
+  // (anonymous): add 
   fprintf(stderr, "current num_conn: %d, but we add +1 for long-running query\n",num_conn);
   num_conn = num_conn*2;
 
@@ -490,7 +490,7 @@ int main( int argc, char *argv[] )
   }
 #endif
 
-// (jhpark)
+// (anonymous)
 #ifdef LLT
   for( t_num=num_conn/2; t_num < num_conn/2+1; t_num++ ){
     thd_arg[t_num].port= port;
@@ -741,7 +741,7 @@ void alarm_dummy()
   }
 }
 
-// TOOD(jhpark): fix thread_args value
+// TOOD(anonymous): fix thread_args value
 int thread_long_tx(thread_arg * arg) {
 	int t_num= arg->number;
 	int port = arg->port;

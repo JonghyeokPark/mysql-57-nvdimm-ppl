@@ -1238,7 +1238,7 @@ row_undo_mod(
 
 	row_undo_mod_parse_undo_rec(node, dict_locked);
 #ifdef UNIV_NVDIMM_PPL
-  // (jhpark): ipl-undo
+  // (anonymous): ipl-undo
 	if (node->pcur.btr_cur.page_cur.block != NULL) {
 		if(recv_check_iplized(node->pcur.btr_cur.page_cur.block->page.id) != NORMAL) {
 		return(DB_SUCCESS);

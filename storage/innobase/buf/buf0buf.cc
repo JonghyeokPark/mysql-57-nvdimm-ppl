@@ -6385,12 +6385,12 @@ corrupt:
 			/* Pages must be uncompressed for crash recovery. */
 			ut_a(uncompressed);
 
-			// (jhpark): recovery
+			// (anonymous): recovery
 			//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
 			//	recv_ipl_apply((buf_block_t*)bpage);
 			//}
 
-			// (jhpark): in this case, if we apply the IPL log for IPLed page in this step,
+			// (anonymous): in this case, if we apply the IPL log for IPLed page in this step,
 			// we can not recover below scenario (i.e., we can not recvoer step 1 and 2 updates)
 			//	1. update page A (page A is nomral page)
 			//  2. update page A (page A is normal page)
@@ -6454,12 +6454,12 @@ corrupt:
 		buf_pool->n_pend_reads--;
 		buf_pool->stat.n_pages_read++;
 #ifdef UNIV_NVDIMM_PPL
-		// (jhpark): recovery
+		// (anonymous): recovery
 		//if (nvdimm_recv_running && recv_check_iplized(bpage->id) != NORMAL) {
 		//	recv_ipl_apply((buf_block_t*)bpage);
 		//}
 
-		// (jhpark): recovery
+		// (anonymous): recovery
 		if (!nvdimm_recv_running && get_flag(&(bpage->flags), PPLIZED)){
 			buf_pool_mutex_exit(buf_pool);
 			set_apply_info_and_log_apply((buf_block_t*) bpage);

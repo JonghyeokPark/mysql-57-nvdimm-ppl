@@ -844,7 +844,7 @@ trx_rollback_or_clean_recovered(
 			" completed";
 	}
 
-	// jhpark
+	// anonymous
 #ifdef UNIV_NVDIMM_PPL
 	gettimeofday(&end, NULL);
   fprintf(stderr, "undo_time: %f seconds\n",
@@ -886,7 +886,7 @@ DECLARE_THREAD(trx_rollback_or_clean_all_recovered)(
 	/* We count the number of threads in os_thread_exit(). A created
 	thread should always use that to exit and not use return() to exit. */
 
-	//(jhpark): end ipl recovery
+	//(anonymous): end ipl recovery
 #ifdef UNIV_NVDIMM_PPL
 	fprintf(stderr, "[INFO] IPL recovery is finished!\n");
 	nvdimm_recv_running = false;

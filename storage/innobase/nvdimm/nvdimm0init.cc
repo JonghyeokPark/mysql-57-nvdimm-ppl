@@ -1,6 +1,3 @@
-// Copyright 2022 VLDB Lab. (http://vldb.skku.ac.kr/)
-// Author: Jonghyeok Park
-// E-mail: akindo19@skku.edu
 #ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ipl.h"
 #include <sys/mman.h>
@@ -11,7 +8,7 @@
 #include <errno.h>
 #include <stddef.h>
 
-// (jhpark): ipl-undo
+// (anonymous): ipl-undo
 bool nvdimm_recv_ipl_undo = false;
 std::tr1::unordered_map<uint64_t, uint64_t > ipl_active_trx_ids;
 uint64_t ipl_skip_apply_cnt = 0;
@@ -76,7 +73,7 @@ bool make_static_and_dynamic_ipl_region
 
 unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool_size) {
  
-	// (jhpark): check mmaped file existence
+	// (anonymous): check mmaped file existence
 	if (access(path, F_OK) != 0) {
     nvdimm_fd = open(path, O_RDWR|O_CREAT, 0777);
     if (nvdimm_fd < 0) {
@@ -94,7 +91,7 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 		NVDIMM_INFO_PRINT("NVDIMM mmaped success!\n");
 
   } else {
-  	// TODO(jhpark): recovery process!   
+  	// TODO(anonymous): recovery process!   
 		if (srv_use_nvdimm_ppl_recovery) {\
 			ib::info() << "We use IPLzied recovery mode!";
 		}
@@ -112,7 +109,7 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
       return NULL;
     }
 
-    // TODO(jhpark): optimize
+    // TODO(anonymous): optimize
     nvdimm_recv_running = false;
     //recv_ipl_parse_log();
  

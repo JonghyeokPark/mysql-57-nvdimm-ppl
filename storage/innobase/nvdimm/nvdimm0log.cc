@@ -1,8 +1,4 @@
-// E-mail: akindo19@skku.edu
-// Author: Jonghyeok Park
-// E-mail: akindo19@skku.edu
 
-// TODO(jhpark): Implement Log applier
 // 1. REDO Log based log applier (Merge)
 // 2. Convert LSN-based Redo log -> Per-page Redo log
 // 3. Utilize Change buffer "merge" operation (`ibuf_merge_or_delete_for_page()`)
@@ -499,7 +495,7 @@ uint get_ppl_length_from_ppl_header(buf_page_t * bpage){
 }
 
 void set_page_lsn_in_ppl_header(unsigned char* first_ppl_block_ptr, lsn_t lsn){
-  // (jhpark): recovery
+  // (anonymous): recovery
 	if (nvdimm_recv_running) return;
 	mach_write_to_8(first_ppl_block_ptr + PPL_HDR_LSN, lsn);
 	flush_cache(first_ppl_block_ptr + PPL_HDR_LSN, 8);

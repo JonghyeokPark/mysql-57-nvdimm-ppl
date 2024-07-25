@@ -1467,7 +1467,7 @@ innobase_start_or_create_for_mysql(void)
 	size_t		dirnamelen;
 	unsigned	i = 0;
 
-	// (jhpark): recovery
+	// (anonymous): recovery
 	gettimeofday(&start, NULL);
 
 	/* Reset the start state. */
@@ -1827,7 +1827,7 @@ innobase_start_or_create_for_mysql(void)
 	}
 
 #ifdef UNIV_NVDIMM_PPL
-	// TODO(jhpark): add configuration variable
+	// TODO(anonymous): add configuration variable
 	// 앞으로 옮긴 이유는, Buf_pool instance에 대한 allocator를 할당하기 위해서는 먼저 nvdimm_info가 생성 필요
 	if (srv_use_nvdimm_ppl) {
 		char nvdimm_file_path[NVDIMM_MMAP_MAX_FILE_NAME_LENGTH];
@@ -1854,7 +1854,7 @@ innobase_start_or_create_for_mysql(void)
     		NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
 		}
 		
-		// (jhpark): recovery
+		// (anonymous): recovery
 		if (nvdimm_recv_running) {
 			recv_ipl_parse_log();
 			//recv_ipl_map_print();

@@ -35,7 +35,7 @@ extern struct timeval start, end;
   __FILE__, __LINE__, __func__, ##args)                \
 
 
-// (jhpark): persistence barrier
+// (anonymous): persistence barrier
 #define CACHE_LINE_SIZE 64
 #define ASMFLUSH(dst) __asm__ __volatile__ ("clflush %0" : : "m"(*(volatile char *)dst))
 
@@ -312,7 +312,7 @@ bool recv_check_normal_flag_using_page_id(page_id_t page_id);
 RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
 extern std::tr1::unordered_map<page_id_t, uint64_t > ipl_recv_map;
 
-// (jhpark): for IPL-undo
+// (anonymous): for IPL-undo
 extern std::tr1::unordered_map<uint64_t, uint64_t > ipl_active_trx_ids;
 extern bool nvdimm_recv_ipl_undo;
 extern uint64_t ipl_skip_apply_cnt;

@@ -116,7 +116,7 @@ RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id) {
 	return NORMAL;
 }
 
-// TODO(jhpark): integrate the `set_apply_info_and_log_apply` function
+// TODO(anonymous): integrate the `set_apply_info_and_log_apply` function
 // For dynamic address list, now we leave the list data structure in IPL map
 void recv_ipl_apply(buf_block_t* block) {
 	// step1. get the apply info
@@ -315,7 +315,7 @@ sipl_apply:
 		sipl_size = apply_info->ipl_log_length - PPL_BLOCK_HDR_SIZE;
 
 /*
-		// (jhpark): this is 2nd DIPL case, but we use only real_size
+		// (anonymous): this is 2nd DIPL case, but we use only real_size
 		if (real_size > (sipl_size + dipl_size)) {
 			// sipl + dipl + within the 2nd dipl area
 			sdipl_size = real_size;
@@ -336,7 +336,7 @@ sipl_apply:
 			return true;
 		}
 
-		// TODO(jhpark): do we still need this?
+		// TODO(anonymous): do we still need this?
 		fprintf(stderr,"SIPL org: %llu page_lsn: %llu (%lu:%lu)\n", cur_page_lsn, page_lsn
                   , apply_info->block->page.id.space()
                   , apply_info->block->page.id.page_no());
