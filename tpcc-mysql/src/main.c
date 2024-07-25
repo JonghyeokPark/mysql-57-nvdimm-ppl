@@ -786,8 +786,11 @@ int thread_long_tx(thread_arg * arg) {
     unsigned old_clock = clock();
 		rc = mysql_query(ctx[t_num], "start transaction;");
 		if (rc != 0) goto sql_error;
-		rc = mysql_query(ctx[t_num], "select * from stock where s_i_id > 1 AND s_i_id <2000 for update;"); // for update item 100k
-		if (rc != 0) goto sql_error;
+		if(cnt%2==0){
+			rc = mysql_query(ctx[t_num], "select * from stock where s_i_id > 1 AND s_i_id <2000 for update;"); // for update item 100k
+		}else{
+			rc = mysql_query(ctx[t_num], "select * from stock where s_i_id > 6000 AND s_i_id <9000 for update;"); // for update item 100k
+		}if (rc != 0) goto sql_error;
 		MYSQL_RES *r=mysql_store_result(ctx[t_num]);\
 		if(r!=NULL) mysql_free_result(r);\
 		mysql_next_result(ctx[t_num]);

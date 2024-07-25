@@ -90,6 +90,21 @@ row_vers_old_has_index_entry(
 	roll_ptr_t	roll_ptr,/*!< in: roll_ptr for the purge record */
 	trx_id_t	trx_id);/*!< in: transaction ID on the purging record */
 
+#ifdef UNIV_NVDIMM_PPL
+/* lbh */
+bool
+row_check_undo_page_buffer_miss(
+dict_index_t*	index,	/*!< in: the clustered index */
+const rec_t*	rec,	/*!< in: record in a clustered index; the
+				caller must have a latch on the page; this
+				latch locks the top of the stack of versions
+				of this records */
+ulint**		offsets/*!< in/out: offsets returned by
+				rec_get_offsets(rec, index) */
+);
+/* end */
+#endif
+
 /*****************************************************************//**
 Constructs the version of a clustered index record which a consistent
 read should see. We assume that the trx id stored in rec is such that

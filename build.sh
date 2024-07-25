@@ -23,10 +23,10 @@ echo $PASSWD | sudo -S rm -rf CMakeFiles/*
 
 # Build and install the source code
 if [ "$2" = "--origin" ]; then
-  # No caching
+  # vanilla
   BUILD_FLAGS=""
 elif [ "$2" = "--ppl" ]; then
-  # Enable Flash-Friendly Checkpoint
+  # Enable PPL
   BUILD_FLAGS="-DUNIV_NVDIMM_PPL"
 else
   BUILD_FLAGS="-DUNIV_NVDIMM_PPL"

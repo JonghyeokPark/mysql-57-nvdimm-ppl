@@ -393,9 +393,12 @@ extern ulong	srv_force_recovery;
 #ifndef DBUG_OFF
 extern ulong	srv_force_recovery_crash;
 #endif /* !DBUG_OFF */
-
+/* lbh */
+extern ulint	llt_space_id;
+/* end */
 extern ulint	srv_fast_shutdown;	/*!< If this is 1, do not do a
-					purge and index buffer merge.
+					
+					 purge and index buffer merge.
 					If this 2, do not even flush the
 					buffer pool to data files at the
 					shutdown: we effectively 'crash'
