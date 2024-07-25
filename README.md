@@ -260,7 +260,7 @@ For testing the other performances, experiment guidelines are below:
 # Plotting graph scripts
 > Note: Before plotting the graph, run the experiment first. Then, execute the script with the following parameter:
 
-After executing the scripts, check the **`plots`** directory to see the graph
+After executing the scripts, check the **`plots`** directory to see the graphs
 ## Prerequisite
 
 - gnuplot
