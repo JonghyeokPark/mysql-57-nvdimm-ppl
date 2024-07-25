@@ -255,7 +255,7 @@ $ ./tpcc_start -h 127.0.0.1 -S /tmp/mysql.sock -d tpcc -u root -p "yourPassword"
 For testing the other performances, experiment guidelines are below:
 * [Testing NV-PPL with the Linkbench benchmark](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/paper_version/how_to_test_with_linkbench.md)
 * [Testing NV-PPL recovery performance](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/paper_version/how_to_test_recovery.md)
-* Testing NV-PPL HTAP performance(?)
+* Testing NV-PPL HTAP performance
 
 # Plotting graph scripts
 > Note: Before plotting the graph, run the experiment first. Then, execute the script with the following parameter:
