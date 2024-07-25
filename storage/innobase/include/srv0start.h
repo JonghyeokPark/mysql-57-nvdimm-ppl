@@ -157,7 +157,7 @@ extern	ibool	srv_start_raw_disk_in_use;
 /** UNDO tablespaces starts with space id. */
 extern	ulint	srv_undo_space_id_start;
 
-/* lbh */
+/* mvcc-ppl */
 /** Check whether given space id is LLT tablespace id
 @param[in]	space_id	space id to check
 @return true if it is undo tablespace else false. */

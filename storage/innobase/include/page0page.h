@@ -200,7 +200,7 @@ page_set_max_trx_id(
 	mtr_t*		mtr);	/*!< in/out: mini-transaction, or NULL */
 #ifdef UNIV_NVDIMM_PPL
 /* mvcc */	
-/* lbh */
+/* mvcc-ppl */
 /*************************************************************//**
 Sets the max trx id field value in IPL page*/
 void
@@ -1038,7 +1038,7 @@ page_parse_delete_rec_list(
 @param[in]	is_rtree whether it is rtree page */
 
 #ifdef UNIV_NVDIMM_PPL
-/* lbh */
+/* mvcc-ppl */
 /**********************************************************//**
 Parses a log record of a record list end or start deletion.
 @return end of log record or NULL */

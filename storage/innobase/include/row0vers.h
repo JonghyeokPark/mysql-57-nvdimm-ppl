@@ -91,7 +91,7 @@ row_vers_old_has_index_entry(
 	trx_id_t	trx_id);/*!< in: transaction ID on the purging record */
 
 #ifdef UNIV_NVDIMM_PPL
-/* lbh */
+/* mvcc-ppl */
 bool
 row_check_undo_page_buffer_miss(
 dict_index_t*	index,	/*!< in: the clustered index */

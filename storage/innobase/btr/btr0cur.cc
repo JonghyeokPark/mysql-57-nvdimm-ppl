@@ -4018,7 +4018,7 @@ func_exit:
 		ibuf_update_free_bits_zip(block, mtr);
 	}
 
-	/* lbh */
+	/* mvcc-ppl */
 	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(block->frame)){ // check iplized or not
 		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
 		//fprintf(stderr, "update max_trx_id for update in place\n");
@@ -4302,7 +4302,7 @@ func_exit:
 		btr_cur_prefetch_siblings(block);
 	}
 
-	/* lbh */
+	/* mvcc-ppl */
 	if((dict_index_get_space(index) ==llt_space_id) && page_is_leaf(page))
 		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
 	/* end */
@@ -4783,7 +4783,7 @@ return_after_reservations:
 
 #ifdef UNIV_NVDIMM_PPL
 	set_normalize_flag((buf_page_t *)(btr_cur_get_block(cursor)), 1);
-	/* lbh */
+	/* mvcc-ppl */
 	if( page_is_leaf(page)&& (dict_index_get_space(cursor->index) ==llt_space_id))
 		ipl_page_set_max_trx_id(block->frame, buf_block_get_page_zip(block), trx_id, mtr);
 	/* end */

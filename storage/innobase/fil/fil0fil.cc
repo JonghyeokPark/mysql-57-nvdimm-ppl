@@ -908,7 +908,7 @@ add_size:
 	}
 
 	if(srv_use_ppl_mvcc){
-	/* lbh for TPC-C benchmark */
+	/* mvcc-ppl for TPC-C benchmark */
 
 	if (strstr(node->name, "stock.ibd") != NULL) {
 		fprintf(stderr, "setting %s to %lu\n", node->name, space->id);

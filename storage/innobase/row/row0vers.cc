@@ -49,7 +49,7 @@ Created 2/6/1997 Heikki Tuuri
 #include "lock0lock.h"
 #include "row0mysql.h"
 
-/* lbh */
+/* mvcc-ppl */
 #include "nvdimm-ipl.h"
 /* end */
 /** Check whether all non-virtual columns in a virtual index match that of in
@@ -1099,7 +1099,7 @@ row_vers_old_has_index_entry(
 	}
 }
 
-/* lbh */
+/* mvcc-ppl */
 bool
 row_check_undo_page_buffer_miss(
 dict_index_t*	index,	/*!< in: the clustered index */
@@ -1111,7 +1111,7 @@ ulint**		offsets/*!< in/out: offsets returned by
 				rec_get_offsets(rec, index) */
 ){
 
-		/* lbh check if undo page is cached inside buffer pool */
+		/* mvcc-ppl check if undo page is cached inside buffer pool */
 
 	if( dict_index_get_space(index)== llt_space_id){
 
@@ -1230,7 +1230,7 @@ int buffer_miss_cnt = 0;
 			break;
 		}
 
-		/*lbh */
+		/*mvcc-ppl */
 		bool undo_buffer_miss = row_check_undo_page_buffer_miss(index, prev_version, offsets);
 
 		if(undo_buffer_miss && prev_version != NULL){
@@ -1427,7 +1427,7 @@ committed_version_trx:
 	}
 }
 
-/* lbh */
+/* mvcc-ppl */
 dberr_t
 row_vers_build_prev_vers_with_nvdimm(
 /*===============================*/

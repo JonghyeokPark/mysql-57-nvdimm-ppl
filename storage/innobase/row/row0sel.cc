@@ -62,7 +62,7 @@ Created 12/19/1997 Heikki Tuuri
 #include "ut0new.h"
 #include "handler.h"
 #include "ha_innodb.h"
-/* lbh */
+/* mvcc-ppl */
 #include "srv0srv.h"
 /* end */
 /* Maximum number of rows to prefetch; MySQL interface has another parameter */
@@ -808,9 +808,9 @@ row_sel_build_prev_vers(
 
 	bool use_nvdimm_for_vers_build = false;
 
-	/* lbh : Choose among redo-based vs. undo-based */
+	/* mvcc-ppl : Choose among redo-based vs. undo-based */
 
-	/* lbh */
+	/* mvcc-ppl */
 	ulint version_chasing = 0;
 	uintmax_t	cur_time = ut_time_us(NULL);
 	uintmax_t	counter_time = ut_time_us(NULL);
@@ -3590,7 +3590,7 @@ row_sel_store_mysql_rec(
 Builds a previous version of a clustered index record for a consistent read
 */
 
-/* lbh */
+/* mvcc-ppl */
 /*********************************************************************//**
 Builds a previous version of a clustered index record for a consistent read
 @return DB_SUCCESS or error code */
@@ -3625,7 +3625,7 @@ row_sel_build_prev_vers_for_mysql(
 		prebuilt->old_vers_heap = mem_heap_create(200);
 	}
 
-	/* lbh */
+	/* mvcc-ppl */
 
 	bool use_nvdimm_for_vers_build = false;
 
@@ -3898,7 +3898,7 @@ row_sel_get_clust_rec_for_mysql(
 			    clust_rec, clust_index, *offsets,
 			    trx_get_read_view(trx))) {
 
-			/* lbh */
+			/* mvcc-ppl */
 			buf_block_t* block = btr_pcur_get_block(prebuilt->clust_pcur);
 			buf_page_t* bpage = &block->page;
 			page_t* page = block->frame;

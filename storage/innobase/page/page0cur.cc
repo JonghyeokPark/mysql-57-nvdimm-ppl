@@ -1317,7 +1317,7 @@ page_cur_parse_insert_rec(
 }
 
 #ifdef UNIV_NVDIMM_PPL
-/* lbh */
+/* mvcc-ppl */
 /***********************************************************//**
 Parses a log record of a record insert on a IPL page.
 @return end of log record or NULL */

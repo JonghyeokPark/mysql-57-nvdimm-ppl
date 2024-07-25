@@ -1186,7 +1186,7 @@ delete_all:
 }
 
 #ifdef UNIV_NVDIMM_PPL
-/* lbh */
+/* mvcc-ppl */
 /**********************************************************//**
 Parses a log record of a record list end or start deletion.
 @return end of log record or NULL */

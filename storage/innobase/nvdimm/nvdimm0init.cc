@@ -121,7 +121,7 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
       We call mync() instead of mfense()\n");
   /*Make NVDIMM structure*/
 
-   /* lbh */
+   /* mvcc-ppl */
   init_prebuilt_page_cache(prebuilt_page_list);
   /* end */
   
