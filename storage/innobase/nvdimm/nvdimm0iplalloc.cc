@@ -35,9 +35,11 @@ unsigned char * alloc_ppl_from_queue(buf_pool_t * buf_pool){
 	mutex_exit(&buf_pool->ppl_block_allocator_mutex);
 
 	// PPL Cleaner Buffer Pool Flush
-	if(!flush_thread_started && (buf_pool->ppl_block_allocator->size() < flush_thread_started_threshold)){
-		os_event_set(ppl_buf_flush_event);
-		flush_thread_started = true;
+	if(srv_use_ppl_cleaner){
+		if(!flush_thread_started && (buf_pool->ppl_block_allocator->size() < flush_thread_started_threshold)){
+			os_event_set(ppl_buf_flush_event);
+			flush_thread_started = true;
+		}
 	}
 
 	return ret_address;
