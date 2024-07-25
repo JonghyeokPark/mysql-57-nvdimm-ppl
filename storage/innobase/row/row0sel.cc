@@ -62,7 +62,9 @@ Created 12/19/1997 Heikki Tuuri
 #include "ut0new.h"
 #include "handler.h"
 #include "ha_innodb.h"
-
+/* lbh */
+#include "srv0srv.h"
+/* end */
 /* Maximum number of rows to prefetch; MySQL interface has another parameter */
 #define SEL_MAX_N_PREFETCH	16
 
@@ -742,6 +744,41 @@ sel_enqueue_prefetched_row(
 /*********************************************************************//**
 Builds a previous version of a clustered index record for a consistent read
 @return DB_SUCCESS or error code */
+/*
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
+dberr_t
+row_sel_build_prev_vers(
+/*====================*/
+
+//ReadView*	read_view,	/*!< in: read view */
+//	dict_index_t*	index,		/*!< in: plan node for table */
+//	rec_t*		rec,		/*!< in: record in a clustered index */
+//	ulint**		offsets,	/*!< in/out: offsets returned by
+//					rec_get_offsets(rec, plan->index) */
+//	mem_heap_t**	offset_heap,	/*!< in/out: memory heap from which
+//					the offsets are allocated */
+//	mem_heap_t**    old_vers_heap,  /*!< out: old version heap to use */
+//	rec_t**		old_vers,	/*!< out: old version, or NULL if the
+//					record does not exist in the view:
+//					i.e., it was freshly inserted
+//					afterwards */
+//	mtr_t*		mtr)		/*!< in: mtr */
+/*
+{
+	dberr_t	err;
+
+	if (*old_vers_heap) {
+		mem_heap_empty(*old_vers_heap);
+	} else {
+		*old_vers_heap = mem_heap_create(512);
+	}
+
+	err = row_vers_build_for_consistent_read(
+		rec, mtr, index, offsets, read_view, offset_heap,
+		*old_vers_heap, old_vers, NULL);
+	return(err);
+}
+*/
 static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_sel_build_prev_vers(
@@ -758,7 +795,8 @@ row_sel_build_prev_vers(
 					record does not exist in the view:
 					i.e., it was freshly inserted
 					afterwards */
-	mtr_t*		mtr)		/*!< in: mtr */
+	mtr_t*		mtr, 
+	buf_page_t* bpage)		/*!< in: mtr */
 {
 	dberr_t	err;
 
@@ -768,11 +806,74 @@ row_sel_build_prev_vers(
 		*old_vers_heap = mem_heap_create(512);
 	}
 
+	bool use_nvdimm_for_vers_build = false;
+
+	/* lbh : Choose among redo-based vs. undo-based */
+
+	/* lbh */
+	ulint version_chasing = 0;
+	uintmax_t	cur_time = ut_time_us(NULL);
+	uintmax_t	counter_time = ut_time_us(NULL);
+	/* end */
+
+	roll_ptr_t	roll_ptr;
+
+
+	// roll_ptr = row_get_rec_roll_ptr(rec, index, *offsets);
+
+	// if(trx_undo_roll_ptr_is_insert(roll_ptr)){
+	// 	*old_vers = NULL;
+	// 	counter_time = ut_time_us(NULL);
+	// 	fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu insert undo rec\n", (counter_time-cur_time), dict_index_get_space(index));
+	// 	return DB_SUCCESS;
+	// }
+
+
+	bool undo_buffer_miss = row_check_undo_page_buffer_miss(index, rec, offsets);
+
+	buf_block_t* block = buf_page_get_block(bpage);
+
+	if((dict_index_get_space(index) ==llt_space_id) && get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && page_get_max_trx_id(block->frame)!=0 ){
+		use_nvdimm_for_vers_build = true;
+	}
+
+	use_nvdimm_for_vers_build = false;
+	if(use_nvdimm_for_vers_build){
+
+		//redo-based version constructions
+	//	fprintf(stderr, "version build with redo bpage : %lu space_id: %lu page_no: %lu max_trx_id: %lu\n", 
+	//	bpage, bpage->id.space(), bpage->id.page_no(), page_get_max_trx_id(block->frame));
+
+		err = nvdimm_build_prev_vers_with_redo(
+			rec, mtr,index, offsets, read_view, offset_heap,
+			*old_vers_heap, old_vers, NULL, bpage);
+
+	}
+	if(err!=DB_SUCCESS || !use_nvdimm_for_vers_build){
+
+	// undo-based version construction
+	//fprintf(stderr, "version build with undo bpage : %lu space_id: %lu page_no: %lu leaf_page: %d iplized: %d normalized: %lu oldest_modification: %lu max_trx_id: %lu\n", 
+	//bpage, bpage->id.space(), bpage->id.page_no(), page_is_leaf(block->frame), 
+	//get_flag(bpage, IPLIZED), get_flag(bpage, NORMALIZE), bpage->oldest_modification, page_get_max_trx_id(block->frame));
+
 	err = row_vers_build_for_consistent_read(
 		rec, mtr, index, offsets, read_view, offset_heap,
 		*old_vers_heap, old_vers, NULL);
+
+	}
+
+	counter_time = ut_time_us(NULL);
+
+	if(use_nvdimm_for_vers_build){
+		fprintf(stderr, "Version build with redo version_build_time_(us): %lu space_id: %lu undo_buffer_miss: %lu\n", (counter_time-cur_time), dict_index_get_space(index), undo_buffer_miss);
+	}else{
+		fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu undo_buffer_miss: %lu\n", (counter_time-cur_time), dict_index_get_space(index), undo_buffer_miss);
+	}
+
 	return(err);
 }
+
+/************/
 
 /*********************************************************************//**
 Builds the last committed version of a clustered index record for a
@@ -994,11 +1095,14 @@ row_sel_get_clust_rec(
 
 		if (!lock_clust_rec_cons_read_sees(clust_rec, index, offsets,
 						   node->read_view)) {
+			buf_block_t* block = btr_pcur_get_block(&(plan->pcur));
+			buf_page_t* bpage = &block->page;
+			page_t* page = block->frame;
 
 			err = row_sel_build_prev_vers(
 				node->read_view, index, clust_rec,
 				&offsets, &heap, &plan->old_vers_heap,
-				&old_vers, mtr);
+				&old_vers, mtr, bpage);
 
 			if (err != DB_SUCCESS) {
 
@@ -1976,10 +2080,13 @@ skip_lock:
 			if (!lock_clust_rec_cons_read_sees(
 					rec, index, offsets, node->read_view)) {
 
+				buf_block_t* block = btr_pcur_get_block(&(plan->pcur));
+			buf_page_t* bpage = &block->page;
+			page_t* page = block->frame;
 				err = row_sel_build_prev_vers(
 					node->read_view, index, rec,
 					&offsets, &heap, &plan->old_vers_heap,
-					&old_vers, &mtr);
+					&old_vers, &mtr, bpage);
 
 				if (err != DB_SUCCESS) {
 
@@ -3481,6 +3588,11 @@ row_sel_store_mysql_rec(
 
 /*********************************************************************//**
 Builds a previous version of a clustered index record for a consistent read
+*/
+
+/* lbh */
+/*********************************************************************//**
+Builds a previous version of a clustered index record for a consistent read
 @return DB_SUCCESS or error code */
 static MY_ATTRIBUTE((warn_unused_result))
 dberr_t
@@ -3500,9 +3612,12 @@ row_sel_build_prev_vers_for_mysql(
 					afterwards */
 	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
 					column data */
-	mtr_t*		mtr)		/*!< in: mtr */
+	mtr_t*		mtr, /*!< in: mtr */
+	buf_page_t* bpage,
+	trx_t* trx) /* IPL page */
 {
 	dberr_t	err;
+	dberr_t	temp_err;
 
 	if (prebuilt->old_vers_heap) {
 		mem_heap_empty(prebuilt->old_vers_heap);
@@ -3510,10 +3625,76 @@ row_sel_build_prev_vers_for_mysql(
 		prebuilt->old_vers_heap = mem_heap_create(200);
 	}
 
+	/* lbh */
+
+	bool use_nvdimm_for_vers_build = false;
+
+	// add condition to compare last insert record trx_id?
+
+	ulint version_chasing = 0;
+	uintmax_t	cur_time = ut_time_us(NULL);
+	uintmax_t	counter_time = ut_time_us(NULL);
+
+
+	roll_ptr_t	roll_ptr;
+
+
+	roll_ptr = row_get_rec_roll_ptr(rec, clust_index, *offsets);
+
+	if(trx_undo_roll_ptr_is_insert(roll_ptr)){
+		*old_vers = NULL;
+		counter_time = ut_time_us(NULL);
+		fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu insert undo rec\n", (counter_time-cur_time), dict_index_get_space(clust_index));
+		return DB_SUCCESS;
+	}
+
+//	bool undo_buffer_miss = row_check_undo_page_buffer_miss(clust_index, rec, offsets);
+
+	buf_block_t* block = buf_page_get_block(bpage);
+
+	if((dict_index_get_space(clust_index) ==llt_space_id) && get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)
+	 && page_get_max_trx_id(block->frame)!=0 && page_is_leaf(block->frame) && bpage->io_fix==BUF_IO_NONE && buf_page_in_file(bpage)){ // undo_bufer_miss
+
+		use_nvdimm_for_vers_build = true;
+	}
+	//use_nvdimm_for_vers_build = false;
+
+	if(use_nvdimm_for_vers_build){
+
+		//redo-based version construction
+		// fprintf(stderr, "version build with redo bpage : %lu space_id: %lu page_no: %lu max_trx_id: %lu\n",
+		// bpage, bpage->id.space(), bpage->id.page_no(), page_get_max_trx_id(block->frame));
+
+		err = nvdimm_build_prev_vers_with_redo(
+			rec, mtr, clust_index, offsets, read_view, offset_heap,
+			prebuilt->old_vers_heap, old_vers, vrow, bpage);
+
+		temp_err = err;
+
+
+	}
+	if(err!=DB_SUCCESS || !use_nvdimm_for_vers_build){
+
+	// undo-based version construction
+	// fprintf(stderr, "version build with undo bpage : %lu space_id: %lu page_no: %lu leaf_page: %d iplized: %d normalized: %lu oldest_modification: %lu max_trx_id: %lu buffer miss: %d\n",
+	// bpage, bpage->id.space(), bpage->id.page_no(), page_is_leaf(block->frame),
+	// get_flag(bpage, IPLIZED), get_flag(bpage, NORMALIZE), bpage->oldest_modification, page_get_max_trx_id(block->frame), undo_buffer_miss);
+
+
 	err = row_vers_build_for_consistent_read(
 		rec, mtr, clust_index, offsets, read_view, offset_heap,
 		prebuilt->old_vers_heap, old_vers, vrow);
-	return(err);
+
+	}
+
+	counter_time = ut_time_us(NULL);
+
+	if(use_nvdimm_for_vers_build && temp_err==DB_SUCCESS){
+		fprintf(stderr, "Version build with redo version_build_time_(us): %lu space_id: %lu\n", (counter_time-cur_time), dict_index_get_space(clust_index));
+	}else{
+		fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu\n", (counter_time-cur_time), dict_index_get_space(clust_index));
+	}
+	return(DB_SUCCESS);
 }
 
 /*********************************************************************//**
@@ -3717,12 +3898,16 @@ row_sel_get_clust_rec_for_mysql(
 			    clust_rec, clust_index, *offsets,
 			    trx_get_read_view(trx))) {
 
+			/* lbh */
+			buf_block_t* block = btr_pcur_get_block(prebuilt->clust_pcur);
+			buf_page_t* bpage = &block->page;
+			page_t* page = block->frame;
 			/* The following call returns 'offsets' associated with
 			'old_vers' */
 			err = row_sel_build_prev_vers_for_mysql(
 				trx->read_view, clust_index, prebuilt,
 				clust_rec, offsets, offset_heap, &old_vers,
-				vrow, mtr);
+				vrow, mtr, bpage, trx);
 
 			if (err != DB_SUCCESS || old_vers == NULL) {
 
@@ -5676,13 +5861,18 @@ no_gap_lock:
 				    trx_get_read_view(trx))) {
 
 				rec_t*	old_vers;
+				
+				buf_block_t* block = btr_pcur_get_block(pcur);
+				page_t* page = block->frame;
+				buf_page_t* bpage = &block->page;
+				page_id_t page_id = bpage->id;
 				/* The following call returns 'offsets'
 				associated with 'old_vers' */
 				err = row_sel_build_prev_vers_for_mysql(
 					trx->read_view, clust_index,
 					prebuilt, rec, &offsets, &heap,
 					&old_vers, need_vrow ? &vrow : NULL,
-					&mtr);
+					&mtr, bpage, trx);
 
 				if (err != DB_SUCCESS) {
 

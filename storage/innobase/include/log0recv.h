@@ -359,7 +359,20 @@ struct recv_sys_t{
 	encryption_list_t*	/*!< Encryption information list */
 			encryption_list;
 };
-
+#ifdef UNIV_NVDIMM_PPL
+/* mvcc */
+trx_id_t
+nvdimm_recv_parse_or_apply_log_rec_body(
+	mlog_id_t	type,
+	byte*		ptr,
+	byte*		end_ptr,
+	ulint		space_id,
+	ulint		page_no,
+	mtr_t*		mtr,
+	page_t* page,
+	trx_id_t temp_trx_id);
+/* end */
+#endif
 /** The recovery system */
 extern recv_sys_t*	recv_sys;
 

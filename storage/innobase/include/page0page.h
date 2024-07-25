@@ -198,6 +198,20 @@ page_set_max_trx_id(
 	page_zip_des_t*	page_zip,/*!< in/out: compressed page, or NULL */
 	trx_id_t	trx_id,	/*!< in: transaction id */
 	mtr_t*		mtr);	/*!< in/out: mini-transaction, or NULL */
+#ifdef UNIV_NVDIMM_PPL
+/* mvcc */	
+/* lbh */
+/*************************************************************//**
+Sets the max trx id field value in IPL page*/
+void
+ipl_page_set_max_trx_id(
+/*================*/
+	page_t*	page,	/*!< in/out: page */
+	page_zip_des_t*	page_zip,/*!< in/out: compressed page, or NULL */
+	trx_id_t	trx_id,	/*!< in: transaction id */
+	mtr_t*		mtr);	/*!< in/out: mini-transaction, or NULL */
+/* end */
+#endif
 /*************************************************************//**
 Sets the max trx id field value if trx_id is bigger than the previous
 value. */
@@ -1022,6 +1036,27 @@ page_parse_delete_rec_list(
 @param[in,out]	block	buffer block, or NULL
 @param[in]	comp	nonzero=compact page format
 @param[in]	is_rtree whether it is rtree page */
+
+#ifdef UNIV_NVDIMM_PPL
+/* lbh */
+/**********************************************************//**
+Parses a log record of a record list end or start deletion.
+@return end of log record or NULL */
+byte*
+ipl_page_parse_delete_rec_list(
+/*=======================*/
+	mlog_id_t	type,	/*!< in: MLOG_LIST_END_DELETE,
+				MLOG_LIST_START_DELETE,
+				MLOG_COMP_LIST_END_DELETE or
+				MLOG_COMP_LIST_START_DELETE */
+	byte*		ptr,	/*!< in: buffer */
+	byte*		end_ptr,/*!< in: buffer end */
+	page_t* page,	/*!< in/out: buffer block or NULL */
+	dict_index_t*	index,	/*!< in: record descriptor */
+	mtr_t*		mtr);	/*!< in: mtr or NULL */
+
+/* end */	
+#endif
 void
 page_parse_create(
 	buf_block_t*	block,

@@ -21,6 +21,7 @@
 #include <sys/time.h>
 #include "buf0buf.h"
 #include "dyn0buf.h"
+#include "read0types.h"
 extern struct timeval start, end;
 
 #define NVDIMM_MMAP_FILE_NAME         			"nvdimm_mmap_file"
@@ -147,6 +148,7 @@ typedef struct NVDIMM_SYSTEM
 
   unsigned char * nc_redo_start_pointer;
   unsigned char * nvdimm_dwb_pointer;
+  byte* old_page;
 }nvdimm_system;
 
 typedef struct APPLY_LOG_INFO
@@ -170,9 +172,9 @@ bool check_write_hot_page(buf_page_t * bpage, lsn_t lsn);
 // extern std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map; // (page_id , ipl_static_address)
 extern nvdimm_system * nvdimm_info;
 
-/* IPL operations */
 
-//Page별 IPL allocation function
+/* PPL operations */
+//PPL allocation APIs per page
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage);
 bool alloc_nth_ppl_to_bpage(buf_page_t * bpage);
 void copy_log_to_memory(unsigned char *log, ulint len, mlog_id_t type, buf_page_t * bpage, trx_id_t trx_id);
@@ -180,7 +182,7 @@ void copy_log_to_ppl_directly(unsigned char *log, ulint len, mlog_id_t type, buf
 bool copy_memory_log_to_nvdimm(buf_page_t * bpage);
 bool copy_memory_log_to_ppl(unsigned char *log, ulint len, buf_page_t * bpage);
 
-//page ipl log apply 관련 함수들
+//page ipl log apply related APIs
 void set_apply_info_and_log_apply(buf_block_t* block);
 void all_ppl_apply_to_page(byte *start_ptr, ulint apply_log_size, buf_block_t *block, mtr_t *temp_mtr);
 byte* fetch_next_segment(byte* current_end, byte** new_end, byte** next_ppl);
@@ -189,7 +191,7 @@ void apply_log_record(mlog_id_t log_type, byte* log_data, uint length, trx_id_t 
 
 
 
-//page Normalize, lookup table 함수들
+//page Normalize, lookup table APIs
 void insert_page_ppl_info_in_hash_table(buf_page_t * bpage);
 void set_normalize_flag(buf_page_t * bpage, uint normalize_cause);
 void normalize_ppled_page(buf_page_t * bpage, page_id_t page_id);
@@ -200,7 +202,7 @@ bool check_return_ppl_region(buf_page_t * bpage);
 unsigned char * get_last_block_address_index(buf_page_t * bpage);
 
 
-//ipl metadata set, get 함수들
+//ipl metadata set, get APIs
 void set_ppl_length_in_ppl_header(buf_page_t * bpage, ulint length);
 uint get_ppl_length_from_ppl_header(buf_page_t * bpage);
 void set_page_lsn_in_ppl_header(unsigned char* first_ppl_block_ptr, lsn_t lsn);
@@ -208,7 +210,7 @@ lsn_t get_page_lsn_from_ppl_header(unsigned char* first_ppl_block_ptr);
 void set_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr);
 unsigned char get_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr);
 
-//page IPL flag 관련 함수
+//page IPL flag related APIs
 void set_flag(unsigned char * flags, ipl_flag flag);
 void unset_flag(unsigned char * flags, ipl_flag flag);
 bool get_flag(unsigned char * flags, ipl_flag flag);
@@ -218,14 +220,14 @@ void memcpy_to_nvdimm(void *dest, void *src, size_t size);
 // void memcpy_to_nvdimm(void *__restrict dst, const void * __restrict src, size_t n);
 void memset_to_nvdimm(void* dest, int value, size_t size);
 
-//PPL시킬 수 있는지 판별하는 함수
+//decide whether to PPPLize or not 
 bool can_page_be_pplized(const byte* ptr, const byte* end_ptr);
 
 struct mem_to_nvdimm_copy_t{
 
 	buf_page_t * bpage;
 
-	void init(buf_page_t * target_page){ // 추후 calloc 체킹 필요
+	void init(buf_page_t * target_page){ // needs to check calloc afterward
 		bpage = target_page;
 	}
 
@@ -271,6 +273,17 @@ recv_parse_or_apply_log_rec_body(
 	unsigned long page_no,
 	buf_block_t* block,
 	mtr_t* mtr);
+
+  trx_id_t
+nvdimm_recv_parse_or_apply_log_rec_body(
+	mlog_id_t	type,
+	byte*		ptr,
+	byte*		end_ptr,
+	ulint		space_id,
+	ulint		page_no,
+	mtr_t*		mtr,
+	page_t* page, 
+	trx_id_t prev_trx_id);
 #endif
 
 /* recovery */
@@ -312,10 +325,42 @@ bool recv_check_normal_flag_using_page_id(page_id_t page_id);
 RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
 extern std::tr1::unordered_map<page_id_t, uint64_t > ipl_recv_map;
 
-// (jhpark): for IPL-undo
+// for PPL-undo
 extern std::tr1::unordered_map<uint64_t, uint64_t > ipl_active_trx_ids;
 extern bool nvdimm_recv_ipl_undo;
 extern uint64_t ipl_skip_apply_cnt;
 extern uint64_t ipl_org_apply_cnt;
+
+// for PPL-mvcc
+extern std::vector<buf_page_t*> prebuilt_page_list;
+extern buf_page_t * prebuilt_page_start_ptr;
+//for mvcc prebuilt page upon ppl normalization
+void init_prebuilt_page_cache(std::vector<buf_page_t*> prebuilt_page_list);
+buf_page_t* add_prebuilt_page(buf_page_t* bpage);
+void remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*> prebuilt_page_list);
+buf_page_t* find_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>prebuilt_page_list);
+dberr_t
+nvdimm_build_prev_vers_with_redo(
+	const rec_t*	rec,		/*!< in: record in a clustered index */
+	mtr_t*		mtr,
+	dict_index_t*	clust_index,	/*!< in: clustered index */
+	ulint**		offsets,	/*!< in/out: offsets returned by
+					rec_get_offsets(rec, clust_index) */
+	ReadView*	read_view,	/*!< in: read view */
+	mem_heap_t**	offset_heap,	/*!< in/out: memory heap from which
+					the offsets are allocated */
+	mem_heap_t*	in_heap,/*!< in: memory heap from which the memory for
+				*old_vers is allocated; memory for possible
+				intermediate versions is allocated and freed
+				locally within the function */
+	rec_t**		old_vers,	/*!< out: old version, or NULL if the
+					record does not exist in the view:
+					i.e., it was freshly inserted
+					afterwards */
+	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
+					column data */
+	buf_page_t* bpage );
+
+/* end */
 
 #endif // end-of-header

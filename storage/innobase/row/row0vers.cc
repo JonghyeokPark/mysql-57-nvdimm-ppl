@@ -49,6 +49,9 @@ Created 2/6/1997 Heikki Tuuri
 #include "lock0lock.h"
 #include "row0mysql.h"
 
+/* lbh */
+#include "nvdimm-ipl.h"
+/* end */
 /** Check whether all non-virtual columns in a virtual index match that of in
 the cluster index
 @param[in]	index		the secondary index
@@ -1096,6 +1099,56 @@ row_vers_old_has_index_entry(
 	}
 }
 
+/* lbh */
+bool
+row_check_undo_page_buffer_miss(
+dict_index_t*	index,	/*!< in: the clustered index */
+const rec_t*	rec,	/*!< in: record in a clustered index; the
+				caller must have a latch on the page; this
+				latch locks the top of the stack of versions
+				of this records */
+ulint**		offsets/*!< in/out: offsets returned by
+				rec_get_offsets(rec, index) */
+){
+
+		/* lbh check if undo page is cached inside buffer pool */
+
+	if( dict_index_get_space(index)== llt_space_id){
+
+		ibool		is_insert;
+		ulint		page_no;
+		ulint		offset;
+		ulint		rseg_id;
+		roll_ptr_t	roll_ptr;
+
+		bool is_redo_rseg =
+		dict_table_is_temporary(index->table) ? false : true;
+
+		roll_ptr = row_get_rec_roll_ptr(rec, index, *offsets);
+
+		if(trx_undo_roll_ptr_is_insert(roll_ptr)){
+			return false;
+		}
+
+		trx_undo_decode_roll_ptr(roll_ptr, &is_insert, &rseg_id, &page_no,
+					&offset);
+
+		trx_rseg_t*	rseg = trx_rseg_get_on_id(rseg_id, is_redo_rseg);
+
+		buf_pool_t*	buf_pool = buf_pool_get(page_id_t(rseg->space, page_no));
+
+		buf_block_t* block = (buf_block_t*) buf_page_hash_get_low(buf_pool, page_id_t(rseg->space, page_no));
+
+		if(block== NULL ){
+			return true;
+	}else{
+		return false;
+	}
+	return false;
+	}
+}
+/* end */
+
 /*****************************************************************//**
 Constructs the version of a clustered index record which a consistent
 read should see. We assume that the trx id stored in rec is such that
@@ -1146,7 +1199,8 @@ row_vers_build_for_consistent_read(
 	ut_ad(!vrow || !(*vrow));
 
 	version = rec;
-
+int buffer_miss_cnt = 0;
+	int version_build_cnt = 0;
 	for (;;) {
 		mem_heap_t*	prev_heap = heap;
 
@@ -1175,6 +1229,14 @@ row_vers_build_for_consistent_read(
 			ut_ad(!vrow || !(*vrow));
 			break;
 		}
+
+		/*lbh */
+		bool undo_buffer_miss = row_check_undo_page_buffer_miss(index, prev_version, offsets);
+
+		if(undo_buffer_miss && prev_version != NULL){
+			buffer_miss_cnt++;
+		}
+		version_build_cnt++;
 
 		*offsets = rec_get_offsets(
 			prev_version, index, *offsets, ULINT_UNDEFINED,
@@ -1363,4 +1425,39 @@ committed_version_trx:
 	if (heap) {
 		mem_heap_free(heap);
 	}
+}
+
+/* lbh */
+dberr_t
+row_vers_build_prev_vers_with_nvdimm(
+/*===============================*/
+	const rec_t*	rec,	/*!< in: record in a clustered index; the
+				caller must have a latch on the page; this
+				latch locks the top of the stack of versions
+				of this records */
+	mtr_t*		mtr,	/*!< in: mtr holding the latch on rec */
+	dict_index_t*	index,	/*!< in: the clustered index */
+	ulint**		offsets,/*!< in/out: offsets returned by
+				rec_get_offsets(rec, index) */
+	ReadView*	view,	/*!< in: the consistent read view */
+	mem_heap_t**	offset_heap,/*!< in/out: memory heap from which
+				the offsets are allocated */
+	mem_heap_t*	in_heap,/*!< in: memory heap from which the memory for
+				*old_vers is allocated; memory for possible
+				intermediate versions is allocated and freed
+				locally within the function */
+	rec_t**		old_vers,/*!< out, own: old version, or NULL
+				if the history is missing or the record
+				does not exist in the view, that is,
+				it was freshly inserted afterwards */
+	const dtuple_t**vrow)	/*!< out: virtual row */
+{
+	const rec_t*	version;
+	rec_t*		prev_version;
+	trx_id_t	trx_id;
+	mem_heap_t*	heap		= NULL;
+	byte*		buf;
+	dberr_t		err;
+
+
 }
