@@ -259,6 +259,8 @@ For testing the other performances, experiment guidelines are below:
 
 # Plotting graph scripts
 > Note: Before plotting the graph, run the experiment first. Then, execute the script with the following parameter:
+
+After executing the scripts, check the **`plots`** directory to see the graph
 ## Prerequisite
 
 - gnuplot
@@ -280,6 +282,14 @@ $ python3 ./plots/plot_tpcc_tps_graph.py /tpcc-result-path
 
 ```bash
 $ python3 ./plots/plot_linkbench_ops_graph.py /linkbench-result-path
+```
+
+## Plotting recovery time graph
+
+- `logdir`: The absolute path to the MySQL log directory
+
+```bash
+$ python3 ./plots/plot_recovery_graph.py /logdir/mysql_error_nvdimm.log
 ```
 
 

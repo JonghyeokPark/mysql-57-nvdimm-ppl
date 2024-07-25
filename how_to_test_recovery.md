@@ -44,7 +44,7 @@ $ ./bld/bin/mysqld --defaults-file=my.cnf
 $ grep -E "scan_time|redo_time|undo_time" /path/to/logdir/mysql_error_nvdimm.log
 
 #Result
-scan_time: 57.899113 seconds
+scan_time: 57.071975 seconds
 redo_time: 27.989681 seconds
-undo_time: 0.152785 seconds
+undo_time: 0.131537 seconds
 ```
