@@ -617,6 +617,12 @@ buf_flush_note_modification(
 	ut_ad(block->page.newest_modification <= end_lsn);
 	block->page.newest_modification = end_lsn;
 
+#ifdef UNIV_NVDIMM_PPL
+	buf_page_t * bpage = (buf_page_t *)block;
+	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
+		set_page_lsn_and_length_in_ppl_header(bpage->first_ppl_block_ptr, end_lsn, bpage->ppl_length);
+	}
+#endif
 	/* Don't allow to set flush observer from non-null to null,
 	or from one observer to another. */
 	ut_ad(block->page.flush_observer == NULL
@@ -1163,7 +1169,6 @@ buf_flush_write_block_low(
 		}
 		if(copy_memory_log_to_nvdimm(bpage)){
 jump_to_io_complete:
-			set_page_lsn_in_ppl_header(bpage->first_ppl_block_ptr, bpage->newest_modification);
 			if(sync){
 				buf_page_io_complete(bpage, true);
 			}

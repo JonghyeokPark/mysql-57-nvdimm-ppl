@@ -865,9 +865,9 @@ row_sel_build_prev_vers(
 	counter_time = ut_time_us(NULL);
 
 	if(use_nvdimm_for_vers_build){
-		fprintf(stderr, "Version build with redo version_build_time_(us): %lu space_id: %lu undo_buffer_miss: %lu\n", (counter_time-cur_time), dict_index_get_space(index), undo_buffer_miss);
+		// fprintf(stderr, "Version build with redo version_build_time_(us): %lu space_id: %lu undo_buffer_miss: %lu\n", (counter_time-cur_time), dict_index_get_space(index), undo_buffer_miss);
 	}else{
-		fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu undo_buffer_miss: %lu\n", (counter_time-cur_time), dict_index_get_space(index), undo_buffer_miss);
+		// fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu undo_buffer_miss: %lu\n", (counter_time-cur_time), dict_index_get_space(index), undo_buffer_miss);
 	}
 
 	return(err);
@@ -3644,7 +3644,7 @@ row_sel_build_prev_vers_for_mysql(
 	if(trx_undo_roll_ptr_is_insert(roll_ptr)){
 		*old_vers = NULL;
 		counter_time = ut_time_us(NULL);
-		fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu insert undo rec\n", (counter_time-cur_time), dict_index_get_space(clust_index));
+		// fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu insert undo rec\n", (counter_time-cur_time), dict_index_get_space(clust_index));
 		return DB_SUCCESS;
 	}
 
@@ -3690,9 +3690,9 @@ row_sel_build_prev_vers_for_mysql(
 	counter_time = ut_time_us(NULL);
 
 	if(use_nvdimm_for_vers_build && temp_err==DB_SUCCESS){
-		fprintf(stderr, "Version build with redo version_build_time_(us): %lu space_id: %lu\n", (counter_time-cur_time), dict_index_get_space(clust_index));
+		// fprintf(stderr, "Version build with redo version_build_time_(us): %lu space_id: %lu\n", (counter_time-cur_time), dict_index_get_space(clust_index));
 	}else{
-		fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu\n", (counter_time-cur_time), dict_index_get_space(clust_index));
+		// fprintf(stderr, "Version build with undo version_build_time_(us): %lu space_id: %lu\n", (counter_time-cur_time), dict_index_get_space(clust_index));
 	}
 	return(DB_SUCCESS);
 }

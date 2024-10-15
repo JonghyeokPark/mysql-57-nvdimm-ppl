@@ -203,8 +203,9 @@ void set_ppl_length_in_ppl_header(buf_page_t * bpage, ulint length);
 uint get_ppl_length_from_ppl_header(buf_page_t * bpage);
 void set_page_lsn_in_ppl_header(unsigned char* first_ppl_block_ptr, lsn_t lsn);
 lsn_t get_page_lsn_from_ppl_header(unsigned char* first_ppl_block_ptr);
-void set_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr);
+void set_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr, unsigned char value);
 unsigned char get_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr);
+void set_page_lsn_and_length_in_ppl_header(unsigned char* first_ppl_block_ptr, lsn_t lsn, ulint length);
 
 //page IPL flag related APIs
 void set_flag(unsigned char * flags, ipl_flag flag);

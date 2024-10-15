@@ -5899,7 +5899,7 @@ fil_aio_wait(
 			//만약 DIPL Page라면 여기서 Normalize flag 처리
 			buf_page_t * bpage = static_cast<buf_page_t*>(message);
 			if((buf_page_get_io_fix(bpage) == BUF_IO_WRITE) && (bpage->first_ppl_block_ptr!= NULL) && get_flag(&(bpage->flags), PPLIZED)){
-				set_normalize_flag_in_ppl_header(bpage->first_ppl_block_ptr);
+				set_normalize_flag_in_ppl_header(bpage->first_ppl_block_ptr, 2);
 			}
 #endif			
 			buf_page_io_complete(static_cast<buf_page_t*>(message));

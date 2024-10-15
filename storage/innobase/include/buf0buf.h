@@ -1760,6 +1760,7 @@ public:
 	unsigned char flags; // first bit: iplized_flag, second bit: normalize_flag, third bit: dirtifed_flag
 	uint normalize_cause;
 	uint block_used;
+	uint ppl_length;
 	trx_id_t trx_id;
 #endif
 };

@@ -105,8 +105,7 @@ void copy_log_to_ppl_directly(unsigned char *log, ulint len, mlog_id_t type, buf
 	//Step2. Write PPL Payload
 	if(!copy_memory_log_to_ppl(write_ipl_log_buffer, APPLY_LOG_HDR_SIZE, bpage)) return;
 	if(!copy_memory_log_to_ppl(log, log_body_size, bpage))	return;
-
-	set_ppl_length_in_ppl_header(bpage, len + get_ppl_length_from_ppl_header(bpage));
+	bpage->ppl_length += len;
 	set_flag(&(bpage->flags), DIRECTLY_WRITE);
 }
 
@@ -117,7 +116,8 @@ bool copy_memory_log_to_nvdimm(buf_page_t * bpage){
 	if(!block->in_memory_ppl_buf.for_each_block(ppl_copy)){ 
 		return false;
 	}
-	set_ppl_length_in_ppl_header(bpage, block->in_memory_ppl_buf.size());
+	bpage->ppl_length += block->in_memory_ppl_buf.size();
+	set_page_lsn_and_length_in_ppl_header(bpage->first_ppl_block_ptr, bpage->newest_modification, block->in_memory_ppl_buf.size());
 	insert_page_ppl_info_in_hash_table(bpage);
 	return true;
 }
@@ -289,6 +289,9 @@ void set_normalize_flag(buf_page_t * bpage, uint normalize_cause){
 		bpage->normalize_cause = normalize_cause;
 	}
 	set_flag(&(bpage->flags), NORMALIZE);
+	if(get_flag(&(bpage->flags), PPLIZED)){
+		set_normalize_flag_in_ppl_header(bpage->first_ppl_block_ptr, 1);
+	}
 }
 
 UNIV_INLINE
@@ -362,6 +365,7 @@ void normalize_ppled_page(buf_page_t * bpage, page_id_t page_id){
 	bpage->first_ppl_block_ptr = NULL;
 	bpage->ppl_write_pointer = NULL;
 	bpage->block_used = 0;
+	bpage->ppl_length = 0;
 	bpage->trx_id = 0;
 	bpage->normalize_cause = 0;
 	if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
@@ -380,6 +384,7 @@ void set_for_ppled_page(buf_page_t* bpage){
 	bpage->first_ppl_block_ptr = NULL;
 	bpage->ppl_write_pointer = NULL;
 	bpage->block_used = 0;
+	bpage->ppl_length = 0;
 	if(!get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
 		bpage->flags = 0;
 	}
@@ -393,6 +398,7 @@ void set_for_ppled_page(buf_page_t* bpage){
 		set_flag(&(bpage->flags), PPLIZED);
 		set_flag(&(bpage->flags), IN_LOOK_UP);
 		bpage->first_ppl_block_ptr = it->second;
+		bpage->ppl_length = get_ppl_length_from_ppl_header(bpage);
 	}
 	
 }
@@ -459,6 +465,7 @@ bool check_return_ppl_region(buf_page_t * bpage){
 		bpage->trx_id = 0;
 		bpage->block_used = 0;
 		bpage->normalize_cause = 0;
+		bpage->ppl_length = 0;
 		if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
 			bpage->flags = 32;
 		}
@@ -503,9 +510,9 @@ lsn_t get_page_lsn_from_ppl_header(unsigned char* first_ppl_block_ptr){
 	return mach_read_from_8(first_ppl_block_ptr + PPL_HDR_LSN);
 }
 
-void set_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr){
-	mach_write_to_1(first_ppl_block_ptr + PPL_HDR_NORMALIZE_MARKER, 1);
-	flush_cache(first_ppl_block_ptr + PPL_HDR_NORMALIZE_MARKER, 1);
+void set_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr, unsigned char value){
+	mach_write_to_1(first_ppl_block_ptr + PPL_HDR_NORMALIZE_MARKER, value);
+	flush_cache(first_ppl_block_ptr + PPL_HDR_NORMALIZE_MARKER, value);
 }
 
 unsigned char get_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr){
@@ -514,6 +521,17 @@ unsigned char get_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_p
 
 unsigned char get_first_block_flag_in_ppl_header(unsigned char * first_ppl_block_ptr){
 	return mach_read_from_1(first_ppl_block_ptr + PPL_HDR_FIRST_MARKER);
+}
+
+void set_page_lsn_and_length_in_ppl_header(unsigned char* first_ppl_block_ptr, lsn_t lsn, ulint length){
+  // (anonymous): recovery
+	if (nvdimm_recv_running) return;
+	// Set LSN and Length simultaneously making one block
+	unsigned char write_ipl_log_buffer [12] = {0, };
+	mach_write_to_4(write_ipl_log_buffer, length);
+	mach_write_to_8(write_ipl_log_buffer + 4, lsn);
+	memcpy_to_nvdimm(first_ppl_block_ptr + PPL_HDR_LEN, write_ipl_log_buffer, 12);
+	flush_cache(first_ppl_block_ptr + PPL_HDR_LEN, 12);
 }
 
 void set_flag(unsigned char * flags, ipl_flag flag_type){
