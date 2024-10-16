@@ -1853,12 +1853,6 @@ innobase_start_or_create_for_mysql(void)
 				srv_nvdimm_max_ppl_size)){
     		NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
 		}
-		
-		// (anonymous): recovery
-		if (nvdimm_recv_running) {
-			recv_ipl_parse_log();
-			//recv_ipl_map_print();
-		}
 	}
 #endif
 	
@@ -1879,6 +1873,16 @@ innobase_start_or_create_for_mysql(void)
 		<< ", chunk size = " << chunk_size << chunk_unit;
 
 	err = buf_pool_init(srv_buf_pool_size, srv_buf_pool_instances);
+
+#ifdef UNIV_NVDIMM_PPL
+	if (srv_use_nvdimm_ppl) {
+		// Analysis after the buffer pool is initialized
+		if (nvdimm_recv_running) {
+			recv_ipl_parse_log();
+			//recv_ipl_map_print();
+		}
+	}
+#endif
 
 	if (err != DB_SUCCESS) {
 		ib::error() << "Cannot allocate memory for the buffer pool";

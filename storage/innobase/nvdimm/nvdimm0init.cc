@@ -110,8 +110,8 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
     }
 
     // TODO(anonymous): optimize
-    nvdimm_recv_running = false;
-    //recv_ipl_parse_log();
+	if(srv_use_nvdimm_ppl_recovery)	nvdimm_recv_running = true;
+    // recv_ipl_parse_log();
  
 	}
 	// Force to set NVIMMM

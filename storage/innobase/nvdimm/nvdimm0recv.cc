@@ -17,56 +17,47 @@ void recv_ipl_parse_log() {
 
 	fprintf(stderr, "[DEBUG] printf_nvidmm_info: static_page_size: %lu\n"
 			 , nvdimm_info->each_ppl_size);	
-
-	byte first_ppl_marker = 0;
-	uint64_t space_no = -1, page_no = -1, dynamic_addr= -1;
 	nvdimm_recv_ptr = nvdimm_ptr;
+	byte first_ppl_marker, normalize_marker;
+	uint space_no, page_no, dynamic_index;
+	ulint ppl_length;
+	lsn_t page_lsn;
 
 	// step1. Read the IPL region from the begining of NVDIMM
 	byte hdr[PPL_BLOCK_HDR_SIZE];
 	for (uint64_t i = 0; i < nvdimm_info->overall_ppl_size; i+= nvdimm_info->each_ppl_size) {
 		// step2. Get the header information
-		memcpy(hdr, nvdimm_recv_ptr + i, PPL_HDR_FIRST_MARKER);
-		first_ppl_marker = mach_read_from_1(hdr + PPL_HDR_FIRST_MARKER);
-		if(!first_ppl_marker){
-			continue;
-		}
-		space_no = mach_read_from_4(hdr + IPL_HDR_SPACE);
-		page_no = mach_read_from_4(hdr + IPL_HDR_PAGE);
-	
-		// skip deleted IPL log
-		// SIPL > DIPL > SDIPL 작성된 IPL 로그가 있는 page가 normalize 된 경우, 
-		// SDIPL > DIPL > SIPL 순으로, 삭제되기 때문에 normalize가 되어도 SDIPL이 있을 수 있다.
-		// 따라서, normalize flag를 확인해서 IPLed 페이지 해제함.
-    /*
-		if(get_flag(nvdimm_recv_ptr + i + IPL_HDR_FLAG, NORMALIZE)) {
-			fprintf(stderr, "(%u,%u) is ipled but become normailze at crash\n"
-							, space_no, page_no);
-			continue;
-		}
-    */
+		first_ppl_marker = mach_read_from_1(nvdimm_recv_ptr + i + PPL_HDR_FIRST_MARKER);
+		normalize_marker = mach_read_from_1(nvdimm_recv_ptr + i + PPL_HDR_NORMALIZE_MARKER);
+		space_no = mach_read_from_4(nvdimm_recv_ptr + i + IPL_HDR_SPACE);
+		page_no = mach_read_from_4(nvdimm_recv_ptr + i + IPL_HDR_PAGE);
+		dynamic_index = mach_read_from_4(nvdimm_recv_ptr + i + PPL_HDR_DYNAMIC_INDEX);
+		ppl_length = mach_read_from_4(nvdimm_recv_ptr + i + PPL_HDR_LEN);
+		page_lsn = get_page_lsn_from_ppl_header(nvdimm_recv_ptr + i + PPL_HDR_LSN);
 
-		// PPL Page 출력해보기
-		// uint64_t space, page_no, ppl_length, page_lsn;
-		// unsigned char * dynamic_pointer, * second_dynamic_pointer;
-		// dynamic_pointer = NULL;
-		// second_dynamic_pointer = NULL;
-		// space = mach_read_from_4(hdr);
-		// page_no = mach_read_from_4(hdr + PAGE_NO_OFFSET);
-		// page_lsn = get_page_lsn_from_ppl_header(hdr);
-		// dynamic_pointer = get_addr_from_ppl_index(nvdimm_info->dynamic_start_pointer, 
-		// 											mach_read_from_4(hdr + DYNAMIC_ADDRESS_OFFSET), 
-		// 											nvdimm_info->dynamic_ipl_per_page_size);
-		// if(dynamic_pointer != NULL) {
-		// 	second_dynamic_pointer = get_addr_from_ppl_index(nvdimm_info->second_dynamic_start_pointer, 
-		// 											mach_read_from_4(dynamic_pointer), 
-		// 											nvdimm_info->second_dynamic_ipl_per_page_size);
-		// }
-		// ppl_length = mach_read_from_4(hdr+PPL_HDR_LEN);
-		// fprintf(stderr,"PPL_INFO,%lu,%lu,%d,%d,%zu\n", space, ppl_length, (dynamic_pointer != NULL), (second_dynamic_pointer != NULL), page_lsn);
-
-// 
-		ipl_recv_map[page_id_t(space_no, page_no)] = i;
+		if(first_ppl_marker == 1) {
+			// fprintf(stderr, "[DEBUG] PPL region:%u %u %u %u %lu %zu\n"
+									// , first_ppl_marker, normalize_marker
+									// , space_no, page_no, ppl_length, page_lsn);
+			if(normalize_marker == 1){
+				// These pages are normalized pages but not flushed, these pages must be applied redo log in WAL file after applying PPLs
+				// fprintf(stderr, "Normalize_page\n");
+			}
+			else if (normalize_marker == 2) {
+				// These pages are normalized pages and flushed, just skip redo for these pages
+				// fprintf(stderr, "Flushing page\n");
+			}
+			else{
+				page_id_t page_id = page_id_t(space_no, page_no);
+				std::pair <page_id_t, unsigned char *> insert_data = std::make_pair(page_id, nvdimm_recv_ptr + i);
+				buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
+				rw_lock_x_lock(&buf_pool->lookup_table_lock);
+				buf_pool->ppl_look_up_table->insert(insert_data);
+				rw_lock_x_unlock(&buf_pool->lookup_table_lock);
+				ipl_recv_map[page_id_t(space_no, page_no)] = i;
+			}
+		}
+		
 	}
 }
 
