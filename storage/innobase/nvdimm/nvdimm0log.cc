@@ -288,10 +288,10 @@ void set_normalize_flag(buf_page_t * bpage, uint normalize_cause){
 	if(bpage->normalize_cause == 0){
 		bpage->normalize_cause = normalize_cause;
 	}
-	set_flag(&(bpage->flags), NORMALIZE);
-	if(get_flag(&(bpage->flags), PPLIZED)){
+	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
 		set_normalize_flag_in_ppl_header(bpage->first_ppl_block_ptr, 1);
 	}
+	set_flag(&(bpage->flags), NORMALIZE);
 }
 
 UNIV_INLINE
@@ -400,7 +400,6 @@ void set_for_ppled_page(buf_page_t* bpage){
 		bpage->first_ppl_block_ptr = it->second;
 		bpage->ppl_length = get_ppl_length_from_ppl_header(bpage);
 	}
-	
 }
 
 //Dynamic 영역을 가지고 있는 checkpoint page인지 확인하기.

@@ -44,18 +44,20 @@ void recv_ipl_parse_log() {
 				// fprintf(stderr, "Normalize_page\n");
 			}
 			else if (normalize_marker == 2) {
-				// These pages are normalized pages and flushed, just skip redo for these pages
+				// These pages areFlushed but not returned PPL, just skip redo for these pages
 				// fprintf(stderr, "Flushing page\n");
 			}
 			else{
-				page_id_t page_id = page_id_t(space_no, page_no);
-				std::pair <page_id_t, unsigned char *> insert_data = std::make_pair(page_id, nvdimm_recv_ptr + i);
-				buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
-				rw_lock_x_lock(&buf_pool->lookup_table_lock);
-				buf_pool->ppl_look_up_table->insert(insert_data);
-				rw_lock_x_unlock(&buf_pool->lookup_table_lock);
-				ipl_recv_map[page_id_t(space_no, page_no)] = i;
+				// fprintf(stderr, "Normal PPL page\n");
 			}
+			page_id_t page_id = page_id_t(space_no, page_no);
+			std::pair <page_id_t, unsigned char *> insert_data = std::make_pair(page_id, nvdimm_recv_ptr + i);
+			buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
+			rw_lock_x_lock(&buf_pool->lookup_table_lock);
+			buf_pool->ppl_look_up_table->insert(insert_data);
+			rw_lock_x_unlock(&buf_pool->lookup_table_lock);
+			ipl_recv_map[page_id_t(space_no, page_no)] = i;
+
 		}
 		
 	}
@@ -73,35 +75,33 @@ void recv_ipl_map_print() {
 	}
 }
 
+
+
 RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id) {
-  
 	// length로 dipl있는지 확인.
-	ulint real_size, ipl_index;
 	std::tr1::unordered_map<page_id_t, uint64_t >::iterator recv_iter;
 	recv_iter = ipl_recv_map.find(page_id);
 	if (recv_iter != ipl_recv_map.end()) {
-		uint64_t addr = recv_iter->second;
-		real_size = recv_ipl_get_len(nvdimm_recv_ptr + addr);
-		ipl_index = mach_read_from_4(nvdimm_recv_ptr + addr 
-																				+ PPL_HDR_DYNAMIC_INDEX);
-
-		unsigned char* dynamic_start_pointer = get_addr_from_ppl_index(
-										nvdimm_info->dynamic_start_pointer
-										, ipl_index
-										, nvdimm_info->dynamic_ipl_per_page_size);
-
-		unsigned char* second_dynamic_start_pointer = get_addr_from_ppl_index(
-										nvdimm_info->second_dynamic_start_pointer
-										, ipl_index
-										, nvdimm_info->second_dynamic_ipl_per_page_size);
-
-
-		
-		if (second_dynamic_start_pointer != NULL) return SDIPL;
-		else if (second_dynamic_start_pointer != NULL) return DIPL;
-		else return SIPL;
+		return PPL;
 	}
 	return NORMAL;
+}
+
+PPL_RECV_TYPE recv_check_ppl_recv_type(page_id_t page_id) {
+	// length로 dipl있는지 확인.
+	std::tr1::unordered_map<page_id_t, uint64_t >::iterator recv_iter;
+	recv_iter = ipl_recv_map.find(page_id);
+	if (recv_iter != ipl_recv_map.end()) {
+		byte normalize_marker = get_normalize_flag_in_ppl_header(nvdimm_recv_ptr + recv_iter->second + PPL_HDR_NORMALIZE_MARKER);
+		if(normalize_marker == 0) {
+			return SKIP_RECV;
+		} else if (normalize_marker == 1) {
+			return PPL_WAR_RECV;
+		} else {
+			return SKIP_RECV;
+		}
+	}
+	return NORMAL_RECV;
 }
 
 // TODO(anonymous): integrate the `set_apply_info_and_log_apply` function

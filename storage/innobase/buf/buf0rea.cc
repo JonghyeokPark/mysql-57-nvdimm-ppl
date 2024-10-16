@@ -882,6 +882,11 @@ buf_read_recv_pages(
 	for (i = 0; i < n_stored; i++) {
 		buf_pool_t*		buf_pool;
 		const page_id_t	cur_page_id(space_id, page_nos[i]);
+#ifdef UNIV_NVDIMM_PPL				
+		if(recv_check_iplized(cur_page_id) != NORMAL && recv_check_ppl_recv_type(cur_page_id) == SKIP_RECV){
+			continue;
+		}
+#endif	
 
 		count = 0;
 
