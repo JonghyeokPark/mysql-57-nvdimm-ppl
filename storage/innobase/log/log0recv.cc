@@ -2698,9 +2698,6 @@ recv_recover_page_func(
 		case 1:
 			recv_type = PPL_WAR_RECV;
 			break;
-		case 2:
-			recv_type = SKIP_RECV;
-			break;
 		default:
 			break;
 		}
@@ -2713,10 +2710,15 @@ recv_recover_page_func(
 	if (recv_type == PPL_WAR_RECV) {
 		lsn_t last_update_lsn = get_page_lsn_from_ppl_header(bpage->first_ppl_block_ptr);
 		lsn_t store_lsn = mach_read_from_8(block->frame + FIL_PAGE_LSN);
-		set_apply_info_and_log_apply(block);
-		mach_write_to_8(block->frame + FIL_PAGE_LSN, last_update_lsn);
-		mach_write_to_8(block->frame + UNIV_PAGE_SIZE - FIL_PAGE_END_LSN_OLD_CHKSUM, last_update_lsn);
-		set_normalize_flag(bpage, 5);
+		if(last_update_lsn < store_lsn){
+			recv_type = SKIP_RECV;
+		}
+		else{
+			set_apply_info_and_log_apply(block);
+			mach_write_to_8(block->frame + FIL_PAGE_LSN, last_update_lsn);
+			mach_write_to_8(block->frame + UNIV_PAGE_SIZE - FIL_PAGE_END_LSN_OLD_CHKSUM, last_update_lsn);
+			set_normalize_flag(bpage, 5);
+		}
 	}
 #endif
 

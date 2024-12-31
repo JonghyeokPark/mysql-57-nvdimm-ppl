@@ -42,8 +42,7 @@ void recv_ipl_parse_log() {
 			if(normalize_marker == 1){
 				// These pages are normalized pages but not flushed, these pages must be applied redo log in WAL file after applying PPLs
 				// fprintf(stderr, "Normalize_page\n");
-			}
-			else if (normalize_marker == 2) {
+
 				// These pages areFlushed but not returned PPL, just skip redo for these pages
 				// fprintf(stderr, "Flushing page\n");
 			}
