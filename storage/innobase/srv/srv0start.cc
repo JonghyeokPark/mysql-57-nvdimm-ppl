@@ -1966,7 +1966,7 @@ innobase_start_or_create_for_mysql(void)
 #ifdef UNIV_NVDIMM_PPL
 	// PPL Cleaner Buffer Pool Flush
 	if(srv_use_ppl_cleaner){
-		uint ppl_page_cleaners = 4;
+		uint ppl_page_cleaners = 8;
 		os_thread_create(ppl_buf_flush_page_cleaner_coordinator,
 				NULL, NULL);
 		for (i = 0; i < ppl_page_cleaners; ++i) {

@@ -319,7 +319,7 @@ check_normalize_cause(buf_page_t * bpage){
 				fprintf(stderr, "Normalize_cause,%f,Cleaning\n",(double)(time(NULL) - my_start));
 				break;
 			case 6:
-				// fprintf(stderr, "Normalize_cause,%f,LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
+				fprintf(stderr, "Normalize_cause,%f,LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
 				break;
 			default:
 				break;
@@ -347,7 +347,7 @@ check_normalize_cause(buf_page_t * bpage){
 				fprintf(stderr, "Normalize_cause,%f,Direct_Cleaning\n",(double)(time(NULL) - my_start));
 				break;
 			case 6:
-				// fprintf(stderr, "Normalize_cause,%f,Direct_LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
+				fprintf(stderr, "Normalize_cause,%f,Direct_LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
 				break;
 			default:
 				break;
@@ -405,11 +405,16 @@ void set_for_ppled_page(buf_page_t* bpage){
 //Dynamic 영역을 가지고 있는 checkpoint page인지 확인하기.
 bool check_can_be_skip(buf_page_t *bpage) {
     // 플래그 검사 및 빠른 반환 조건
+	buf_pool_t * buf_pool = normal_buf_pool_get(bpage->id);
     if (get_flag(&(bpage->flags), NORMALIZE)) {
         return false;
     }
 
     if (get_flag(&(bpage->flags), DIRECTLY_WRITE)) {
+		if(buf_pool->is_eager_normalize && get_ppl_length_from_ppl_header(bpage) > fourth_block_start_size){
+			set_normalize_flag(bpage, 6);
+			return false;
+		}
         return true;
     }
 

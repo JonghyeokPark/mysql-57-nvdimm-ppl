@@ -161,6 +161,11 @@ typedef struct APPLY_LOG_INFO
 extern bool flush_thread_started;
 extern ulint flush_thread_started_threshold;
 
+//Eager Normalization
+extern ulint eager_normalize_started_threshold;
+extern ulint eager_normalize_finished_threshold;
+extern ulint fourth_block_start_size;
+
 
 bool check_write_hot_page(buf_page_t * bpage, lsn_t lsn);
 //PPL Lack

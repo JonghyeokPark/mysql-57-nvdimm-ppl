@@ -35,10 +35,23 @@ unsigned char * alloc_ppl_from_queue(buf_pool_t * buf_pool){
 	mutex_exit(&buf_pool->ppl_block_allocator_mutex);
 
 	// PPL Cleaner Buffer Pool Flush
-	if(srv_use_ppl_cleaner){
-		if(!flush_thread_started && (buf_pool->ppl_block_allocator->size() < flush_thread_started_threshold)){
-			os_event_set(ppl_buf_flush_event);
-			flush_thread_started = true;
+	// if(srv_use_ppl_cleaner){
+	// 	if(!flush_thread_started){
+	// 		os_event_set(ppl_buf_flush_event);
+	// 		flush_thread_started = true;
+	// 	}
+	// }
+
+	// Eager Normalization
+	if(buf_pool->is_eager_normalize){
+		if(buf_pool->ppl_block_allocator->size() > eager_normalize_finished_threshold){
+			buf_pool->is_eager_normalize = false;
+		}
+	}
+	else{
+		if (buf_pool->ppl_block_allocator->size() <= eager_normalize_started_threshold){
+			fprintf(stderr, "Eager_start,%f,%lu\n", (double)(time(NULL) - my_start),buf_pool->instance_no);
+			buf_pool->is_eager_normalize = true;
 		}
 	}
 
@@ -64,6 +77,11 @@ void free_ppl_and_push_queue(buf_pool_t * buf_pool, unsigned char * addr){
 		buf_pool->ppl_block_allocator->push(get_ppl_index_from_addr(nvdimm_info->ppl_start_pointer, addr, nvdimm_info->each_ppl_size));
 		mutex_exit(&buf_pool->ppl_block_allocator_mutex);
 		addr = next_addr;
+	}
+
+	// Eager Normalization
+	if(buf_pool->is_eager_normalize && (buf_pool->ppl_block_allocator->size() > eager_normalize_finished_threshold)){
+		buf_pool->is_eager_normalize = false;
 	}
 	
 	// fprintf(stderr, "free static address : %p\n", addr);

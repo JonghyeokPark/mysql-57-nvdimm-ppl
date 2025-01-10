@@ -30,6 +30,11 @@ time_t my_start = 0;
 bool flush_thread_started = false;
 ulint flush_thread_started_threshold = 0;
 
+//Eager Normalization
+ulint eager_normalize_started_threshold = 0;
+ulint eager_normalize_finished_threshold = 0;
+ulint fourth_block_start_size = 0;
+
 /* Create or initialize NVDIMM mapping reginos
 	 If a memroy-maped already exists then trigger recovery process and initialize
 
@@ -58,7 +63,12 @@ bool make_static_and_dynamic_ipl_region
 	flush_thread_started = true;
 	flush_thread_started_threshold = (nvdimm_info->ppl_block_number_per_buf_pool * 5) / 100; // 5%
 
-	
+	//Eager Normalization
+	eager_normalize_started_threshold = (nvdimm_info->ppl_block_number_per_buf_pool * 3) / 100; // 3%
+	eager_normalize_finished_threshold = (nvdimm_info->ppl_block_number_per_buf_pool * 5) / 100; // 5%
+	fourth_block_start_size = nvdimm_info->each_ppl_size * 3 - (PPL_BLOCK_HDR_SIZE + 2 * NTH_PPL_BLOCK_HEADER_SIZE);
+
+
 	fprintf(stderr, "Overall PPL Size : %luM\n", nvdimm_info->overall_ppl_size / (1024 * 1024));
 	fprintf(stderr, "Each PPL Size : %lu\n", nvdimm_info->each_ppl_size);
 	fprintf(stderr, "Max PPL Size : %lu\n", nvdimm_info->max_ppl_size);
@@ -66,6 +76,11 @@ bool make_static_and_dynamic_ipl_region
 	fprintf(stderr, "nvdimm_ptr: %p\n", nvdimm_ptr);
 	fprintf(stderr, "static_start_pointer: %p\n", nvdimm_info->ppl_start_pointer);
 	fprintf(stderr, "nc_redo_start_pointer: %p\n", nvdimm_info->nc_redo_start_pointer);
+
+	//Eager Normalization
+	fprintf(stderr, "eager_normalize_started_threshold : %lu\n", eager_normalize_started_threshold);
+	fprintf(stderr, "eager_normalize_finished_threshold : %lu\n", eager_normalize_finished_threshold);
+	fprintf(stderr, "fourth_block_start_size : %lu\n", fourth_block_start_size);
 
 	my_start = time(NULL);
 	return true;
