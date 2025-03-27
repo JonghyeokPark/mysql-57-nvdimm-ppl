@@ -1015,7 +1015,7 @@ buf_pool_get(
         ulint		i = id.fold() % srv_buf_pool_instances;
 
 #ifdef UNIV_NVDIMM_PPL
-		if (buf_page_hash_get_low(&ppl_buf_pool_ptr[i], page_id)) {
+		if (srv_use_ppl_cleaner && buf_page_hash_get_low(&ppl_buf_pool_ptr[i], page_id)) {
 			// fprintf(stderr, "ppl_buf_pool [%lu] is used: (%u, %u)\n", i, page_id.space(), page_id.page_no());
 			return(&ppl_buf_pool_ptr[i]);
 		}

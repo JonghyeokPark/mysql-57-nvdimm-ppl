@@ -1760,6 +1760,7 @@ public:
 	unsigned char flags; // first bit: iplized_flag, second bit: normalize_flag, third bit: dirtifed_flag
 	uint normalize_cause;
 	uint block_used;
+	uint ppl_length;
 	trx_id_t trx_id;
 #endif
 };
@@ -2169,6 +2170,9 @@ struct buf_pool_t{
 	std::queue<uint> * ppl_block_allocator;
 	ib_mutex_t ppl_block_allocator_mutex;
 	bool is_ppl_buf_pool;
+	
+	// Eager Normalization
+	bool is_eager_normalize;
 #endif
 
 	BufPoolMutex	mutex;		/*!< Buffer pool mutex of this

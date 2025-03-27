@@ -161,6 +161,11 @@ typedef struct APPLY_LOG_INFO
 extern bool flush_thread_started;
 extern ulint flush_thread_started_threshold;
 
+//Eager Normalization
+extern ulint eager_normalize_started_threshold;
+extern ulint eager_normalize_finished_threshold;
+extern ulint fourth_block_start_size;
+
 
 bool check_write_hot_page(buf_page_t * bpage, lsn_t lsn);
 //PPL Lack
@@ -203,8 +208,9 @@ void set_ppl_length_in_ppl_header(buf_page_t * bpage, ulint length);
 uint get_ppl_length_from_ppl_header(buf_page_t * bpage);
 void set_page_lsn_in_ppl_header(unsigned char* first_ppl_block_ptr, lsn_t lsn);
 lsn_t get_page_lsn_from_ppl_header(unsigned char* first_ppl_block_ptr);
-void set_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr);
+void set_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr, unsigned char value);
 unsigned char get_normalize_flag_in_ppl_header(unsigned char * first_ppl_block_ptr);
+void set_page_lsn_and_length_in_ppl_header(unsigned char* first_ppl_block_ptr, lsn_t lsn, ulint length);
 
 //page IPL flag related APIs
 void set_flag(unsigned char * flags, ipl_flag flag);
@@ -287,10 +293,14 @@ extern unsigned char* nvdimm_recv_ptr;
 extern bool nvdimm_recv_running;
 typedef enum {
   NORMAL = 0,
-	SIPL,
-	DIPL,
-	SDIPL
+  PPL
 } RECV_IPL_PAGE_TYPE;
+
+typedef enum {
+  NORMAL_RECV = 0,
+  SKIP_RECV,
+  PPL_WAR_RECV 
+} PPL_RECV_TYPE;
 
 void recv_ipl_parse_log();
 void recv_ipl_map_print();
@@ -319,6 +329,7 @@ lsn_t recv_get_first_ipl_lsn_using_page_id(page_id_t page_id);
 bool recv_check_normal_flag_using_page_id(page_id_t page_id);
 
 RECV_IPL_PAGE_TYPE recv_check_iplized(page_id_t page_id);
+PPL_RECV_TYPE recv_check_ppl_recv_type(page_id_t page_id);
 extern std::tr1::unordered_map<page_id_t, uint64_t > ipl_recv_map;
 
 

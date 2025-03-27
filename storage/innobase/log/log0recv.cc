@@ -2685,6 +2685,43 @@ recv_recover_page_func(
 	ibool		modification_to_page;
 	mtr_t		mtr;
 
+#ifdef UNIV_NVDIMM_PPL
+	byte recv_type = NORMAL_RECV;
+	buf_page_t* bpage = (buf_page_t * )block;
+	if(get_flag(&(bpage->flags), PPLIZED)){
+		byte normalize_flag = get_normalize_flag_in_ppl_header(bpage->first_ppl_block_ptr);
+		switch (normalize_flag)
+		{
+		case 0:
+			recv_type = SKIP_RECV;
+			break;
+		case 1:
+			recv_type = PPL_WAR_RECV;
+			break;
+		default:
+			break;
+		}
+	}
+
+	// (anonymous): calculate skipped apply count for IPL
+	//uint64_t tmp_cnt = 0;
+	//uint64_t total_len = UT_LIST_GET_LEN(recv_addr->rec_list);
+	//ipl_org_apply_cnt += total_len;
+	if (recv_type == PPL_WAR_RECV) {
+		lsn_t last_update_lsn = get_page_lsn_from_ppl_header(bpage->first_ppl_block_ptr);
+		lsn_t store_lsn = mach_read_from_8(block->frame + FIL_PAGE_LSN);
+		if(last_update_lsn < store_lsn){
+			recv_type = SKIP_RECV;
+		}
+		else{
+			set_apply_info_and_log_apply(block);
+			mach_write_to_8(block->frame + FIL_PAGE_LSN, last_update_lsn);
+			mach_write_to_8(block->frame + UNIV_PAGE_SIZE - FIL_PAGE_END_LSN_OLD_CHKSUM, last_update_lsn);
+			set_normalize_flag(bpage, 5);
+		}
+	}
+#endif
+
 	mutex_enter(&(recv_sys->mutex));
 
 	if (recv_sys->apply_log_recs == FALSE) {
@@ -2777,38 +2814,8 @@ recv_recover_page_func(
   // case3. page_lsn > recv->start_lsn  
   //  - skip wal redo apply 
 
-#ifdef UNIV_NVDIMM_PPL
-  bool is_ipl = (recv_check_iplized(block->page.id) != NORMAL);
-
-	// (anonymous): calculate skipped apply count for IPL
-	//uint64_t tmp_cnt = 0;
-	//uint64_t total_len = UT_LIST_GET_LEN(recv_addr->rec_list);
-	//ipl_org_apply_cnt += total_len;
-	
+#ifdef UNIV_NVDIMM_PPL	
 	while (recv) {
-
-    // (anonymous): ignore IPLed page (case 3)
-		if (is_ipl) {
-			//ib::info() << "IPled page apply redo logs! " <<block->page.id.space() << ":"
-			//					 << block->page.id.page_no() <<  " start_lsn: " 
-			//					 << recv->start_lsn <<" ipl_lsn: " << recv_get_first_ipl_lsn(block);
-
-			// ipl_lsn > WAL log : we can apply using IPL log only;
-			// do not consider WAL log
-			if (recv->start_lsn > recv_get_first_ipl_lsn(block)) {
-				//ib::info() << "now, we can skip the WAL redo log; becuase we keep previous log in our IPL region!";
-				//ipl_skip_apply_cnt += (total_len - tmp_cnt);
-				break;
-			}
-
-			if (recv->start_lsn < recv_get_first_ipl_lsn(block)) {
-				// now, we can apply the IPL log, no need to keep applying WAL log
-				//ib::info() << "now, we can skip the WAL redo log!";
-				//ipl_skip_apply_cnt += (total_len - tmp_cnt);
-				break;
-			}
-		}
-		//tmp_cnt++;
 	
 		end_lsn = recv->end_lsn;
 
@@ -2854,6 +2861,12 @@ recv_recover_page_func(
 				recv_addr->space);
 			skip_recv = (recv->start_lsn < init_lsn);
 		}
+		// if(recv_type == PPL_WAR_RECV){
+		// 	if(recv->start_lsn < get_page_lsn_from_ppl_header(bpage->first_ppl_block_ptr)){
+		// 		fprintf(stderr, "Skip apply: %u,%u page_lsn: %lu, WAL: recv->start_lsn: %zu ,recv->end_lsn: %zu, Log type: %d, Log_len: %lu\n", 
+		// 				recv_addr->space, recv_addr->page_no, page_lsn, recv->start_lsn, recv->end_lsn, recv->type, recv->len);
+		// 	}
+		// }
 
 		/* Ignore applying the redo logs for tablespace that is
 		truncated. Post recovery there is fixup action that will
@@ -2886,6 +2899,11 @@ recv_recover_page_func(
 				recv->type, buf, buf + recv->len,
 				recv_addr->space, recv_addr->page_no,
 				block, &mtr);
+			// if(recv_type == PPL_WAR_RECV){
+			// 	fprintf(stderr, "WAL apply: %u,%u page_lsn: %lu, WAL: recv->start_lsn: %zu ,recv->end_lsn: %zu\n", 
+			// 				recv_addr->space, recv_addr->page_no, page_lsn, recv->start_lsn, recv->end_lsn);
+			// }
+			
 
 			end_lsn = recv->start_lsn + recv->len;
 			mach_write_to_8(FIL_PAGE_LSN + page, end_lsn);
@@ -3082,7 +3100,7 @@ recv_read_in_area(
 
 			if (recv_addr->state == RECV_NOT_PROCESSED) {
 #ifdef UNIV_NVDIMM_PPL				
-				if(recv_check_iplized(cur_page_id) != NORMAL && !recv_check_normal_flag_using_page_id(cur_page_id)){
+				if(recv_check_iplized(cur_page_id) != NORMAL && recv_check_ppl_recv_type(cur_page_id) == SKIP_RECV){
 					recv_addr->state = RECV_PROCESSED;
 					recv_sys->n_addrs--;
 					mutex_exit(&(recv_sys->mutex));
@@ -3189,8 +3207,15 @@ loop:
 					      stderr);
 					has_printed = TRUE;
 				}
-
+#ifdef UNIV_NVDIMM_PPL
+				if(recv_check_iplized(page_id) != NORMAL && recv_check_ppl_recv_type(page_id) == SKIP_RECV){
+					recv_addr->state = RECV_PROCESSED;
+					recv_sys->n_addrs--;
+					continue;
+				}
+#endif
 				mutex_exit(&(recv_sys->mutex));
+
 
 				if (buf_page_peek(page_id)) {
 					buf_block_t*	block;
@@ -3203,26 +3228,15 @@ loop:
 
 					buf_block_dbg_add_level(
 						block, SYNC_NO_ORDER_CHECK);
-
-#ifdef UNIV_NVDIMM_PPL					
-					// (anonymous): recovery
-					// this is rare cases, somehow pages are fetched in the buffer pool
-					// without applying using IPL log
-					if (nvdimm_recv_running
-							&& recv_check_iplized(block->page.id) != NORMAL){
-						recv_ipl_apply(block);
-					}
-#endif					
+			
 					recv_recover_page(FALSE, block);
 					mtr_commit(&mtr);
 				} else {
 					recv_read_in_area(page_id);
 				}
-
 				mutex_enter(&(recv_sys->mutex));
-			}
+			}		
 		}
-
 		if (has_printed
 		    && (i * 100) / hash_get_n_cells(recv_sys->addr_hash)
 		    != ((i + 1) * 100)

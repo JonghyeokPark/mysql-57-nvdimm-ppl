@@ -1853,12 +1853,6 @@ innobase_start_or_create_for_mysql(void)
 				srv_nvdimm_max_ppl_size)){
     		NVDIMM_INFO_PRINT("make static and dynamic ipl region success!\n");
 		}
-		
-		// (anonymous): recovery
-		if (nvdimm_recv_running) {
-			recv_ipl_parse_log();
-			//recv_ipl_map_print();
-		}
 	}
 #endif
 	
@@ -1880,6 +1874,16 @@ innobase_start_or_create_for_mysql(void)
 
 	err = buf_pool_init(srv_buf_pool_size, srv_buf_pool_instances);
 
+#ifdef UNIV_NVDIMM_PPL
+	if (srv_use_nvdimm_ppl) {
+		// Analysis after the buffer pool is initialized
+		if (nvdimm_recv_running) {
+			recv_ipl_parse_log();
+			//recv_ipl_map_print();
+		}
+	}
+#endif
+
 	if (err != DB_SUCCESS) {
 		ib::error() << "Cannot allocate memory for the buffer pool";
 
@@ -1889,24 +1893,26 @@ innobase_start_or_create_for_mysql(void)
 	ib::info() << "Completed initialization of buffer pool";
 
 #ifdef UNIV_NVDIMM_PPL
-	ulong ppl_buf_pool_instances = 8;
-	double	ppl_size = 16;
-	char	ppl_unit = 'M';
-	double	ppl_chunk_size = 2;
-	char	ppl_chunk_unit = 'M';
-	ib::info() << "Initializing PPL Cleaner buffer pool, total size = "
-		<< ppl_size << ppl_unit << ", instances = " << ppl_buf_pool_instances
-		<< ", chunk size = " << ppl_chunk_size << ppl_chunk_unit;
+	if(srv_use_ppl_cleaner){
+		ulong ppl_buf_pool_instances = 8;
+		double	ppl_size = 16;
+		char	ppl_unit = 'M';
+		double	ppl_chunk_size = 2;
+		char	ppl_chunk_unit = 'M';
+		ib::info() << "Initializing PPL Cleaner buffer pool, total size = "
+			<< ppl_size << ppl_unit << ", instances = " << ppl_buf_pool_instances
+			<< ", chunk size = " << ppl_chunk_size << ppl_chunk_unit;
 
-	err = ppl_buf_pool_init(ppl_size * 1024 * 1024, ppl_buf_pool_instances);
+		err = ppl_buf_pool_init(ppl_size * 1024 * 1024, ppl_buf_pool_instances);
 
-	if (err != DB_SUCCESS) {
-		ib::error() << "Cannot allocate memory for the buffer pool";
+		if (err != DB_SUCCESS) {
+			ib::error() << "Cannot allocate memory for the buffer pool";
 
-		return(srv_init_abort(DB_ERROR));
+			return(srv_init_abort(DB_ERROR));
+		}
+
+		ib::info() << "Completed initialization of buffer pool";
 	}
-
-	ib::info() << "Completed initialization of buffer pool";
 #endif
 
 #ifdef UNIV_DEBUG
@@ -1960,7 +1966,7 @@ innobase_start_or_create_for_mysql(void)
 #ifdef UNIV_NVDIMM_PPL
 	// PPL Cleaner Buffer Pool Flush
 	if(srv_use_ppl_cleaner){
-		uint ppl_page_cleaners = 4;
+		uint ppl_page_cleaners = 8;
 		os_thread_create(ppl_buf_flush_page_cleaner_coordinator,
 				NULL, NULL);
 		for (i = 0; i < ppl_page_cleaners; ++i) {
@@ -2921,7 +2927,9 @@ innobase_shutdown_for_mysql(void)
 	log_mem_free();
 	buf_pool_free(srv_buf_pool_instances);
 #ifdef UNIV_NVDIMM_PPL
-	ppl_buf_pool_free(srv_buf_pool_instances);
+	if(srv_use_ppl_cleaner){
+		ppl_buf_pool_free(srv_buf_pool_instances);
+	}
 #endif
 
 	/* 6. Free the thread management resoruces. */

@@ -1871,6 +1871,9 @@ buf_pool_init_instance(
 	mutex_create(LATCH_ID_STATIC_REGION, &buf_pool->ppl_block_allocator_mutex);
 	make_ppl_and_push_queue(buf_pool);
 	buf_pool->is_ppl_buf_pool = false;
+
+	// Eager Normalization
+	buf_pool->is_eager_normalize = false;
 	fprintf(stderr, "buf_pool_init_instance: %d: %p, ppl_look_up_table: %p\n"
 			,buf_pool->instance_no, buf_pool, buf_pool->ppl_look_up_table);
 #endif
