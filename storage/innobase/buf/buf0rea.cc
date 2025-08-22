@@ -41,7 +41,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "srv0srv.h"
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #include "page0page.h"
 #endif
 

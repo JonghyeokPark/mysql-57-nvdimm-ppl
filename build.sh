@@ -10,16 +10,16 @@ BASE_DIR=`pwd -P`
 BUILD_DIR=$BASE_DIR/bld
 PASSWD=$1
 
-# Make a directory for build
-if [ ! -d "$BUILD_DIR" ]; then
+# Clean and make a directory for build
+if [ -d "$BUILD_DIR" ]; then
+    echo "Cleaning existing build directory"
+    echo $PASSWD | sudo -S rm -rf $BUILD_DIR/*
+else
     echo "Make a directory for build"
     mkdir bld
 fi
 
 cd $BUILD_DIR
-
-rm -rf CMakeCache.txt
-echo $PASSWD | sudo -S rm -rf CMakeFiles/*
 
 # Build and install the source code
 if [ "$2" = "--origin" ]; then
@@ -40,5 +40,5 @@ cmake .. -DWITH_DEBUG=0 -DCMAKE_C_FLAGS="$BUILD_FLAGS" -DCMAKE_CXX_FLAGS="$BUILD
 -DDOWNLOAD_BOOST=ON -DWITH_BOOST=$BASE_DIR/boost -DENABLED_LOCAL_INFILE=1 \
 -DCMAKE_INSTALL_PREFIX=$BUILD_DIR
 
-make -j8
+make -j
 echo $PASSWD | sudo -S make install

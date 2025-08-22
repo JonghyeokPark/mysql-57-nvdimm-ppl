@@ -105,7 +105,7 @@ Created 2/16/1996 Heikki Tuuri
 # include "ut0new.h"
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 extern unsigned char* nvdimm_ptr;
 pfs_os_file_t nvdimm_dwb_file;
 #endif

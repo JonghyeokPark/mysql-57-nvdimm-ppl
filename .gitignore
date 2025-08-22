@@ -2500,5 +2500,5 @@ bld/
 ctags
 cscope.*
 boost/
-
+tpcc-mysql/
 my.cnf

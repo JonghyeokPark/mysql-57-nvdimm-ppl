@@ -16,7 +16,7 @@
 // step2. apply per-page log when 
 // step3. for split pages do not invoke IPLization process
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #include "mtr0log.h"
 #include "page0page.h"
 #include "buf0flu.h"

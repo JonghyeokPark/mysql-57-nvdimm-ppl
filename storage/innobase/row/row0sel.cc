@@ -740,45 +740,7 @@ sel_enqueue_prefetched_row(
 		sel_buf->val_buf_size = val_buf_size;
 	}
 }
-
-/*********************************************************************//**
-Builds a previous version of a clustered index record for a consistent read
-@return DB_SUCCESS or error code */
-/*
-static MY_ATTRIBUTE((nonnull, warn_unused_result))
-dberr_t
-row_sel_build_prev_vers(
-/*====================*/
-
-//ReadView*	read_view,	/*!< in: read view */
-//	dict_index_t*	index,		/*!< in: plan node for table */
-//	rec_t*		rec,		/*!< in: record in a clustered index */
-//	ulint**		offsets,	/*!< in/out: offsets returned by
-//					rec_get_offsets(rec, plan->index) */
-//	mem_heap_t**	offset_heap,	/*!< in/out: memory heap from which
-//					the offsets are allocated */
-//	mem_heap_t**    old_vers_heap,  /*!< out: old version heap to use */
-//	rec_t**		old_vers,	/*!< out: old version, or NULL if the
-//					record does not exist in the view:
-//					i.e., it was freshly inserted
-//					afterwards */
-//	mtr_t*		mtr)		/*!< in: mtr */
-/*
-{
-	dberr_t	err;
-
-	if (*old_vers_heap) {
-		mem_heap_empty(*old_vers_heap);
-	} else {
-		*old_vers_heap = mem_heap_create(512);
-	}
-
-	err = row_vers_build_for_consistent_read(
-		rec, mtr, index, offsets, read_view, offset_heap,
-		*old_vers_heap, old_vers, NULL);
-	return(err);
-}
-*/
+#ifdef UNIV_NVDIMM_PPL
 static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_sel_build_prev_vers(
@@ -837,7 +799,7 @@ row_sel_build_prev_vers(
 		use_nvdimm_for_vers_build = true;
 	}
 
-	use_nvdimm_for_vers_build = false;
+	// use_nvdimm_for_vers_build = false;
 	if(use_nvdimm_for_vers_build){
 
 		//redo-based version constructions
@@ -874,6 +836,42 @@ row_sel_build_prev_vers(
 }
 
 /************/
+#else
+/*********************************************************************//**
+Builds a previous version of a clustered index record for a consistent read
+@return DB_SUCCESS or error code */
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
+dberr_t
+row_sel_build_prev_vers(
+/*====================*/
+	ReadView*	read_view,	/*!< in: read view */
+	dict_index_t*	index,		/*!< in: plan node for table */
+	rec_t*		rec,		/*!< in: record in a clustered index */
+	ulint**		offsets,	/*!< in/out: offsets returned by
+					rec_get_offsets(rec, plan->index) */
+	mem_heap_t**	offset_heap,	/*!< in/out: memory heap from which
+					the offsets are allocated */
+	mem_heap_t**    old_vers_heap,  /*!< out: old version heap to use */
+	rec_t**		old_vers,	/*!< out: old version, or NULL if the
+					record does not exist in the view:
+					i.e., it was freshly inserted
+					afterwards */
+	mtr_t*		mtr)		/*!< in: mtr */
+{
+	dberr_t	err;
+
+	if (*old_vers_heap) {
+		mem_heap_empty(*old_vers_heap);
+	} else {
+		*old_vers_heap = mem_heap_create(512);
+	}
+
+	err = row_vers_build_for_consistent_read(
+		rec, mtr, index, offsets, read_view, offset_heap,
+		*old_vers_heap, old_vers, NULL);
+	return(err);
+}
+#endif
 
 /*********************************************************************//**
 Builds the last committed version of a clustered index record for a
@@ -1098,11 +1096,17 @@ row_sel_get_clust_rec(
 			buf_block_t* block = btr_pcur_get_block(&(plan->pcur));
 			buf_page_t* bpage = &block->page;
 			page_t* page = block->frame;
-
+#ifdef UNIV_NVDIMM_PPL
 			err = row_sel_build_prev_vers(
 				node->read_view, index, clust_rec,
 				&offsets, &heap, &plan->old_vers_heap,
 				&old_vers, mtr, bpage);
+#else
+			err = row_sel_build_prev_vers(
+				node->read_view, index, clust_rec,
+				&offsets, &heap, &plan->old_vers_heap,
+				&old_vers, mtr);
+#endif				
 
 			if (err != DB_SUCCESS) {
 
@@ -2083,10 +2087,17 @@ skip_lock:
 				buf_block_t* block = btr_pcur_get_block(&(plan->pcur));
 			buf_page_t* bpage = &block->page;
 			page_t* page = block->frame;
+#ifdef UNIV_NVDIMM_PPL			
 				err = row_sel_build_prev_vers(
 					node->read_view, index, rec,
 					&offsets, &heap, &plan->old_vers_heap,
 					&old_vers, &mtr, bpage);
+#else
+				err = row_sel_build_prev_vers(
+					node->read_view, index, rec,
+					&offsets, &heap, &plan->old_vers_heap,
+					&old_vers, &mtr);
+#endif				
 
 				if (err != DB_SUCCESS) {
 
@@ -3590,6 +3601,7 @@ row_sel_store_mysql_rec(
 Builds a previous version of a clustered index record for a consistent read
 */
 
+#ifdef UNIV_NVDIMM_PPL
 /* mvcc-ppl */
 /*********************************************************************//**
 Builds a previous version of a clustered index record for a consistent read
@@ -3696,6 +3708,44 @@ row_sel_build_prev_vers_for_mysql(
 	}
 	return(DB_SUCCESS);
 }
+#else
+/*********************************************************************//**
+Builds a previous version of a clustered index record for a consistent read
+@return DB_SUCCESS or error code */
+static MY_ATTRIBUTE((warn_unused_result))
+dberr_t
+row_sel_build_prev_vers_for_mysql(
+/*==============================*/
+	ReadView*	read_view,	/*!< in: read view */
+	dict_index_t*	clust_index,	/*!< in: clustered index */
+	row_prebuilt_t*	prebuilt,	/*!< in: prebuilt struct */
+	const rec_t*	rec,		/*!< in: record in a clustered index */
+	ulint**		offsets,	/*!< in/out: offsets returned by
+					rec_get_offsets(rec, clust_index) */
+	mem_heap_t**	offset_heap,	/*!< in/out: memory heap from which
+					the offsets are allocated */
+	rec_t**		old_vers,	/*!< out: old version, or NULL if the
+					record does not exist in the view:
+					i.e., it was freshly inserted
+					afterwards */
+	const dtuple_t**vrow,		/*!< out: dtuple to hold old virtual
+					column data */
+	mtr_t*		mtr)		/*!< in: mtr */
+{
+	dberr_t	err;
+
+	if (prebuilt->old_vers_heap) {
+		mem_heap_empty(prebuilt->old_vers_heap);
+	} else {
+		prebuilt->old_vers_heap = mem_heap_create(200);
+	}
+
+	err = row_vers_build_for_consistent_read(
+		rec, mtr, clust_index, offsets, read_view, offset_heap,
+		prebuilt->old_vers_heap, old_vers, vrow);
+	return(err);
+}
+#endif
 
 /*********************************************************************//**
 Retrieves the clustered index record corresponding to a record in a
@@ -3904,10 +3954,17 @@ row_sel_get_clust_rec_for_mysql(
 			page_t* page = block->frame;
 			/* The following call returns 'offsets' associated with
 			'old_vers' */
+#ifdef UNIV_NVDIMM_PPL			
 			err = row_sel_build_prev_vers_for_mysql(
 				trx->read_view, clust_index, prebuilt,
 				clust_rec, offsets, offset_heap, &old_vers,
 				vrow, mtr, bpage, trx);
+#else
+			err = row_sel_build_prev_vers_for_mysql(
+				trx->read_view, clust_index, prebuilt,
+				clust_rec, offsets, offset_heap, &old_vers,
+				vrow, mtr);
+#endif				
 
 			if (err != DB_SUCCESS || old_vers == NULL) {
 
@@ -5868,11 +5925,20 @@ no_gap_lock:
 				page_id_t page_id = bpage->id;
 				/* The following call returns 'offsets'
 				associated with 'old_vers' */
+#ifdef UNIV_NVDIMM_PPL				
 				err = row_sel_build_prev_vers_for_mysql(
 					trx->read_view, clust_index,
 					prebuilt, rec, &offsets, &heap,
 					&old_vers, need_vrow ? &vrow : NULL,
 					&mtr, bpage, trx);
+#else
+				err = row_sel_build_prev_vers_for_mysql(
+					trx->read_view, clust_index,
+					prebuilt, rec, &offsets, &heap,
+					&old_vers, need_vrow ? &vrow : NULL,
+					&mtr);
+#endif
+
 
 				if (err != DB_SUCCESS) {
 

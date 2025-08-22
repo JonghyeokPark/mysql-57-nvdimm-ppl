@@ -38,7 +38,7 @@ Created 2011/12/19
 #include "trx0sys.h"
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 extern pfs_os_file_t nvdimm_dwb_file;
 extern unsigned char* nvdimm_ptr;
 #endif

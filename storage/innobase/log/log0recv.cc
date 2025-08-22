@@ -69,7 +69,7 @@ bool	recv_replay_file_ops	= true;
 #endif /* !UNIV_HOTBACKUP */
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #endif
 
 /** Log records are stored in the hash table in chunks at most of this size;

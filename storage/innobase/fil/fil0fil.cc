@@ -907,6 +907,7 @@ add_size:
 		UT_LIST_ADD_FIRST(fil_system->LRU, node);
 	}
 
+#ifdef UNIV_NVDIMM_PPL
 	if(srv_use_ppl_mvcc){
 	/* mvcc-ppl for TPC-C benchmark */
 
@@ -919,6 +920,7 @@ add_size:
 
 	/* end */
 	}
+#endif
 	return(true);
 }
 

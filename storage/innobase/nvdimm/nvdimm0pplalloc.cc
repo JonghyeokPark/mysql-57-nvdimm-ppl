@@ -1,6 +1,6 @@
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
