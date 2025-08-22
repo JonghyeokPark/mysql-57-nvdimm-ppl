@@ -62,7 +62,7 @@ static const int buf_flush_page_cleaner_priority = -20;
 #endif /* UNIV_LINUX */
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #include "vector"
 #include "algorithm"
 #include "deque"

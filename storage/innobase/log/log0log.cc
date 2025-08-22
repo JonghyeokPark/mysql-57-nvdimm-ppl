@@ -58,7 +58,7 @@ Created 12/9/1995 Heikki Tuuri
 #endif /* !UNIV_HOTBACKUP */
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #endif
 
 /*

@@ -28,7 +28,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "trx0roll.h"
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #endif
 
 #ifdef UNIV_NONINL

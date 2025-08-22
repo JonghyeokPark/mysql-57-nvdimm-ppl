@@ -40,7 +40,7 @@ Created 11/26/1995 Heikki Tuuri
 #endif /* UNIV_NONINL */
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #endif
 
 /** Iterate over a memo block in reverse. */

@@ -33,7 +33,7 @@ Created 2011/12/19 Inaam Rana
 #include "log0recv.h"
 
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #endif
 
 #ifndef UNIV_HOTBACKUP

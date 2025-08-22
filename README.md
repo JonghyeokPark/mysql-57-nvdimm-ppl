@@ -1,8 +1,162 @@
 # Boosting Transaction Performance using Per-Page Logging on NVDIMM
 
+**Presented at ACM SIGMOD 2025**
+
 * NV-PPL is a novel database architecture that leverages NVDIMM as a durable log cache so as to avoid the durability overhead in flash-based databases.
 * NV-PPL captures per-page redo logs and stores them on NVDIMM, thus avoiding a significant fraction of page writes to the storage and boosting the performance of OLTP workloads dramatically.
 * NV-PPL is implemented on MySQL 5.7/InnoDB with moderate code changes.
+
+## Abstract
+When running OLTP workloads on flash SSDs, relational DBMSs still face the write durability overhead, severely limiting their performance. To address this challenge, we propose NV-PPL, a novel database architecture that leverages NVDIMM as a durable log cache. NV-PPL captures per-page redo logs and retains them on NVDIMM to absorb writes from DRAM to SSD. Our NV-PPL prototype, deployed on an actual NVDIMM device, demonstrates superior transaction throughput, surpassing the same-priced Vanilla MySQL by at least 6.9× and NV-SQL, a page-grained NVDIMM caching scheme, by up to 1.5×. Beyond write reduction, the page-wise logs in NVDIMM enable novel approaches such as redo-less recovery and redo-based multi-versioning. Compared to Vanilla MySQL, redo-less recovery reduces recovery time by one-third, while redo-based multi-versioning enhances the latency of long-lived transactions in HTAP workloads by 3× to 18×.
+
+---
+
+## Environment Requirements
+
+### Hardware Configuration
+Our experiments were conducted on a dual-socket Linux machine with the following specifications:
+- **CPU**: Two Intel Xeon E5-2460 CPUs (32 cores at 2.5GHz) 
+- **Memory**: 64GB DRAM + 16GB NVDIMM-N
+- **Storage**: 
+  - Data: Samsung 960 PRO 1TB NVMe SSD
+  - Logs: Samsung 850 PRO 256GB SSD
+- **File System**: ext4 with direct I/O mode
+- **NVDIMM Mount**: DAX option enabled
+
+### Minimum Hardware Requirements
+- **CPU**: x86_64 architecture with clflush instruction support
+- **Memory**: 
+  - Minimum 32GB DRAM
+  - 8GB+ NVDIMM (for PPL functionality)
+- **Storage**: 100GB+ free space
+- **OS**: Ubuntu 18.04 LTS or higher
+
+### Software Prerequisites
+- **Operating System**: Ubuntu 18.04/20.04 LTS
+- **Compiler**: GCC 7.5.0 or higher
+- **Build Tools**: CMake 3.10 or higher
+- **Libraries**:
+  - libreadline6 and libreadline6-dev
+  - libaio1 and libaio-dev  
+  - libssl-dev
+  - libncurses5 and libncurses5-dev
+  - bison
+- **Python**: 3.6+ (for plotting scripts)
+- **gnuplot**: For graph generation
+
+### MySQL, TPC-C Benchmark Configuration
+- **Buffer Cache**: 10% of database size
+- **Page Size**: 4KB
+- **Concurrent Client Threads**: 32
+
+---
+
+## Link to slides
+Slide Link: [Boosting Transaction Performance using Per-Page Logging on NVDIMM (PDF)](slides/Boosting_Transaction_Performance_using_PerPage_Logging_on_NVDIMM.pdf)
+
+---
+
+## Repository Structure
+
+```
+mysql-57-nvdimm-ppl/
+├── storage/innobase/nvdimm/    # NV-PPL core implementation
+│   ├── nvdimm0init.cc          # NVDIMM initialization
+│   ├── nvdimm0pplalloc.cc      # Per-Page Logging allocation
+│   ├── nvdimm0log.cc           # Per-page logging operations
+│   └── nvdimm0recv.cc          # PPL-based recovery
+├── storage/innobase/buf/        # Buffer pool modifications
+├── storage/innobase/log/        # Recovery mechanism changes
+├── storage/innobase/include/    # Header files
+│   └── nvdimm-ppl.h            # NVDIMM interface definitions
+├── my.cnf                       # NV-PPL configuration template
+├── my-vanilla.cnf               # Vanilla MySQL configuration
+├── build.sh                     # Automated build script
+├── tpcc-mysql/                  # TPC-C benchmark tools
+│   ├── src/                     # TPC-C source code
+│   ├── create_table.sql         # Schema creation
+│   └── add_fkey_idx.sql         # Index creation
+├── plots/                       # Graph generation scripts
+│   ├── plot_tpcc_tps_graph.py
+│   ├── plot_linkbench_ops_graph.py
+│   └── plot_recovery_graph.py
+└── slides/                      # Paper presentation
+
+```
+
+---
+
+## Key Code Modifications
+
+NV-PPL implementation primarily modifies the following MySQL/InnoDB components:
+
+### Core NV-PPL Implementation
+- `storage/innobase/nvdimm/`: New directory containing all per-page logging implementation
+  - `nvdimm0init.cc`: NVDIMM device initialization and management
+  - `nvdimm0pplalloc.cc`: Per-Page Logging (PPL) allocation and management
+  - `nvdimm0log.cc`: Per-page redo log operations
+  - `nvdimm0recv.cc`: PPL-based recovery mechanism
+
+### Modified InnoDB Components
+- `storage/innobase/buf/`: Buffer pool modifications
+  - `buf0buf.cc`: PPL integration with buffer management
+  - `buf0flu.cc`: Modified flush operations for PPL
+  - `buf0rea.cc`: Read operations with PPL support
+  
+- `storage/innobase/log/`: Recovery mechanism changes
+  - `log0recv.cc`: Modified recovery to use PPL when available
+  
+- `storage/innobase/row/`: Row operations modifications
+  - `row0sel.cc`: PPL-based multi-version read support (MVCC)
+  
+- `storage/innobase/srv/`: Server startup modifications
+  - `srv0start.cc`: NVDIMM initialization during startup
+
+### Header Files
+- `storage/innobase/include/nvdimm-ppl.h`: Main NVDIMM interface definitions
+- `storage/innobase/include/buf0buf.h`: Buffer pool PPL extensions
+- `storage/innobase/include/buf0buf.ic`: Buffer pool inline functions for PPL
+
+---
+
+## NVDIMM Setup
+
+Before running NV-PPL, you need to set up NVDIMM.
+
+### 1. Check if NVDIMM is Available
+```bash
+# Ensure fdisk is installed (usually pre-installed on Ubuntu)
+$ which fdisk || sudo apt-get install -y fdisk
+
+# Check for NVDIMM devices
+$ sudo fdisk -l | grep pmem
+# Expected: Should show /dev/pmem0 or similar device if NVDIMM is available
+```
+
+> **Note:** If no NVDIMM device is found, you can emulate it using DRAM. See the detailed guide: [Linux Persistent Memory Emulation](https://docs.pmem.io/persistent-memory/getting-started-guide/creating-development-environments/linux-environments/linux-memmap)
+
+### 2. Setup NVDIMM (if detected)
+If NVDIMM is detected, format and mount it with DAX support:
+
+```bash
+# Format NVDIMM with ext4 filesystem
+$ sudo mkfs.ext4 /dev/pmem0
+
+# Create mount directory
+$ sudo mkdir -p /mnt/pmem
+
+# Mount with DAX (Direct Access) option for optimal performance
+$ sudo mount -o dax /dev/pmem0 /mnt/pmem
+
+# Set permissions for MySQL access
+$ sudo chmod 777 /mnt/pmem
+
+# Verify DAX is enabled
+$ mount | grep dax
+# Expected: /mnt/pmem type ext4 (rw,relatime,dax)
+```
+
+---
 
 ## Build and install
 
@@ -67,11 +221,19 @@ innodb_use_ppl_mvcc=false
 
 2. Run MySQL server:
 
+> **Important**: Ensure `datadir` and `logdir` are empty before starting MySQL for the first time.
+
 ```bash
-$ ./bld/bin/mysqld --defaults-fele=my.cnf
+# Initialize MySQL data directory (only needed for first run)
+$ ./bld/bin/mysqld --initialize --innodb_page_size=4k --user=mysql --datadir=/path/to/datadir --basedir=/path/to/basedir
+
+# Start MySQL server
+$ ./bld/bin/mysqld --defaults-file=my.cnf
 ```
 
-# How to test NV-PPL with TPC-C Benchamrk
+---
+
+# How to test NV-PPL with TPC-C Benchmark
 From this section, we will describe how to test NV-PPL using the TPC-C benchmark. 
 
 ## How to install MySQL 5.7 for loading TPC-C Data
@@ -260,48 +422,63 @@ $ cd tpcc-mysql
 $ ./tpcc_start -h 127.0.0.1 -S /tmp/mysql.sock -d tpcc -u root -p "yourPassword" -w 500 -c 32 -r 300 -l 1800 -i 1 | tee tpcc-result.txt
 ```
 
+> **Note:** Parameters explanation:
+> - `-h 127.0.0.1`: MySQL server host
+> - `-S /tmp/mysql.sock`: MySQL socket file
+> - `-d tpcc`: Database name
+> - `-u root`: MySQL username
+> - `-p "yourPassword"`: MySQL password
+> - `-w 500`: Number of warehouses (500 warehouses = ~54GB database)
+> - `-c 32`: Number of concurrent connections/threads
+> - `-r 300`: Ramp-up time in seconds (warm-up period)
+> - `-l 1800`: Benchmark duration in seconds (30 minutes)
+> - `-i 1`: Report interval in seconds
+> - `tee tpcc-result.txt`: Save output to file while displaying on screen
+
+---
+
 # Testing other performances
 For testing the other performances, experiment guidelines are below:
 * [Testing NV-PPL with the Linkbench benchmark](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/master/how_to_test_with_linkbench.md)
 * [Testing NV-PPL recovery performance](https://github.com/JonghyeokPark/mysql-57-nvdimm-ppl/blob/master/how_to_test_recovery.md)
 * [Testing NV-PPL HTAP performance](#htap-build)
 
+---
+
 # Plotting graph scripts
 > Note: Before plotting the graph, run the experiment first. Then, execute the script with the following parameter:
 
 After executing the scripts, check the **`plots`** directory to see the graphs
-## Prerequisite
 
+### Prerequisite
 - gnuplot
 
 ```bash
 $ sudo apt-get install gnuplot
 ```
 
-## Plotting TPS graph for TPC-C
+### Plotting TPS graph for TPC-C
 - `tpcc-result-path`: The absolute path to the `tpcc-result.txt` file
 
 ```bash
 $ python3 ./plots/plot_tpcc_tps_graph.py /tpcc-result-path
 ```
 
-## Plotting OPS graph for Linkbench
-
+### Plotting OPS graph for Linkbench
 - `linkbench-result-path`: The absolute path to the `linkbench-result.txt` file
 
 ```bash
 $ python3 ./plots/plot_linkbench_ops_graph.py /linkbench-result-path
 ```
 
-## Plotting recovery time graph
-
+### Plotting recovery time graph
 - `logdir`: The absolute path to the MySQL log directory
 
 ```bash
 $ python3 ./plots/plot_recovery_graph.py /logdir/mysql_error_nvdimm.log
 ```
 
-
+---
 
 # Reference
 - https://github.com/meeeejin/til

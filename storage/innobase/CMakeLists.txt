@@ -20,7 +20,7 @@ INCLUDE(innodb.cmake)
 SET(INNOBASE_SOURCES
 	nvdimm/nvdimm0init.cc
 	nvdimm/nvdimm0log.cc
-	nvdimm/nvdimm0iplalloc.cc
+	nvdimm/nvdimm0pplalloc.cc
 	nvdimm/nvdimm0recv.cc
 	nvdimm/nvdimm0buf.cc
 	api/api0api.cc

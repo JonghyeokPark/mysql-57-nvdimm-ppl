@@ -1,5 +1,5 @@
 #ifdef UNIV_NVDIMM_PPL
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 #include "mtr0log.h"
 #include "page0page.h"
 #include "buf0flu.h"

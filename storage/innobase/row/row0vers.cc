@@ -49,9 +49,11 @@ Created 2/6/1997 Heikki Tuuri
 #include "lock0lock.h"
 #include "row0mysql.h"
 
+#ifdef UNIV_NVDIMM_PPL
 /* mvcc-ppl */
-#include "nvdimm-ipl.h"
+#include "nvdimm-ppl.h"
 /* end */
+#endif
 /** Check whether all non-virtual columns in a virtual index match that of in
 the cluster index
 @param[in]	index		the secondary index
@@ -1099,6 +1101,7 @@ row_vers_old_has_index_entry(
 	}
 }
 
+#ifdef UNIV_NVDIMM_PPL
 /* mvcc-ppl */
 bool
 row_check_undo_page_buffer_miss(
@@ -1147,6 +1150,7 @@ ulint**		offsets/*!< in/out: offsets returned by
 	return false;
 	}
 }
+#endif
 /* end */
 
 /*****************************************************************//**
@@ -1231,11 +1235,13 @@ int buffer_miss_cnt = 0;
 		}
 
 		/*mvcc-ppl */
+#ifdef UNIV_NVDIMM_PPL		
 		bool undo_buffer_miss = row_check_undo_page_buffer_miss(index, prev_version, offsets);
 
 		if(undo_buffer_miss && prev_version != NULL){
 			buffer_miss_cnt++;
 		}
+#endif				
 		version_build_cnt++;
 
 		*offsets = rec_get_offsets(
