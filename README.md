@@ -119,6 +119,23 @@ NV-PPL implementation primarily modifies the following MySQL/InnoDB components:
 
 ---
 
+## Docker Environment
+
+A Docker environment is provided for easier setup and testing.
+
+```bash
+# Build the Docker image
+$ sudo docker build -t nv-ppl-mysql .
+
+# Run the container
+$ sudo docker run -it -v $(pwd):/work --privileged nv-ppl-mysql
+
+# Inside the container, build NV-PPL
+$ ./build.sh PASSWD --ppl
+```
+
+---
+
 ## NVDIMM Setup
 
 Before running NV-PPL, you need to set up NVDIMM.
