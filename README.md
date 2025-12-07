@@ -9,48 +9,6 @@
 ## Abstract
 When running OLTP workloads on flash SSDs, relational DBMSs still face the write durability overhead, severely limiting their performance. To address this challenge, we propose NV-PPL, a novel database architecture that leverages NVDIMM as a durable log cache. NV-PPL captures per-page redo logs and retains them on NVDIMM to absorb writes from DRAM to SSD. Our NV-PPL prototype, deployed on an actual NVDIMM device, demonstrates superior transaction throughput, surpassing the same-priced Vanilla MySQL by at least 6.9× and NV-SQL, a page-grained NVDIMM caching scheme, by up to 1.5×. Beyond write reduction, the page-wise logs in NVDIMM enable novel approaches such as redo-less recovery and redo-based multi-versioning. Compared to Vanilla MySQL, redo-less recovery reduces recovery time by one-third, while redo-based multi-versioning enhances the latency of long-lived transactions in HTAP workloads by 3× to 18×.
 
----
-
-## Environment Requirements
-
-### Hardware Configuration
-Our experiments were conducted on a dual-socket Linux machine with the following specifications:
-- **CPU**: Two Intel Xeon E5-2460 CPUs (32 cores at 2.5GHz) 
-- **Memory**: 64GB DRAM + 16GB NVDIMM-N
-- **Storage**: 
-  - Data: Samsung 960 PRO 1TB NVMe SSD
-  - Logs: Samsung 850 PRO 256GB SSD
-- **File System**: ext4 with direct I/O mode
-- **NVDIMM Mount**: DAX option enabled
-
-### Minimum Hardware Requirements
-- **CPU**: x86_64 architecture with clflush instruction support
-- **Memory**: 
-  - Minimum 32GB DRAM
-  - 8GB+ NVDIMM (for PPL functionality)
-- **Storage**: 100GB+ free space
-- **OS**: Ubuntu 18.04 LTS or higher
-
-### Software Prerequisites
-- **Operating System**: Ubuntu 18.04/20.04 LTS
-- **Compiler**: GCC 7.5.0 or higher
-- **Build Tools**: CMake 3.10 or higher
-- **Libraries**:
-  - libreadline6 and libreadline6-dev
-  - libaio1 and libaio-dev  
-  - libssl-dev
-  - libncurses5 and libncurses5-dev
-  - bison
-- **Python**: 3.6+ (for plotting scripts)
-- **gnuplot**: For graph generation
-
-### MySQL, TPC-C Benchmark Configuration
-- **Buffer Cache**: 10% of database size
-- **Page Size**: 4KB
-- **Concurrent Client Threads**: 32
-
----
-
 ## Link to slides
 Slide Link: [Boosting Transaction Performance using Per-Page Logging on NVDIMM (PDF)](slides/Boosting_Transaction_Performance_using_PerPage_Logging_on_NVDIMM.pdf)
 
@@ -119,7 +77,46 @@ NV-PPL implementation primarily modifies the following MySQL/InnoDB components:
 
 ---
 
-## Docker Environment
+## Environment Requirements
+
+### Hardware Configuration
+Our experiments were conducted on a dual-socket Linux machine with the following specifications:
+- **CPU**: Two Intel Xeon E5-2460 CPUs (32 cores at 2.5GHz) 
+- **Memory**: 64GB DRAM + 16GB NVDIMM-N
+- **Storage**: 
+  - Data: Samsung 960 PRO 1TB NVMe SSD
+  - Logs: Samsung 850 PRO 256GB SSD
+- **File System**: ext4 with direct I/O mode
+- **NVDIMM Mount**: DAX option enabled
+
+### Minimum Hardware Requirements
+- **CPU**: x86_64 architecture with clflush instruction support
+- **Memory**: 
+  - Minimum 32GB DRAM
+  - 8GB+ NVDIMM (for PPL functionality)
+- **Storage**: 100GB+ free space
+- **OS**: Ubuntu 18.04 LTS or higher
+
+### Software Prerequisites
+- **Operating System**: Ubuntu 18.04/20.04 LTS
+- **Compiler**: GCC 7.5.0 or higher
+- **Build Tools**: CMake 3.10 or higher
+- **Libraries**:
+  - libreadline6 and libreadline6-dev
+  - libaio1 and libaio-dev  
+  - libssl-dev
+  - libncurses5 and libncurses5-dev
+  - bison
+- **Python**: 3.6+ (for plotting scripts)
+- **gnuplot**: For graph generation
+
+### MySQL, TPC-C Benchmark Configuration
+- **Buffer Cache**: 10% of database size
+- **Page Size**: 4KB
+- **Concurrent Client Threads**: 32
+
+
+### Docker Environment
 
 A Docker environment is provided for easier setup and testing.
 
@@ -355,7 +352,6 @@ $ ./bld/bin/mysqld --defaults-file=./my-vanilla.cnf
 ```bash
 $ sudo apt-get install libmysqlclient-dev
 ```
----
 ### Installation
 
 Go to the tpcc-mysql directory and build binaries:
