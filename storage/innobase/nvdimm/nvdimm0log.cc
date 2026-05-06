@@ -20,6 +20,8 @@
 #include "mtr0log.h"
 #include "page0page.h"
 #include "buf0flu.h"
+#include "srv0srv.h"
+#include "srv0mon.h"
 
 #include <emmintrin.h>
 #include <stdlib.h>
@@ -355,7 +357,29 @@ check_normalize_cause(buf_page_t * bpage){
 	}
 }
 
-void normalize_ppled_page(buf_page_t * bpage, page_id_t page_id){ 
+void normalize_ppled_page(buf_page_t * bpage, page_id_t page_id){
+	/* Capture cause and PPL byte count BEFORE clearing the bpage fields
+	   below, for innodb_metrics. */
+	{
+		uint cause = bpage->normalize_cause;
+		ulint log_bytes = bpage->ppl_length;
+		MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_TOTAL);
+		MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LOG_BYTES_TOTAL, log_bytes);
+		/* Per-table CSV trace: NORM,<space>,<page_no>,<cause>,<bytes> */
+		fprintf(stderr, "NORM,%u,%u,%u,%lu\n",
+			(unsigned)bpage->id.space(),
+			(unsigned)bpage->id.page_no(),
+			cause, (unsigned long)log_bytes);
+		switch (cause) {
+		case 1: MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE1); break;
+		case 2: MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE2); break;
+		case 3: MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE3); break;
+		case 4: MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE4); break;
+		case 5: MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE5); break;
+		case 6: MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE6); break;
+		default: break;
+		}
+	}
 	if(get_flag(&(bpage->flags), IN_LOOK_UP)){
 		buf_pool_t * buf_pool = normal_buf_pool_get(page_id);
 		rw_lock_x_lock(&buf_pool->lookup_table_lock);
@@ -479,6 +503,14 @@ bool check_return_ppl_region(buf_page_t * bpage){
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
+			/* PPL-MVCC: snapshot this page's frame BEFORE normalize_ppled_page
+			   discards the PPL pointers. Used later by LLT readers in
+			   nvdimm_build_prev_vers_with_redo() via find_prebuilt_page_from_list(). */
+			if (srv_use_ppl_mvcc
+			    && bpage->id.space() == llt_space_id) {
+				add_prebuilt_page(bpage);
+				MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_ADDED);
+			}
 			normalize_ppled_page(bpage, bpage->id);
 			return true;
 		}
@@ -603,68 +635,93 @@ can_page_be_pplized(
 }
 
 
-void 
-init_prebuilt_page_cache(std::vector<buf_page_t*> prebuilt_page_list){
+void
+init_prebuilt_page_cache(std::vector<buf_page_t*>& prebuilt_page_list){
     prebuilt_page_list.clear();
 }
 
-buf_page_t* 
+buf_page_t*
 add_prebuilt_page(buf_page_t* bpage){
+    /* Snapshot the current page (buf_block_t control struct + frame bytes).
+       The original code did memcpy(prebuilt_page, bpage, UNIV_PAGE_SIZE) which
+       is wrong: bpage is a buf_page_t header (~hundreds of bytes), not a 16KB
+       page. We split allocation: a buf_block_t control + a separate aligned
+       frame buffer. Locks/mutexes inside the copied buf_block_t are bitwise
+       duplicates and must NOT be acquired on the copy. */
+    buf_block_t* current_block = buf_page_get_block(bpage);
+    if (current_block == NULL || current_block->frame == NULL) {
+        return NULL;
+    }
 
-    byte * buf = NULL;
-    buf_page_t* prebuilt_page = NULL;
+    byte* control_buf = static_cast<byte*>(ut_malloc_nokey(sizeof(buf_block_t)));
+    if (control_buf == NULL) {
+        return NULL;
+    }
+    byte* frame_buf = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
+    if (frame_buf == NULL) {
+        ut_free(control_buf);
+        return NULL;
+    }
+    byte* frame = static_cast<byte*>(ut_align(frame_buf, UNIV_PAGE_SIZE));
 
+    buf_block_t* prebuilt_block = reinterpret_cast<buf_block_t*>(control_buf);
+    memcpy(prebuilt_block, current_block, sizeof(buf_block_t));
+    buf_frame_copy(frame, current_block->frame);
+    prebuilt_block->frame = frame;
 
-    buf = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
-    prebuilt_page = static_cast<buf_page_t*>(ut_align(buf, UNIV_PAGE_SIZE));
+    /* The in-memory frame already reflects all updates corresponding to its
+       PPLs. We do NOT re-apply PPLs here; the snapshot is taken at the
+       moment of de-PPLization, when the frame is up to date. */
 
-    // copy current version to  prebuilt_page
-    memcpy(prebuilt_page, bpage, UNIV_PAGE_SIZE);
-    buf_block_t* block = buf_page_get_block(prebuilt_page); 
-
-    // apply all the ipl log inside nvdimm 
-    set_apply_info_and_log_apply(block);
-
-    // add prebuilt page to the list
+    buf_page_t* prebuilt_page = &prebuilt_block->page;
     prebuilt_page_list.push_back(prebuilt_page);
-
-    // set start_ptr 
-    if(prebuilt_page_list.size()==1){
-        prebuilt_page_start_ptr=prebuilt_page;
+    if (prebuilt_page_list.size() == 1) {
+        prebuilt_page_start_ptr = prebuilt_page;
     }
     return prebuilt_page;
 }
 
 
-void 
-remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*> prebuilt_page_list){  
-    for(int idx=0; idx<prebuilt_page_list.size(); idx++){
-        if(prebuilt_page_list[idx]==prebuilt_page){
-            prebuilt_page_list.erase(prebuilt_page_list.begin()+idx);
+void
+remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>& prebuilt_page_list){
+    std::vector<buf_page_t*>::iterator it = prebuilt_page_list.begin();
+    while (it != prebuilt_page_list.end()) {
+        if (*it == prebuilt_page) {
+            it = prebuilt_page_list.erase(it);
+        } else {
+            ++it;
         }
     }
 }
 
-buf_page_t* 
-find_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*> prebuilt_page_list){
-    int idx = 0;
+buf_page_t*
+find_prebuilt_page_from_list(buf_page_t* target_bpage, std::vector<buf_page_t*>& prebuilt_page_list){
+    /* Match by page_id (space, page_no), NOT by buf_page_t pointer.
+       add_prebuilt_page stores a COPY of the page's control struct in the
+       list, so the stored pointer is never equal to the original bpage. */
+    if (target_bpage == NULL) return NULL;
     int found_cnt = 0;
-    int found_idx = 0;
-
-    for(idx=0; idx<prebuilt_page_list.size(); idx++){
-        if(prebuilt_page_list[idx]==prebuilt_page){
-            found_idx = idx;
+    int found_idx = -1;
+    for(size_t idx=0; idx<prebuilt_page_list.size(); idx++){
+        buf_page_t* p = prebuilt_page_list[idx];
+        if (p == NULL) continue;
+        if(p->id.space() == target_bpage->id.space()
+           && p->id.page_no() == target_bpage->id.page_no()){
+            found_idx = (int)idx;
             found_cnt++;
         }
     }
-    if(found_idx>1){
-        fprintf(stderr, "MVCC WARNING: there are multiple prebuilt page for this pid...\n");
+    if(found_cnt > 1){
+        fprintf(stderr, "MVCC WARNING: multiple prebuilt pages for page (%u, %u) (count=%d)\n",
+                (unsigned)target_bpage->id.space(),
+                (unsigned)target_bpage->id.page_no(), found_cnt);
     }
-    if(idx==prebuilt_page_list.size()){
+    if(found_idx < 0){
+        MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_MISS);
         return NULL;
-    }else{
-        return prebuilt_page_list[idx];
     }
+    MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_HIT);
+    return prebuilt_page_list[found_idx];
 }
 
 dberr_t
@@ -689,7 +746,28 @@ nvdimm_build_prev_vers_with_redo(
 					column data */
 	buf_page_t* bpage ){
 
-	page_id_t page_id = bpage->id; // cur bpage 
+	/* RAII timer + outcome tracking. Outcome detected from *old_vers at
+	   destruction time:
+	     - *old_vers != NULL: B1 (version produced, e.g. via prebuilt frame)
+	     - *old_vers == NULL: B5/FAIL (no version produced; caller may fall back) */
+	struct RedoBuildStats {
+		rec_t** old_vers_p;
+		ib_uint64_t start;
+		RedoBuildStats(rec_t** ov)
+			: old_vers_p(ov), start(ut_time_us(NULL)) {}
+		~RedoBuildStats() {
+			uint64_t us = (uint64_t)(ut_time_us(NULL) - start);
+			MONITOR_INC(MONITOR_NVDIMM_PPL_REDO_BUILD_CALLS);
+			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_REDO_BUILD_US_SUM, (mon_type_t)us);
+			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_REDO_BUILD_US_MAX, (mon_type_t)us);
+			if (old_vers_p && *old_vers_p != NULL) {
+				MONITOR_INC(MONITOR_NVDIMM_PPL_REDO_OUT_VERS);
+			} else {
+				MONITOR_INC(MONITOR_NVDIMM_PPL_REDO_OUT_NULL);
+			}
+		}
+	} __redo_timer(old_vers);
+	page_id_t page_id = bpage->id; // cur bpage
 	buf_block_t* block = buf_page_get_block(bpage); // cur block
 	
 	
@@ -717,6 +795,7 @@ nvdimm_build_prev_vers_with_redo(
 	dberr_t		err = DB_SUCCESS;
 	buf_block_t* temp_block;
 	bool resuse_prev_built_page = false;
+	bool used_prebuilt = false;
 	trx_id_t	old_page_max_trx_id;
 	trx_id_t	cur_page_max_trx_id;
 	trx_id_t temp_trx_id;
@@ -777,19 +856,34 @@ nvdimm_build_prev_vers_with_redo(
 		goto get_rec_offset;
 	}
 
-	// check prebuilt page list
+	/* Prebuilt page lookup. add_prebuilt_page allocates a separate
+	   buf_block_t + frame at de-PPLization time. If found, copy that
+	   frame into temp_page and skip disk read + PPL apply by jumping
+	   straight to record extraction at get_rec_offset. */
 	temp_bpage = find_prebuilt_page_from_list(bpage, prebuilt_page_list);
-	if(temp_bpage!=NULL){
-		memcpy(bpage, temp_bpage, UNIV_PAGE_SIZE);
+	if (temp_bpage != NULL) {
+		buf_block_t* pre_block = buf_page_get_block(temp_bpage);
+		if (pre_block != NULL && pre_block->frame != NULL) {
+			buf_frame_copy(temp_page, pre_block->frame);
+			used_prebuilt = true;
+		}
 		remove_prebuilt_page_from_list(temp_bpage, prebuilt_page_list);
-		fprintf(stderr, "prebuilt page list size: %d\n", prebuilt_page_list.size());
+		if (used_prebuilt) {
+			goto get_rec_offset;
+		}
 	}
 	
 	/* 1. Copy PPL region to memory */
 
-	if(final_ipl_rec==NULL){
+	/* Redo path could not produce an old version (no prebuilt matched, no
+	   page_no cache hit, and the disk-read + PPL-apply body below is dead
+	   code). Return DB_FAIL so row0sel.cc falls back to the undo-based
+	   path (row_vers_build_for_consistent_read). Returning DB_SUCCESS
+	   with *old_vers=NULL would silently drop the record from the LLT's
+	   view, which is wrong. */
+	if (final_ipl_rec == NULL) {
 		*old_vers = NULL;
-		return DB_SUCCESS;
+		return DB_FAIL;
 	}
 	if(apply_log_size<64){
 		return DB_FAIL;
@@ -930,8 +1024,10 @@ read_old_page:
 	/* 4. After getting the right version of the IPL page, store the right record to the old_vers record */
 
 get_rec_offset:
-	if(resuse_prev_built_page==true){
-		fprintf(stderr, "reuse_prev_built_page: %d bpage: %lu \n", resuse_prev_built_page, bpage);
+	if (used_prebuilt) {
+		/* temp_page already populated from prebuilt frame above.
+		   Don't overwrite it with nvdimm_info->old_page. */
+	} else if (resuse_prev_built_page == true) {
 		buf_frame_copy(temp_page, nvdimm_info->old_page);
 	}
 

@@ -417,9 +417,18 @@ int main( int argc, char *argv[] )
 	      atoi(argv[12 + arg_offset]), atoi(argv[13 + arg_offset]) );
   }
 
-  // (anonymous): add 
-  fprintf(stderr, "current num_conn: %d, but we add +1 for long-running query\n",num_conn);
-  num_conn = num_conn*2;
+  /* LLT support: spawn one extra thread for the long-running query.
+     Original code did num_conn*=2 (allocating twice as many slots) but then
+     only spawned num_conn/2 regular threads + 1 LLT thread, leaving the
+     upper half of the t[] array uninitialized. pthread_join on those
+     uninit slots is undefined behaviour. Fix: bump num_conn by exactly 1
+     when LLT is enabled, so all allocated slots are actually spawned. */
+#ifdef LLT
+  fprintf(stderr, "current num_conn: %d, +1 LLT thread (total: %d)\n", num_conn, num_conn + 1);
+  num_conn = num_conn + 1;
+#else
+  fprintf(stderr, "current num_conn: %d (no LLT)\n", num_conn);
+#endif
 
   /* set up each counter */
   for ( i=0; i<5; i++ ){
@@ -469,7 +478,14 @@ int main( int argc, char *argv[] )
 
   /* EXEC SQL WHENEVER SQLERROR GOTO sqlerr; */
 
-  for( t_num=0; t_num < num_conn/2; t_num++ ){
+  /* Spawn regular TPC-C threads. Under LLT, num_conn already includes
+     the +1 LLT slot, so spawn (num_conn-1) regular threads. */
+#ifdef LLT
+  int num_regular = num_conn - 1;
+#else
+  int num_regular = num_conn;
+#endif
+  for( t_num=0; t_num < num_regular; t_num++ ){
     thd_arg[t_num].port= port;
     thd_arg[t_num].number= t_num;
     pthread_create( &t[t_num], NULL, (void *)thread_main, (void *)&(thd_arg[t_num]) );
@@ -490,12 +506,14 @@ int main( int argc, char *argv[] )
   }
 #endif
 
-// (anonymous)
+  /* Spawn the LLT thread at the last slot (index num_conn-1) so the
+     join loop covers it. */
 #ifdef LLT
-  for( t_num=num_conn/2; t_num < num_conn/2+1; t_num++ ){
+  {
+    t_num = num_conn - 1;
     thd_arg[t_num].port= port;
-    thd_arg[t_num].number= t_num; 
-	pthread_create(&t[t_num], NULL, (void*)thread_long_tx, (void *)&(thd_arg[t_num]));
+    thd_arg[t_num].number= t_num;
+    pthread_create(&t[t_num], NULL, (void*)thread_long_tx, (void *)&(thd_arg[t_num]));
   }
 #endif
 	
@@ -780,16 +798,27 @@ int thread_long_tx(thread_arg * arg) {
 	}
 
   int cnt = 0;
-	
-	while( activate_transaction ) { 
+
+	/* Paper Sec 6.5: LLT issues SELECTs over Stock that need MVCC version
+	   reconstruction. Use REPEATABLE READ snapshot (default) and a plain
+	   SELECT (NOT "for update", which would lock pages and bypass MVCC).
+	   Range covers most of the Stock table so each Q1 scans many pages
+	   touched by concurrent OLTP, forcing prev-version build. */
+	while( activate_transaction ) {
     cnt++;
     unsigned old_clock = clock();
-		rc = mysql_query(ctx[t_num], "start transaction;");
+		rc = mysql_query(ctx[t_num], "start transaction with consistent snapshot;");
 		if (rc != 0) goto sql_error;
 		if(cnt%2==0){
-			rc = mysql_query(ctx[t_num], "select * from stock where s_i_id > 1 AND s_i_id <2000 for update;"); // for update item 100k
+			rc = mysql_query(ctx[t_num],
+				"select s.*, w.w_name, w.w_ytd "
+				"from stock s join warehouse w on s.s_w_id = w.w_id "
+				"where s.s_i_id between 1 and 50000;");
 		}else{
-			rc = mysql_query(ctx[t_num], "select * from stock where s_i_id > 6000 AND s_i_id <9000 for update;"); // for update item 100k
+			rc = mysql_query(ctx[t_num],
+				"select s.*, w.w_name, w.w_ytd "
+				"from stock s join warehouse w on s.s_w_id = w.w_id "
+				"where s.s_i_id between 50001 and 100000;");
 		}if (rc != 0) goto sql_error;
 		MYSQL_RES *r=mysql_store_result(ctx[t_num]);\
 		if(r!=NULL) mysql_free_result(r);\

@@ -29,7 +29,7 @@ extern "C" {
 
 /* definitions for new order transaction */
 #define MAX_NUM_ITEMS 15
-#define MAX_ITEM_LEN  24
+#define MAX_ITEM_LEN  25
 
 #define swap_int(a,b) {int tmp; tmp=a; a=b; b=tmp;}
 

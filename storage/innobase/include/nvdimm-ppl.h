@@ -343,10 +343,10 @@ extern uint64_t ipl_org_apply_cnt;
 extern std::vector<buf_page_t*> prebuilt_page_list;
 extern buf_page_t * prebuilt_page_start_ptr;
 //for mvcc prebuilt page upon ppl normalization
-void init_prebuilt_page_cache(std::vector<buf_page_t*> prebuilt_page_list);
+void init_prebuilt_page_cache(std::vector<buf_page_t*>& prebuilt_page_list);
 buf_page_t* add_prebuilt_page(buf_page_t* bpage);
-void remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*> prebuilt_page_list);
-buf_page_t* find_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>prebuilt_page_list);
+void remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>& prebuilt_page_list);
+buf_page_t* find_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>& prebuilt_page_list);
 dberr_t
 nvdimm_build_prev_vers_with_redo(
 	const rec_t*	rec,		/*!< in: record in a clustered index */

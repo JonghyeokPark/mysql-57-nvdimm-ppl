@@ -26,6 +26,7 @@ Created 2/6/1997 Heikki Tuuri
 #include "ha_prototypes.h"
 
 #include "row0vers.h"
+#include "srv0mon.h"
 
 #ifdef UNIV_NONINL
 #include "row0vers.ic"
@@ -1188,6 +1189,9 @@ row_vers_build_for_consistent_read(
 	mem_heap_t*	heap		= NULL;
 	byte*		buf;
 	dberr_t		err;
+#ifdef UNIV_NVDIMM_PPL
+	ib_uint64_t	t_start_us = ut_time_us(NULL);
+#endif
 
 	ut_ad(dict_index_is_clust(index));
 	ut_ad(mtr_memo_contains_page(mtr, rec, MTR_MEMO_PAGE_X_FIX)
@@ -1277,6 +1281,39 @@ int buffer_miss_cnt = 0;
 	}
 
 	mem_heap_free(heap);
+
+#ifdef UNIV_NVDIMM_PPL
+	/* Per-table undo-chain + timing stats (innodb_metrics). */
+	{
+		uint64_t elapsed_us = (uint64_t)(ut_time_us(NULL) - t_start_us);
+		const char* tname = (index && index->table) ? index->table->name.m_name : "";
+		if (tname && strstr(tname, "/stock") != NULL) {
+			MONITOR_INC(MONITOR_NVDIMM_PPL_UNDO_STOCK_CALLS);
+			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_STOCK_LEN_SUM,
+				(mon_type_t)version_build_cnt);
+			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_STOCK_LEN_MAX,
+				(mon_type_t)version_build_cnt);
+			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_STOCK_PAGE_MISS,
+				(mon_type_t)buffer_miss_cnt);
+			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_STOCK_US_SUM,
+				(mon_type_t)elapsed_us);
+			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_STOCK_US_MAX,
+				(mon_type_t)elapsed_us);
+		} else if (tname && strstr(tname, "/warehouse") != NULL) {
+			MONITOR_INC(MONITOR_NVDIMM_PPL_UNDO_WH_CALLS);
+			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_WH_LEN_SUM,
+				(mon_type_t)version_build_cnt);
+			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_WH_LEN_MAX,
+				(mon_type_t)version_build_cnt);
+			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_WH_PAGE_MISS,
+				(mon_type_t)buffer_miss_cnt);
+			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_WH_US_SUM,
+				(mon_type_t)elapsed_us);
+			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_WH_US_MAX,
+				(mon_type_t)elapsed_us);
+		}
+	}
+#endif
 
 	return(err);
 }
