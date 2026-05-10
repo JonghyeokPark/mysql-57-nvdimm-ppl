@@ -792,43 +792,60 @@ int thread_long_tx(thread_arg * arg) {
 		goto sql_error;
 	}	
 	if (!is_long_running) {
-		fprintf(stderr, "start timer for long running transaction execution!\n");
+		fprintf(stdout, "start timer for long running transaction execution!\n"); fflush(stdout);
 		sleep(5); //lbh
 		is_long_running=1;
 	}
 
   int cnt = 0;
 
-	/* Paper Sec 6.5: LLT issues SELECTs over Stock that need MVCC version
-	   reconstruction. Use REPEATABLE READ snapshot (default) and a plain
-	   SELECT (NOT "for update", which would lock pages and bypass MVCC).
-	   Range covers most of the Stock table so each Q1 scans many pages
-	   touched by concurrent OLTP, forcing prev-version build. */
+	/* True LLT: BEGIN once with a consistent snapshot, then issue SELECTs
+	   repeatedly without committing. The read view stays anchored at the
+	   initial snapshot so OLTP updates that happen during the run force
+	   MVCC version reconstruction (undo chain or PPL-MV path) for every
+	   record LLT reads. Commit only at the end (when activate_transaction
+	   flips to 0). */
+	rc = mysql_query(ctx[t_num], "start transaction with consistent snapshot;");
+	if (rc != 0) goto sql_error;
+
+	/* Bound each LLT SELECT to the remaining measurement window so the
+	   thread exits when the run ends. ER_QUERY_INTERRUPTED is treated
+	   like a normal end-of-iteration. */
+	char llt_q[512];
+	unsigned long llt_budget_ms = (unsigned long)measure_time * 1000UL;
 	while( activate_transaction ) {
     cnt++;
     unsigned old_clock = clock();
-		rc = mysql_query(ctx[t_num], "start transaction with consistent snapshot;");
-		if (rc != 0) goto sql_error;
 		if(cnt%2==0){
-			rc = mysql_query(ctx[t_num],
-				"select s.*, w.w_name, w.w_ytd "
+			snprintf(llt_q, sizeof(llt_q),
+				"select /*+ MAX_EXECUTION_TIME(%lu) */ s.*, w.w_name, w.w_ytd "
 				"from stock s join warehouse w on s.s_w_id = w.w_id "
-				"where s.s_i_id between 1 and 50000;");
+				"where s.s_i_id between 1 and 50000;", llt_budget_ms);
 		}else{
-			rc = mysql_query(ctx[t_num],
-				"select s.*, w.w_name, w.w_ytd "
+			snprintf(llt_q, sizeof(llt_q),
+				"select /*+ MAX_EXECUTION_TIME(%lu) */ s.*, w.w_name, w.w_ytd "
 				"from stock s join warehouse w on s.s_w_id = w.w_id "
-				"where s.s_i_id between 50001 and 100000;");
-		}if (rc != 0) goto sql_error;
-		MYSQL_RES *r=mysql_store_result(ctx[t_num]);\
-		if(r!=NULL) mysql_free_result(r);\
+				"where s.s_i_id between 50001 and 100000;", llt_budget_ms);
+		}
+		rc = mysql_query(ctx[t_num], llt_q);
+		if (rc != 0) {
+			unsigned int e = mysql_errno(ctx[t_num]);
+			if (e == 3024 /* ER_QUERY_TIMEOUT */ || e == 1317 /* ER_QUERY_INTERRUPTED */) {
+				break;
+			}
+			goto sql_error;
+		}
+		MYSQL_RES *r=mysql_store_result(ctx[t_num]);
+		if(r!=NULL) mysql_free_result(r);
 		mysql_next_result(ctx[t_num]);
-		rc = mysql_commit(ctx[t_num]);
-		if (rc != 0) goto sql_error;
+		/* Do NOT commit: keep the snapshot alive across iterations. */
     unsigned cur_clock = clock();
 
-    fprintf(stderr, "LLT query cnt: %d %d seconds (%d milliseconds).\n", cnt, (cur_clock - old_clock) / CLOCKS_PER_SEC, (cur_clock - old_clock) / (CLOCKS_PER_SEC / 1000) );
+    fprintf(stdout, "LLT query cnt: %d %d seconds (%d milliseconds).\n", cnt, (cur_clock - old_clock) / CLOCKS_PER_SEC, (cur_clock - old_clock) / (CLOCKS_PER_SEC / 1000) ); fflush(stdout);
 	}
+
+	/* Cleanup commit at end of measurement. */
+	mysql_commit(ctx[t_num]);
 
 sql_error:
 	fprintf(stderr, "SQL error! rc: %d\n", rc);

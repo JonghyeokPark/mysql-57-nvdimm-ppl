@@ -6497,6 +6497,21 @@ corrupt:
 		/* Write means a flush operation: call the completion
 		routine in the flush system */
 		buf_flush_write_complete(bpage);
+#ifdef UNIV_NVDIMM_PPL
+		/* PPL-MVCC: snapshot the frame for LLT readers WHILE SX-lock
+		   is still held. After the SX-unlock below, X-writers may
+		   modify the frame and our 16KB memcpy would tear, producing
+		   a snapshot with cyclic record links. A reader then spins
+		   forever in page_find_rec_with_heap_no, holding its own page
+		   S-latch and freezing the server. */
+		if (uncompressed
+		    && srv_use_ppl_mvcc
+		    && get_flag(&(bpage->flags), PPLIZED)
+		    && get_flag(&(bpage->flags), NORMALIZE)
+		    && bpage->id.space() == llt_space_id) {
+			add_prebuilt_page(bpage);
+		}
+#endif
 		if (uncompressed) {
 			rw_lock_sx_unlock_gen(&((buf_block_t*) bpage)->lock,
 					      BUF_IO_WRITE);

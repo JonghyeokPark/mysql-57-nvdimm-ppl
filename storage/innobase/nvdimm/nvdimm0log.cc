@@ -543,14 +543,9 @@ bool check_return_ppl_region(buf_page_t * bpage){
 	}
 	else{
 		if(get_flag(&(bpage->flags), NORMALIZE)){
-			/* PPL-MVCC: snapshot this page's frame BEFORE normalize_ppled_page
-			   discards the PPL pointers. Used later by LLT readers in
-			   nvdimm_build_prev_vers_with_redo() via find_prebuilt_page_from_list(). */
-			if (srv_use_ppl_mvcc
-			    && bpage->id.space() == llt_space_id) {
-				add_prebuilt_page(bpage);
-				MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_ADDED);
-			}
+			/* PPL-MVCC prebuild snapshot is taken earlier in
+			   buf_page_io_complete WHILE the SX-lock is still held;
+			   here we only truncate the chain. */
 			normalize_ppled_page(bpage, bpage->id);
 			return true;
 		}
