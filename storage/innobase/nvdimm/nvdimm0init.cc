@@ -138,6 +138,7 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
 
    /* mvcc-ppl */
   init_prebuilt_page_cache(prebuilt_page_list);
+  mutex_create(LATCH_ID_STATIC_REGION, &prebuilt_page_list_mutex);
   /* end */
   
   return nvdimm_ptr;

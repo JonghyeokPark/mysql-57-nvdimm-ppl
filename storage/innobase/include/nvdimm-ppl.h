@@ -342,6 +342,7 @@ extern uint64_t ipl_org_apply_cnt;
 // for PPL-mvcc
 extern std::vector<buf_page_t*> prebuilt_page_list;
 extern buf_page_t * prebuilt_page_start_ptr;
+extern ib_mutex_t prebuilt_page_list_mutex;
 //for mvcc prebuilt page upon ppl normalization
 void init_prebuilt_page_cache(std::vector<buf_page_t*>& prebuilt_page_list);
 buf_page_t* add_prebuilt_page(buf_page_t* bpage);

@@ -451,9 +451,18 @@ enum monitor_id_t {
 	MONITOR_NVDIMM_PPL_REDO_BUILD_CALLS,    /* nvdimm_build_prev_vers_with_redo calls */
 	MONITOR_NVDIMM_PPL_REDO_BUILD_US_SUM,
 	MONITOR_NVDIMM_PPL_REDO_BUILD_US_MAX,
-	MONITOR_NVDIMM_PPL_REDO_OUT_VERS,       /* B1: returned old_vers != NULL (prebuilt direct used) */
-	MONITOR_NVDIMM_PPL_REDO_OUT_NULL,       /* B5: returned old_vers = NULL (no old version) */
+	MONITOR_NVDIMM_PPL_REDO_OUT_VERS,       /* returned old_vers != NULL */
+	MONITOR_NVDIMM_PPL_REDO_OUT_NULL,       /* returned old_vers = NULL */
 	MONITOR_NVDIMM_PPL_REDO_OUT_FAIL,       /* DB_FAIL → caller falls back to undo */
+	/* Per-path stats (mutually exclusive within nvdimm_build_prev_vers_with_redo) */
+	MONITOR_NVDIMM_PPL_PATH_A_CALLS,        /* prebuilt direct success */
+	MONITOR_NVDIMM_PPL_PATH_A_US_SUM,
+	MONITOR_NVDIMM_PPL_PATH_A_US_MAX,
+	MONITOR_NVDIMM_PPL_PATH_B_FALLBACK,     /* prebuilt found but visibility failed → DB_FAIL → undo */
+	MONITOR_NVDIMM_PPL_PATH_C_CALLS,        /* disk read + PPL forward apply */
+	MONITOR_NVDIMM_PPL_PATH_C_US_SUM,
+	MONITOR_NVDIMM_PPL_PATH_C_US_MAX,
+	MONITOR_NVDIMM_PPL_PATH_C_FAIL,         /* Path C taken but resulted in DB_FAIL */
 
 	/* This is used only for control system to turn
 	on/off and reset all monitor counters */

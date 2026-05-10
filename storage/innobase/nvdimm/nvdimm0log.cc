@@ -22,6 +22,7 @@
 #include "buf0flu.h"
 #include "srv0srv.h"
 #include "srv0mon.h"
+#include "row0row.h"
 
 #include <emmintrin.h>
 #include <stdlib.h>
@@ -30,6 +31,11 @@
 
 std::vector<buf_page_t*> prebuilt_page_list;
 buf_page_t * prebuilt_page_start_ptr = NULL;
+/* Guards prebuilt_page_list against concurrent push_back / erase / scan
+   from OLTP de-PPLization adders and LLT version-build consumers. Without
+   it, vector reallocation invalidates in-flight iterators, producing the
+   SEGV at *it dereference observed in remove_prebuilt_page_from_list. */
+ib_mutex_t prebuilt_page_list_mutex;
 
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
 	unsigned char * first_ppl_block_ptr = alloc_ppl_from_queue(normal_buf_pool_get(bpage->id));
@@ -152,6 +158,10 @@ alloc_ppl:
 
 void set_apply_info_and_log_apply(buf_block_t* block) {
 	buf_page_t * apply_page = (buf_page_t *)block;
+
+	unsigned char* ppl = apply_page->first_ppl_block_ptr;
+	if (ppl == NULL) return;
+
 	mtr_t temp_mtr;
 	ulint apply_log_size = get_ppl_length_from_ppl_header(apply_page);
 
@@ -247,6 +257,32 @@ void all_ppl_apply_to_page(byte *start_ptr, ulint apply_log_size, buf_block_t *b
     }
 	block->page.ppl_write_pointer = current_ptr;
 	block->page.block_used = current_ptr - (end_ptr - nvdimm_info->each_ppl_size);
+
+	/* Post-apply page sanity check. Catch stale-chain corruption that
+	   silently wrote out-of-range bytes into the page (heap_top, n_recs,
+	   page type). If we crash here, the chain that was just applied is
+	   the suspect — apply log_size and ppl pointer recorded above for
+	   the trace. */
+	if (!nvdimm_recv_running) {
+		page_t* page = block->frame;
+		ulint heap_top = mach_read_from_2(page + PAGE_HEADER + PAGE_HEAP_TOP);
+		ulint n_recs   = mach_read_from_2(page + PAGE_HEADER + PAGE_N_RECS);
+		ulint ptype    = mach_read_from_2(page + FIL_PAGE_TYPE);
+		bool corrupt = false;
+		if (heap_top > UNIV_PAGE_SIZE || heap_top < PAGE_DATA) corrupt = true;
+		if (n_recs   > 8000)                                   corrupt = true;
+		if (ptype != FIL_PAGE_INDEX
+		 && ptype != FIL_PAGE_RTREE)                           corrupt = true;
+		if (corrupt) {
+			fprintf(stderr,
+				"PPL_APPLY_CORRUPT,page=%u:%u,heap_top=%lu,n_recs=%lu,ptype=%lu\n",
+				(unsigned)block->page.id.space(),
+				(unsigned)block->page.id.page_no(),
+				heap_top, n_recs, ptype);
+			fflush(stderr);
+			abort();
+		}
+	}
 }
 
 // Helper function to handle log data that spans segment boundaries
@@ -262,16 +298,25 @@ byte* fetch_next_segment(byte* current_end, byte** new_end, byte** next_ppl) {
 	return current_ptr;
 }
 
+/* Thread-local flag: true while we are inside chain apply (set_apply_info_
+   and_log_apply -> all_ppl_apply_to_page -> apply_log_record). Used by
+   page_cur_delete_rec's SILENT_DEL_NO_NORM trace to distinguish apply's
+   own MTR_LOG_NONE deletes from external silent deletes that may break
+   chain coherence. */
+__thread int tls_in_ppl_apply = 0;
+
 void apply_log_record(mlog_id_t log_type, byte* log_data, uint length, trx_id_t trx_id, buf_block_t* block, mtr_t* temp_mtr) {
 	if (nvdimm_recv_ipl_undo && ipl_active_trx_ids.find(trx_id) != ipl_active_trx_ids.end()) {
-			// pass	
-			ib::info() << "skip undo because this is created from trx which is active at the crash!";	
-	} 
+			// pass
+			ib::info() << "skip undo because this is created from trx which is active at the crash!";
+	}
 	else {
+		tls_in_ppl_apply++;
 		recv_parse_or_apply_log_rec_body(
 									log_type, log_data
 									, log_data + length, block->page.id.space()
 									, block->page.id.page_no(), block, temp_mtr);
+		tls_in_ppl_apply--;
 	}
 }
 
@@ -365,11 +410,6 @@ void normalize_ppled_page(buf_page_t * bpage, page_id_t page_id){
 		ulint log_bytes = bpage->ppl_length;
 		MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_TOTAL);
 		MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LOG_BYTES_TOTAL, log_bytes);
-		/* Per-table CSV trace: NORM,<space>,<page_no>,<cause>,<bytes> */
-		fprintf(stderr, "NORM,%u,%u,%u,%lu\n",
-			(unsigned)bpage->id.space(),
-			(unsigned)bpage->id.page_no(),
-			cause, (unsigned long)log_bytes);
 		switch (cause) {
 		case 1: MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE1); break;
 		case 2: MONITOR_INC(MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE2); break;
@@ -623,9 +663,16 @@ can_page_be_pplized(
 	const page_id_t	page_id(space, page_no);
 	buf_pool_t * buf_pool = buf_pool_get(page_id);
 	buf_page_t * buf_page = buf_page_get_also_watch(buf_pool, page_id);
-	if(!is_system_or_undo_tablespace(space) && 
-		!get_flag(&(buf_page->flags), NORMALIZE) && 
-		page_is_leaf(((buf_block_t *)buf_page)->frame) && 
+	/* Guard against PPLizing non-index pages (FSP_HDR/XDES, IBUF_BITMAP,
+	   INODE, UNDO, etc). page_is_leaf only checks PAGE_LEVEL bytes which
+	   on non-index pages are arbitrary data and may happen to be zero,
+	   causing false-positive PPLization → record-level apply on a
+	   non-index page byte layout → page corruption. */
+	ulint ptype = mach_read_from_2(((buf_block_t*)buf_page)->frame + FIL_PAGE_TYPE);
+	if(!is_system_or_undo_tablespace(space) &&
+		!get_flag(&(buf_page->flags), NORMALIZE) &&
+		(ptype == FIL_PAGE_INDEX || ptype == FIL_PAGE_RTREE) &&
+		page_is_leaf(((buf_block_t *)buf_page)->frame) &&
 		buf_page_in_file(buf_page) &&
 		page_id.page_no() > 7){
 		return true;
@@ -674,16 +721,19 @@ add_prebuilt_page(buf_page_t* bpage){
        moment of de-PPLization, when the frame is up to date. */
 
     buf_page_t* prebuilt_page = &prebuilt_block->page;
+    mutex_enter(&prebuilt_page_list_mutex);
     prebuilt_page_list.push_back(prebuilt_page);
     if (prebuilt_page_list.size() == 1) {
         prebuilt_page_start_ptr = prebuilt_page;
     }
+    mutex_exit(&prebuilt_page_list_mutex);
     return prebuilt_page;
 }
 
 
 void
 remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>& prebuilt_page_list){
+    mutex_enter(&prebuilt_page_list_mutex);
     std::vector<buf_page_t*>::iterator it = prebuilt_page_list.begin();
     while (it != prebuilt_page_list.end()) {
         if (*it == prebuilt_page) {
@@ -692,6 +742,7 @@ remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t
             ++it;
         }
     }
+    mutex_exit(&prebuilt_page_list_mutex);
 }
 
 buf_page_t*
@@ -700,6 +751,7 @@ find_prebuilt_page_from_list(buf_page_t* target_bpage, std::vector<buf_page_t*>&
        add_prebuilt_page stores a COPY of the page's control struct in the
        list, so the stored pointer is never equal to the original bpage. */
     if (target_bpage == NULL) return NULL;
+    mutex_enter(&prebuilt_page_list_mutex);
     int found_cnt = 0;
     int found_idx = -1;
     for(size_t idx=0; idx<prebuilt_page_list.size(); idx++){
@@ -717,11 +769,14 @@ find_prebuilt_page_from_list(buf_page_t* target_bpage, std::vector<buf_page_t*>&
                 (unsigned)target_bpage->id.page_no(), found_cnt);
     }
     if(found_idx < 0){
+        mutex_exit(&prebuilt_page_list_mutex);
         MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_MISS);
         return NULL;
     }
+    buf_page_t* found = prebuilt_page_list[found_idx];
+    mutex_exit(&prebuilt_page_list_mutex);
     MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_HIT);
-    return prebuilt_page_list[found_idx];
+    return found;
 }
 
 dberr_t
@@ -746,15 +801,19 @@ nvdimm_build_prev_vers_with_redo(
 					column data */
 	buf_page_t* bpage ){
 
-	/* RAII timer + outcome tracking. Outcome detected from *old_vers at
-	   destruction time:
-	     - *old_vers != NULL: B1 (version produced, e.g. via prebuilt frame)
-	     - *old_vers == NULL: B5/FAIL (no version produced; caller may fall back) */
+	/* Per-path tag for accounting:
+	     0 = none/early-error
+	     1 = Path A (prebuilt direct success — visible)
+	     2 = Path B (prebuilt found, visibility failed → DB_FAIL → undo)
+	     3 = Path C (disk + PPL apply) */
+	int __path_tag = 0;
+	/* RAII timer + outcome accounting. */
 	struct RedoBuildStats {
 		rec_t** old_vers_p;
+		int* path_p;
 		ib_uint64_t start;
-		RedoBuildStats(rec_t** ov)
-			: old_vers_p(ov), start(ut_time_us(NULL)) {}
+		RedoBuildStats(rec_t** ov, int* pp)
+			: old_vers_p(ov), path_p(pp), start(ut_time_us(NULL)) {}
 		~RedoBuildStats() {
 			uint64_t us = (uint64_t)(ut_time_us(NULL) - start);
 			MONITOR_INC(MONITOR_NVDIMM_PPL_REDO_BUILD_CALLS);
@@ -765,8 +824,28 @@ nvdimm_build_prev_vers_with_redo(
 			} else {
 				MONITOR_INC(MONITOR_NVDIMM_PPL_REDO_OUT_NULL);
 			}
+			switch (*path_p) {
+			case 1: /* Path A */
+				MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_A_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_PATH_A_US_SUM, (mon_type_t)us);
+				MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_PATH_A_US_MAX, (mon_type_t)us);
+				break;
+			case 2: /* Path B fallback */
+				MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_B_FALLBACK);
+				break;
+			case 3: /* Path C */
+				if (old_vers_p && *old_vers_p != NULL) {
+					MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_C_CALLS);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_PATH_C_US_SUM, (mon_type_t)us);
+					MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_PATH_C_US_MAX, (mon_type_t)us);
+				} else {
+					MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_C_FAIL);
+				}
+				break;
+			default: break;
+			}
 		}
-	} __redo_timer(old_vers);
+	} __redo_timer(old_vers, &__path_tag);
 	page_id_t page_id = bpage->id; // cur bpage
 	buf_block_t* block = buf_page_get_block(bpage); // cur block
 	
@@ -853,6 +932,7 @@ nvdimm_build_prev_vers_with_redo(
 	// same page built right before -> reuse it
 	if(page_get_page_no(nvdimm_info->old_page)==page_get_page_no(page) && temp_old_page_ptr!=NULL){
 		resuse_prev_built_page = true;
+		__path_tag = 1; /* count cache reuse as Path A; may downgrade to 2 (B) if visibility fails */
 		goto get_rec_offset;
 	}
 
@@ -869,23 +949,14 @@ nvdimm_build_prev_vers_with_redo(
 		}
 		remove_prebuilt_page_from_list(temp_bpage, prebuilt_page_list);
 		if (used_prebuilt) {
+			__path_tag = 1; /* Path A; may downgrade to 2 if visibility check fails below */
 			goto get_rec_offset;
 		}
 	}
 	
-	/* 1. Copy PPL region to memory */
-
-	/* Redo path could not produce an old version (no prebuilt matched, no
-	   page_no cache hit, and the disk-read + PPL-apply body below is dead
-	   code). Return DB_FAIL so row0sel.cc falls back to the undo-based
-	   path (row_vers_build_for_consistent_read). Returning DB_SUCCESS
-	   with *old_vers=NULL would silently drop the record from the LLT's
-	   view, which is wrong. */
-	if (final_ipl_rec == NULL) {
+	__path_tag = 3; /* Path C attempted (disk read + PPL apply) */
+	if (apply_log_size < 64) {
 		*old_vers = NULL;
-		return DB_FAIL;
-	}
-	if(apply_log_size<64){
 		return DB_FAIL;
 	}
 
@@ -924,20 +995,30 @@ read_old_page:
 	//fprintf(stderr, "After fil_io space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
 	//fprintf(stderr, "After lock release space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
 
-	old_page_max_trx_id = page_get_max_trx_id(nvdimm_info->old_page);
+	/* Path C: read max_trx from the freshly disk-loaded local old_page,
+	   not the stale nvdimm_info->old_page global cache. */
+	old_page_max_trx_id = page_get_max_trx_id(old_page);
 	cur_page_max_trx_id = page_get_max_trx_id(page);
 	
 
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 
+	/* Initialize temp_page to disk state so it's never uninitialized,
+	   even if the apply loop below doesn't iterate (e.g. disk's max_trx
+	   already not visible to LLT — extremely rare since LLT.start is
+	   usually older than disk-flushed trx). */
+	buf_frame_copy(temp_page, old_page);
 
 	/* 3. Traverse all the log records inside IPL region to find until which redo log we should apply based on trx_id
 	 Apply the redo log and find compare the max_trx_id of the old bpage with the readview trx_id */
-	 
+
 	 while (apply_log_size != 0 && read_view->changes_visible(old_page_max_trx_id, clust_index->table->name)  ) {
-		/* Copy the old page to temporary space */
-		buf_frame_copy(temp_page, nvdimm_info->old_page);
+		/* Save the current (still LLT-visible) version into temp_page
+		   before applying the next PPL. If the next apply makes the
+		   page no longer visible, we exit and temp_page holds the
+		   correct visible version. */
+		buf_frame_copy(temp_page, old_page);
 
 		temp_trx_id = old_page_max_trx_id;
 
@@ -1011,10 +1092,21 @@ read_old_page:
 			current_ptr += log_body_length; // Move past the log body
 			apply_log_size -= log_body_length;
 		}
-		old_page_max_trx_id = page_get_max_trx_id(nvdimm_info->old_page);
+		/* Re-read max_trx from local old_page after apply. */
+		old_page_max_trx_id = page_get_max_trx_id(old_page);
     }
 	
-	if(start_ptr < end_ptr){  // all built version visible to the read trx -> provide old_page instead of temp_page
+	/* Loop exit interpretation:
+	   - apply_log_size == 0  : all PPLs applied and all were visible to the
+	                            LLT. Final old_page = LLT-visible version.
+	                            Use old_page as the final temp_page.
+	   - apply_log_size  > 0  : visibility broke at some PPL. temp_page holds
+	                            the last-visible state (saved at top of the
+	                            iteration before the breaking apply). Keep
+	                            temp_page as-is.
+	   The original `start_ptr < end_ptr` was always true (start/end are
+	   block boundaries), incorrectly always overwriting temp_page. */
+	if (apply_log_size == 0) {
 		buf_frame_copy(temp_page, old_page);
 		temp_trx_id = old_page_max_trx_id;
 	}
@@ -1079,6 +1171,26 @@ get_rec_offset:
 
 	if(rec_get_deleted_flag(*old_vers, true)){
 		return DB_FAIL;
+	}
+
+	/* Simplified Path B: verify the extracted record is actually visible
+	   to the LLT's read view. If not, the prebuilt frame / disk-applied
+	   version is still too new for this LLT — return DB_FAIL so the
+	   caller falls back to the full undo path which can walk further
+	   back. (paper-optimal Path B would walk undo starting *from* the
+	   prebuilt frame; that requires a latched page and is left for a
+	   future Phase B.) */
+	{
+		trx_id_t old_rec_trx_id = row_get_rec_trx_id(*old_vers, clust_index, *offsets);
+		if (!read_view->changes_visible(old_rec_trx_id, clust_index->table->name)) {
+			/* If we got here via Path A (used_prebuilt), the prebuilt
+			   was newer than LLT — flag as Path B fallback. */
+			if (__path_tag == 1) {
+				__path_tag = 2;
+			}
+			*old_vers = NULL;
+			return DB_FAIL;
+		}
 	}
 
 	if(resuse_prev_built_page==false){

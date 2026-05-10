@@ -778,6 +778,17 @@ page_copy_rec_list_start(
 	ulint*		offsets		= offsets_;
 	rec_offs_init(offsets_);
 
+#ifdef UNIV_NVDIMM_PPL
+	/* Mirror page_copy_rec_list_end: mark NORMALIZE on both source and
+	   target so chain entries from before this MERGE-style copy are
+	   truncated on next flush, and subsequent record-level mlogs produced
+	   inside this function don't slip into chain ahead of the structural
+	   change. Missing here was a real source of stale chain cursors
+	   (cursor > heap_top after disk reread) → SEGV during apply. */
+	set_normalize_flag((buf_page_t *)block, 1);
+	set_normalize_flag((buf_page_t *)new_block, 1);
+#endif
+
 	/* Here, "ret" may be pointing to a user record or the
 	predefined infimum record. */
 

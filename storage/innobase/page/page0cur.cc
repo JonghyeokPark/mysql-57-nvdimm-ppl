@@ -2746,6 +2746,38 @@ page_cur_delete_rec(
 	page = page_cur_get_page(cursor);
 	page_zip = page_cur_get_page_zip(cursor);
 
+	/* Diagnostic: silent delete on PPLIZED+!NORMALIZE page, EXCLUDING
+	   apply's own MTR_LOG_NONE deletes. Goal: catch external paths that
+	   silently delete records on a chain-active page without setting
+	   NORMALIZE → chain becomes stale. */
+	{
+		extern __thread int tls_in_ppl_apply;
+		if (tls_in_ppl_apply == 0) {
+			buf_block_t* blk = page_cur_get_block(cursor);
+			unsigned flags = blk ? (unsigned)blk->page.flags : 0;
+			bool is_pplized = (flags & 1) != 0;
+			bool is_normalize = (flags & 2) != 0;
+			bool dangerous = (mtr == NULL ||
+				(mtr != NULL && mtr_get_log_mode(mtr) == MTR_LOG_NONE))
+				&& is_pplized && !is_normalize;
+			if (dangerous) {
+				const char* ctx = (mtr == NULL) ? "MTR_NULL" :
+					(mtr_get_log_mode(mtr) == MTR_LOG_NONE) ? "LOG_NONE" :
+					"NORMAL";
+				void* ret0 = __builtin_return_address(0);
+				void* ret1 = __builtin_return_address(1);
+				void* ret2 = __builtin_return_address(2);
+				fprintf(stderr,
+					"SILENT_DEL_NO_NORM,page=%u:%u,cursor_off=%lu,n_recs=%u,ctx=%s,flags=0x%x,ret=%p/%p/%p\n",
+					(unsigned)mach_read_from_4(page + 34),
+					(unsigned)mach_read_from_4(page + 4),
+					(unsigned long)page_offset(cursor->rec),
+					(unsigned)mach_read_from_2(page + 38 + 16),
+					ctx, flags, ret0, ret1, ret2);
+			}
+		}
+	}
+
 	/* page_zip_validate() will fail here when
 	btr_cur_pessimistic_delete() invokes btr_set_min_rec_mark().
 	Then, both "page_zip" and "page" would have the min-rec-mark
