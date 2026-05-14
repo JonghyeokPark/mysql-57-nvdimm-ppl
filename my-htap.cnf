@@ -1,0 +1,88 @@
+#
+# my-htap.cnf — NV-PPL with PPL-MV (HTAP) enabled, sized for 10 warehouses.
+# Matches paper Section 6.5 setup at 10w scale: small buffer cache (~10% of
+# DB), full NVDIMM, PPL-MV path enabled so LLT readers can hit the prebuilt
+# / redo-based MVCC code path.
+#
+[client]
+user = root
+port            = 3306
+socket          = /tmp/mysql.sock
+
+[mysql]
+prompt=\u:\d>\_
+
+[mysqld_safe]
+socket          = /tmp/mysql.sock
+
+[mysqld]
+user=root
+default-storage-engine = innodb
+skip-grant-tables
+pid-file        = /mnt/test_data/mysql.pid
+socket          = /tmp/mysql.sock
+port            = 3306
+datadir         = /mnt/test_data/
+log-error       = /mnt/test_log/mysql_error_nvdimm.log
+
+# Log group path (iblog0, iblog1)
+innodb_log_group_home_dir = /mnt/test_log/
+
+# Page size — paper uses 4KB
+innodb_page_size = 4KB
+
+# Force core dump on crash (independent of shell ulimit)
+core-file
+
+# ============== NVDIMM PPL settings (HTAP / PPL-MV ON) ==============
+innodb_use_nvdimm_ppl           = true
+innodb_nvdimm_home_dir          = /mnt/pmem
+innodb_nvdimm_size              = 64M
+innodb_nvdimm_ppl_block_size    = 64
+innodb_nvdimm_max_ppl_size      = 256
+innodb_use_nvdimm_ppl_recovery  = false
+innodb_use_nvdimm_redo          = true
+innodb_use_nvdimm_dwb           = true
+innodb_use_ppl_cleaner          = false
+innodb_use_ppl_mvcc             = true     # <-- HTAP key: enable PPL-based MVCC
+
+innodb_file_per_table = 1
+
+# ============== Buffer cache (sized for 10w, ~1 GB DB) ==============
+# Cost-equivalent ratio from prior 50GB experiment (3GB DRAM : 1GB NVDIMM).
+# Scaled to 10w: DRAM 60MB, NVDIMM 20MB.
+innodb_buffer_pool_size       = 64M
+innodb_buffer_pool_instances  = 8
+innodb_max_dirty_pages_pct_lwm = 0
+
+# etc
+log_error_verbosity = 3
+innodb_page_cleaners = 8
+
+# Log: smaller than 500w setup since DB is small
+innodb_log_file_size      = 2G
+innodb_log_files_in_group = 3
+
+# Flush
+innodb_flush_log_at_trx_commit = 0
+innodb_log_buffer_size         = 32M
+innodb_flush_neighbors         = 0
+
+# Doublewrite / IO
+innodb_doublewrite      = ON
+innodb_flush_method     = O_DIRECT
+innodb_use_native_aio   = true
+innodb_change_buffering = none
+innodb_lru_scan_depth   = 1024
+
+# Server limits
+max_connections   = 1024
+open_files_limit  = 24000
+
+# Long-lived LLT: allow undo to grow huge, don't purge / truncate
+#innodb_max_undo_log_size    = 100G
+#innodb_max_purge_lag=10000000
+#innodb_max_purge_lag_delay=100000000
+#innodb_undo_log_truncate    = OFF
+#innodb_undo_tablespaces     = 0
+#innodb-lock-wait-timeout=36000

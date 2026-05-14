@@ -1,0 +1,66 @@
+#
+# my-vanilla-htap.cnf — Vanilla MySQL HTAP baseline, sized for 10 warehouses.
+# Mirror of my-htap.cnf but with all NV-PPL settings stripped. Same buffer /
+# log / flush settings so the only difference vs my-htap.cnf is the PPL stack.
+#
+[client]
+user = root
+port            = 3306
+socket          = /tmp/mysql.sock
+
+[mysql]
+prompt=\u:\d>\_
+
+[mysqld_safe]
+socket          = /tmp/mysql.sock
+
+[mysqld]
+user=root
+default-storage-engine = innodb
+skip-grant-tables
+pid-file        = /mnt/test_data/mysql.pid
+socket          = /tmp/mysql.sock
+port            = 3306
+datadir         = /mnt/test_data/
+log-error       = /mnt/test_log/mysql_error_nvdimm.log
+
+innodb_log_group_home_dir = /mnt/test_log/
+
+innodb_page_size = 4KB
+
+# Core dump on crash
+core-file
+
+innodb_file_per_table = 1
+
+# ============== Buffer cache (matches my-htap.cnf for fair comparison) ==============
+innodb_buffer_pool_size        = 256M
+innodb_buffer_pool_instances   = 8
+innodb_max_dirty_pages_pct_lwm = 0
+
+log_error_verbosity = 3
+innodb_page_cleaners = 8
+
+innodb_log_file_size      = 2G
+innodb_log_files_in_group = 3
+
+innodb_flush_log_at_trx_commit = 0
+innodb_log_buffer_size         = 32M
+innodb_flush_neighbors         = 0
+
+innodb_doublewrite      = ON
+innodb_flush_method     = O_DIRECT
+innodb_use_native_aio   = true
+innodb_change_buffering = none
+innodb_lru_scan_depth   = 1024
+
+max_connections   = 1024
+open_files_limit  = 24000
+
+# Long-lived LLT: allow undo to grow huge, don't purge / truncate
+#innodb_max_undo_log_size    = 1G
+#innodb_max_purge_lag        = 0
+#innodb_max_purge_lag_delay  = 0
+#innodb_undo_log_truncate    = OFF
+#innodb_undo_tablespaces     = 0
+#innodb-lock-wait-timeout=36000
