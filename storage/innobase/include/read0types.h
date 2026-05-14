@@ -321,6 +321,14 @@ private:
 	/** AC-NL-RO transaction view that has been "closed". */
 	bool		m_closed;
 
+public:
+	/** Copied from THD session var `innodb_is_llt` at view_open time.
+	    Used by ppl_is_llt_view() (PPL build) and vanilla counters to
+	    split LLT vs OLTP version-build metrics without scanning the
+	    trx list. */
+	bool		m_is_llt;
+private:
+
 	typedef UT_LIST_NODE_T(ReadView) node_t;
 
 	/** List of read views in trx_sys */

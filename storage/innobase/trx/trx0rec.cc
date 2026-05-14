@@ -24,6 +24,7 @@ Created 3/26/1996 Heikki Tuuri
 *******************************************************/
 
 #include "trx0rec.h"
+#include "srv0mon.h"
 
 #ifdef UNIV_NONINL
 #include "trx0rec.ic"
@@ -1884,6 +1885,34 @@ trx_undo_report_row_operation(
 	      || (clust_entry && !update && !rec));
 
 	trx = thr_get_trx(thr);
+
+	/* Per-table undo write classifier (TPC-C). Lets us see which table
+	   drives history list growth and purge backlog. */
+	{
+		const char* tname = (index && index->table)
+			? index->table->name.m_name : "";
+		if (tname) {
+			if (strstr(tname, "/stock") != NULL) {
+				MONITOR_INC(MONITOR_UNDO_WRITE_STOCK);
+			} else if (strstr(tname, "/warehouse") != NULL) {
+				MONITOR_INC(MONITOR_UNDO_WRITE_WAREHOUSE);
+			} else if (strstr(tname, "/district") != NULL) {
+				MONITOR_INC(MONITOR_UNDO_WRITE_DISTRICT);
+			} else if (strstr(tname, "/customer") != NULL) {
+				MONITOR_INC(MONITOR_UNDO_WRITE_CUSTOMER);
+			} else if (strstr(tname, "/order_line") != NULL) {
+				MONITOR_INC(MONITOR_UNDO_WRITE_ORDERLINE);
+			} else if (strstr(tname, "/new_orders") != NULL) {
+				MONITOR_INC(MONITOR_UNDO_WRITE_NEWORDER);
+			} else if (strstr(tname, "/orders") != NULL) {
+				MONITOR_INC(MONITOR_UNDO_WRITE_ORDER);
+			} else if (strstr(tname, "/history") != NULL) {
+				MONITOR_INC(MONITOR_UNDO_WRITE_HISTORY);
+			} else {
+				MONITOR_INC(MONITOR_UNDO_WRITE_OTHER);
+			}
+		}
+	}
 
 	bool	is_temp_table = dict_table_is_temporary(index->table);
 

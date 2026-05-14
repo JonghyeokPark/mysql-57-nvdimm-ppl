@@ -23,19 +23,71 @@
 #include "srv0srv.h"
 #include "srv0mon.h"
 #include "row0row.h"
+#include "trx0sys.h"
+#include "row0vers.h"
+#include "trx0undo.h"
+
+bool ppl_is_llt_view(const ReadView* view) {
+	if (view == NULL) return false;
+	return view->m_is_llt;
+}
+
+void ppl_clear_prebuilt_cache(void) {
+	mutex_enter(&prebuilt_page_list_mutex);
+	for (prebuilt_page_map_t::iterator it = prebuilt_page_list.begin();
+	     it != prebuilt_page_list.end(); ++it) {
+		buf_page_t* bp = it->second;
+		if (bp != NULL) {
+			ut_free(buf_page_get_block(bp));
+		}
+	}
+	prebuilt_page_list.clear();
+	mutex_exit(&prebuilt_page_list_mutex);
+}
+
+/* Snapshot leaf data pages of given tablespace into prebuilt cache.
+   Skip system pages (0=FSP, 1=IBUF, 2=INODE). Pages not in BP are
+   force-loaded via buf_page_get_gen. */
+void ppl_snapshot_space_for_llt(ulint space_id, trx_id_t llt_ts) {
+	if (space_id == 0 || llt_ts == 0) return;
+	ulint pages = fil_space_get_size(space_id);
+	if (pages == 0) return;
+	if (pages > 256) pages = 256;  /* safety cap */
+	bool found;
+	const page_size_t page_size(fil_space_get_page_size(space_id, &found));
+	if (!found) return;
+	ulint added = 0;
+	for (ulint p = 3; p < pages; p++) {  /* skip 0,1,2 system pages */
+		page_id_t pid(space_id, p);
+		mtr_t mtr;
+		mtr_start(&mtr);
+		buf_block_t* block = buf_page_get_gen(pid, page_size, RW_S_LATCH,
+			NULL, BUF_GET, __FILE__, __LINE__, &mtr, false);
+		if (block != NULL) {
+			ulint ptype = mach_read_from_2(block->frame + FIL_PAGE_TYPE);
+			if (ptype == FIL_PAGE_INDEX || ptype == FIL_PAGE_RTREE) {
+				add_prebuilt_page(&block->page, llt_ts);
+				added++;
+			}
+		}
+		mtr_commit(&mtr);
+	}
+	(void)added;  /* silenced: snapshot summary log removed */
+}
 
 #include <emmintrin.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <stdint.h>
 
-std::vector<buf_page_t*> prebuilt_page_list;
-buf_page_t * prebuilt_page_start_ptr = NULL;
-/* Guards prebuilt_page_list against concurrent push_back / erase / scan
-   from OLTP de-PPLization adders and LLT version-build consumers. Without
-   it, vector reallocation invalidates in-flight iterators, producing the
-   SEGV at *it dereference observed in remove_prebuilt_page_from_list. */
+prebuilt_page_map_t prebuilt_page_list;
+/* Guards prebuilt_page_list against concurrent insert/find/erase
+   from OLTP de-PPLization adders and LLT version-build consumers. */
 ib_mutex_t prebuilt_page_list_mutex;
+
+static inline uint64_t prebuilt_key(ulint space, ulint page_no) {
+    return ((uint64_t)space << 32) | (uint32_t)page_no;
+}
 
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
 	unsigned char * first_ppl_block_ptr = alloc_ppl_from_queue(normal_buf_pool_get(bpage->id));
@@ -263,26 +315,26 @@ void all_ppl_apply_to_page(byte *start_ptr, ulint apply_log_size, buf_block_t *b
 	   page type). If we crash here, the chain that was just applied is
 	   the suspect — apply log_size and ppl pointer recorded above for
 	   the trace. */
-	if (!nvdimm_recv_running) {
-		page_t* page = block->frame;
-		ulint heap_top = mach_read_from_2(page + PAGE_HEADER + PAGE_HEAP_TOP);
-		ulint n_recs   = mach_read_from_2(page + PAGE_HEADER + PAGE_N_RECS);
-		ulint ptype    = mach_read_from_2(page + FIL_PAGE_TYPE);
-		bool corrupt = false;
-		if (heap_top > UNIV_PAGE_SIZE || heap_top < PAGE_DATA) corrupt = true;
-		if (n_recs   > 8000)                                   corrupt = true;
-		if (ptype != FIL_PAGE_INDEX
-		 && ptype != FIL_PAGE_RTREE)                           corrupt = true;
-		if (corrupt) {
-			fprintf(stderr,
-				"PPL_APPLY_CORRUPT,page=%u:%u,heap_top=%lu,n_recs=%lu,ptype=%lu\n",
-				(unsigned)block->page.id.space(),
-				(unsigned)block->page.id.page_no(),
-				heap_top, n_recs, ptype);
-			fflush(stderr);
-			abort();
-		}
-	}
+	// if (!nvdimm_recv_running) {
+	// 	page_t* page = block->frame;
+	// 	ulint heap_top = mach_read_from_2(page + PAGE_HEADER + PAGE_HEAP_TOP);
+	// 	ulint n_recs   = mach_read_from_2(page + PAGE_HEADER + PAGE_N_RECS);
+	// 	ulint ptype    = mach_read_from_2(page + FIL_PAGE_TYPE);
+	// 	bool corrupt = false;
+	// 	if (heap_top > UNIV_PAGE_SIZE || heap_top < PAGE_DATA) corrupt = true;
+	// 	if (n_recs   > 8000)                                   corrupt = true;
+	// 	if (ptype != FIL_PAGE_INDEX
+	// 	 && ptype != FIL_PAGE_RTREE)                           corrupt = true;
+	// 	if (corrupt) {
+	// 		fprintf(stderr,
+	// 			"PPL_APPLY_CORRUPT,page=%u:%u,heap_top=%lu,n_recs=%lu,ptype=%lu\n",
+	// 			(unsigned)block->page.id.space(),
+	// 			(unsigned)block->page.id.page_no(),
+	// 			heap_top, n_recs, ptype);
+	// 		fflush(stderr);
+	// 		abort();
+	// 	}
+	// }
 }
 
 // Helper function to handle log data that spans segment boundaries
@@ -298,25 +350,16 @@ byte* fetch_next_segment(byte* current_end, byte** new_end, byte** next_ppl) {
 	return current_ptr;
 }
 
-/* Thread-local flag: true while we are inside chain apply (set_apply_info_
-   and_log_apply -> all_ppl_apply_to_page -> apply_log_record). Used by
-   page_cur_delete_rec's SILENT_DEL_NO_NORM trace to distinguish apply's
-   own MTR_LOG_NONE deletes from external silent deletes that may break
-   chain coherence. */
-__thread int tls_in_ppl_apply = 0;
-
 void apply_log_record(mlog_id_t log_type, byte* log_data, uint length, trx_id_t trx_id, buf_block_t* block, mtr_t* temp_mtr) {
 	if (nvdimm_recv_ipl_undo && ipl_active_trx_ids.find(trx_id) != ipl_active_trx_ids.end()) {
 			// pass
 			ib::info() << "skip undo because this is created from trx which is active at the crash!";
 	}
 	else {
-		tls_in_ppl_apply++;
 		recv_parse_or_apply_log_rec_body(
 									log_type, log_data
 									, log_data + length, block->page.id.space()
 									, block->page.id.page_no(), block, temp_mtr);
-		tls_in_ppl_apply--;
 	}
 }
 
@@ -357,16 +400,16 @@ check_normalize_cause(buf_page_t * bpage){
 				// fprintf(stderr, "Normalize_cause,%f,Max_PPL_Size\n",(double)(time(NULL) - my_start));
 				break;
 			case 3:
-				fprintf(stderr, "Normalize_cause,%f,PPL_Area_Lack\n",(double)(time(NULL) - my_start));
+				// fprintf(stderr, "Normalize_cause,%f,PPL_Area_Lack\n",(double)(time(NULL) - my_start));
 				break;
 			case 4:
 				// fprintf(stderr, "Normalize_cause,%f,Not_PPL_Target\n",(double)(time(NULL) - my_start));
 				break;
 			case 5:
-				fprintf(stderr, "Normalize_cause,%f,Cleaning\n",(double)(time(NULL) - my_start));
+				// fprintf(stderr, "Normalize_cause,%f,Cleaning\n",(double)(time(NULL) - my_start));
 				break;
 			case 6:
-				fprintf(stderr, "Normalize_cause,%f,LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
+				// fprintf(stderr, "Normalize_cause,%f,LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
 				break;
 			default:
 				break;
@@ -385,16 +428,16 @@ check_normalize_cause(buf_page_t * bpage){
 				// fprintf(stderr, "Normalize_cause,%f,Direct_Max_PPL_Size\n",(double)(time(NULL) - my_start));
 				break;
 			case 3:
-				fprintf(stderr, "Normalize_cause,%f,Direct_PPL_Area_Lack\n",(double)(time(NULL) - my_start));
+				// fprintf(stderr, "Normalize_cause,%f,Direct_PPL_Area_Lack\n",(double)(time(NULL) - my_start));
 				break;
 			case 4:
 				// fprintf(stderr, "Normalize_cause,%f,Direct_Not_PPL_Target\n",(double)(time(NULL) - my_start));
 				break;
 			case 5:
-				fprintf(stderr, "Normalize_cause,%f,Direct_Cleaning\n",(double)(time(NULL) - my_start));
+				// fprintf(stderr, "Normalize_cause,%f,Direct_Cleaning\n",(double)(time(NULL) - my_start));
 				break;
 			case 6:
-				fprintf(stderr, "Normalize_cause,%f,Direct_LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
+				// fprintf(stderr, "Normalize_cause,%f,Direct_LSN_GAP_Too_Large\n",(double)(time(NULL) - my_start));
 				break;
 			default:
 				break;
@@ -678,99 +721,121 @@ can_page_be_pplized(
 
 
 void
-init_prebuilt_page_cache(std::vector<buf_page_t*>& prebuilt_page_list){
+init_prebuilt_page_cache(prebuilt_page_map_t& prebuilt_page_list){
     prebuilt_page_list.clear();
 }
 
 buf_page_t*
-add_prebuilt_page(buf_page_t* bpage){
-    /* Snapshot the current page (buf_block_t control struct + frame bytes).
-       The original code did memcpy(prebuilt_page, bpage, UNIV_PAGE_SIZE) which
-       is wrong: bpage is a buf_page_t header (~hundreds of bytes), not a 16KB
-       page. We split allocation: a buf_block_t control + a separate aligned
-       frame buffer. Locks/mutexes inside the copied buf_block_t are bitwise
-       duplicates and must NOT be acquired on the copy. */
+add_prebuilt_page(buf_page_t* bpage, trx_id_t target_ts){
+    /* Snapshot a buf_block_t control struct + the 16KB frame into a
+       single ut_malloc allocation so we can ut_free it cleanly later.
+       Layout: [buf_block_t][padding][frame aligned to UNIV_PAGE_SIZE].
+       Locks/mutexes inside the copied buf_block_t are bitwise dupes
+       and must NOT be acquired on the copy. */
     buf_block_t* current_block = buf_page_get_block(bpage);
     if (current_block == NULL || current_block->frame == NULL) {
         return NULL;
     }
 
-    byte* control_buf = static_cast<byte*>(ut_malloc_nokey(sizeof(buf_block_t)));
-    if (control_buf == NULL) {
-        return NULL;
-    }
-    byte* frame_buf = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
-    if (frame_buf == NULL) {
-        ut_free(control_buf);
-        return NULL;
-    }
-    byte* frame = static_cast<byte*>(ut_align(frame_buf, UNIV_PAGE_SIZE));
+    const size_t total_size = sizeof(buf_block_t)
+                            + UNIV_PAGE_SIZE - 1  /* alignment slack */
+                            + UNIV_PAGE_SIZE;     /* frame */
+    byte* raw = static_cast<byte*>(ut_malloc_nokey(total_size));
+    if (raw == NULL) return NULL;
 
-    buf_block_t* prebuilt_block = reinterpret_cast<buf_block_t*>(control_buf);
+    buf_block_t* prebuilt_block = reinterpret_cast<buf_block_t*>(raw);
+    byte* frame = static_cast<byte*>(ut_align(
+        raw + sizeof(buf_block_t), UNIV_PAGE_SIZE));
+
     memcpy(prebuilt_block, current_block, sizeof(buf_block_t));
     buf_frame_copy(frame, current_block->frame);
     prebuilt_block->frame = frame;
-
-    /* The in-memory frame already reflects all updates corresponding to its
-       PPLs. We do NOT re-apply PPLs here; the snapshot is taken at the
-       moment of de-PPLization, when the frame is up to date. */
+    prebuilt_block->page.trx_id = target_ts;
 
     buf_page_t* prebuilt_page = &prebuilt_block->page;
+    uint64_t key = prebuilt_key(bpage->id.space(), bpage->id.page_no());
+
     mutex_enter(&prebuilt_page_list_mutex);
-    prebuilt_page_list.push_back(prebuilt_page);
-    if (prebuilt_page_list.size() == 1) {
-        prebuilt_page_start_ptr = prebuilt_page;
+    prebuilt_page_map_t::iterator it = prebuilt_page_list.find(key);
+    buf_page_t* old = NULL;
+    buf_page_t* kept = NULL;
+    if (it != prebuilt_page_list.end()) {
+        buf_page_t* existing = it->second;
+        /* Lower target_ts = older snapshot = closer to LLT view's start.
+           If the existing entry is older-or-equal, keep it — overwriting
+           with a newer snapshot only makes the nested-undo walk from
+           prebuilt back to LLT view longer. Only replace when the new
+           snapshot is strictly older (rare). */
+        if (existing->trx_id <= target_ts) {
+            kept = existing;
+        } else {
+            old = existing;
+            it->second = prebuilt_page;
+        }
+    } else {
+        prebuilt_page_list.insert(std::make_pair(key, prebuilt_page));
     }
     mutex_exit(&prebuilt_page_list_mutex);
+
+    if (kept != NULL) {
+        /* Discard the newly-allocated copy; existing entry stays. */
+        ut_free(prebuilt_block);
+        return kept;
+    }
+    if (old != NULL) {
+        /* free the previous entry's raw allocation (the block itself
+           was the raw ut_malloc'd pointer). */
+        ut_free(buf_page_get_block(old));
+    }
     return prebuilt_page;
 }
 
 
 void
-remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>& prebuilt_page_list){
+remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, prebuilt_page_map_t& prebuilt_page_list){
+    if (prebuilt_page == NULL) return;
+    uint64_t key = prebuilt_key(prebuilt_page->id.space(),
+                                prebuilt_page->id.page_no());
+    buf_page_t* to_free = NULL;
     mutex_enter(&prebuilt_page_list_mutex);
-    std::vector<buf_page_t*>::iterator it = prebuilt_page_list.begin();
-    while (it != prebuilt_page_list.end()) {
-        if (*it == prebuilt_page) {
-            it = prebuilt_page_list.erase(it);
-        } else {
-            ++it;
-        }
+    prebuilt_page_map_t::iterator it = prebuilt_page_list.find(key);
+    if (it != prebuilt_page_list.end() && it->second == prebuilt_page) {
+        to_free = it->second;
+        prebuilt_page_list.erase(it);
     }
     mutex_exit(&prebuilt_page_list_mutex);
+    if (to_free != NULL) {
+        ut_free(buf_page_get_block(to_free));
+    }
 }
 
 buf_page_t*
-find_prebuilt_page_from_list(buf_page_t* target_bpage, std::vector<buf_page_t*>& prebuilt_page_list){
-    /* Match by page_id (space, page_no), NOT by buf_page_t pointer.
-       add_prebuilt_page stores a COPY of the page's control struct in the
-       list, so the stored pointer is never equal to the original bpage. */
+find_prebuilt_page_from_list(
+	buf_page_t*			target_bpage,
+	prebuilt_page_map_t&		prebuilt_page_list,
+	ReadView*			reader_view,
+	const table_name_t&		table_name)
+{
+    /* Hash lookup keyed by (space, page_no). One entry per page (add
+       replaces old). Reader does per-record visibility check after
+       extraction, so we don't filter on tag here. */
+    (void) reader_view;
+    (void) table_name;
     if (target_bpage == NULL) return NULL;
+    uint64_t key = prebuilt_key(target_bpage->id.space(),
+                                target_bpage->id.page_no());
     mutex_enter(&prebuilt_page_list_mutex);
-    int found_cnt = 0;
-    int found_idx = -1;
-    for(size_t idx=0; idx<prebuilt_page_list.size(); idx++){
-        buf_page_t* p = prebuilt_page_list[idx];
-        if (p == NULL) continue;
-        if(p->id.space() == target_bpage->id.space()
-           && p->id.page_no() == target_bpage->id.page_no()){
-            found_idx = (int)idx;
-            found_cnt++;
-        }
-    }
-    if(found_cnt > 1){
-        fprintf(stderr, "MVCC WARNING: multiple prebuilt pages for page (%u, %u) (count=%d)\n",
-                (unsigned)target_bpage->id.space(),
-                (unsigned)target_bpage->id.page_no(), found_cnt);
-    }
-    if(found_idx < 0){
-        mutex_exit(&prebuilt_page_list_mutex);
-        MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_MISS);
-        return NULL;
-    }
-    buf_page_t* found = prebuilt_page_list[found_idx];
+    prebuilt_page_map_t::iterator it = prebuilt_page_list.find(key);
+    buf_page_t* found = (it != prebuilt_page_list.end()) ? it->second : NULL;
     mutex_exit(&prebuilt_page_list_mutex);
-    MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_HIT);
+    bool is_llt = ppl_is_llt_view(reader_view);
+    if (found == NULL) {
+        MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_MISS);
+        if (is_llt) MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PREBUILD_MISS);
+    } else {
+        MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_HIT);
+        if (is_llt) MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PREBUILD_HIT);
+    }
     return found;
 }
 
@@ -802,18 +867,32 @@ nvdimm_build_prev_vers_with_redo(
 	     2 = Path B (prebuilt found, visibility failed → DB_FAIL → undo)
 	     3 = Path C (disk + PPL apply) */
 	int __path_tag = 0;
+	bool __is_llt = ppl_is_llt_view(read_view);
+	uint64_t __find_us = 0;  /* time spent in find_prebuilt */
+	int __chain_len = 0;     /* path B nested-undo or path C apply-count */
 	/* RAII timer + outcome accounting. */
 	struct RedoBuildStats {
 		rec_t** old_vers_p;
 		int* path_p;
+		uint64_t* find_p;
+		int* chain_p;
+		bool is_llt;
 		ib_uint64_t start;
-		RedoBuildStats(rec_t** ov, int* pp)
-			: old_vers_p(ov), path_p(pp), start(ut_time_us(NULL)) {}
+		RedoBuildStats(rec_t** ov, int* pp, uint64_t* fp, int* cp, bool llt)
+			: old_vers_p(ov), path_p(pp), find_p(fp), chain_p(cp),
+			  is_llt(llt), start(ut_time_us(NULL)) {}
 		~RedoBuildStats() {
-			uint64_t us = (uint64_t)(ut_time_us(NULL) - start);
+			uint64_t total = (uint64_t)(ut_time_us(NULL) - start);
+			uint64_t fus = find_p ? *find_p : 0;
+			/* pure version-construction time = total - find */
+			uint64_t us = (total > fus) ? (total - fus) : 0;
 			MONITOR_INC(MONITOR_NVDIMM_PPL_REDO_BUILD_CALLS);
 			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_REDO_BUILD_US_SUM, (mon_type_t)us);
 			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_REDO_BUILD_US_MAX, (mon_type_t)us);
+			if (is_llt) {
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_REDO_BUILD_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_REDO_BUILD_US_SUM, (mon_type_t)us);
+			}
 			if (old_vers_p && *old_vers_p != NULL) {
 				MONITOR_INC(MONITOR_NVDIMM_PPL_REDO_OUT_VERS);
 			} else {
@@ -824,23 +903,67 @@ nvdimm_build_prev_vers_with_redo(
 				MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_A_CALLS);
 				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_PATH_A_US_SUM, (mon_type_t)us);
 				MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_PATH_A_US_MAX, (mon_type_t)us);
+				if (is_llt) {
+					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_A_CALLS);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_A_US_SUM, (mon_type_t)us);
+				}
 				break;
 			case 2: /* Path B fallback */
 				MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_B_FALLBACK);
+				if (is_llt) {
+					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_B_FALLBACK);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_B_US_SUM, (mon_type_t)us);
+					if (chain_p) {
+						MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_B_LEN_SUM,
+							(mon_type_t)*chain_p);
+					}
+				}
 				break;
-			case 3: /* Path C */
+			case 3: /* Path C pure: disk + forward apply, result visible */
 				if (old_vers_p && *old_vers_p != NULL) {
 					MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_C_CALLS);
 					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_PATH_C_US_SUM, (mon_type_t)us);
 					MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_PATH_C_US_MAX, (mon_type_t)us);
+					if (is_llt) {
+						MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_C_CALLS);
+						MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_US_SUM, (mon_type_t)us);
+						if (chain_p) {
+							MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_LEN_SUM,
+								(mon_type_t)*chain_p);
+						}
+					}
 				} else {
 					MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_C_FAIL);
 				}
 				break;
+			case 4: /* Path C + nested undo (Old Page + Undo) */
+				if (is_llt && old_vers_p && *old_vers_p != NULL) {
+					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_C_NESTED_UNDO_CALLS);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_NESTED_UNDO_US_SUM,
+						(mon_type_t)us);
+				}
+				break;
+			case 5: /* Disk too new → undo from disk frame */
+				if (is_llt && old_vers_p && *old_vers_p != NULL) {
+					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_C_DISK_UNDO_CALLS);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_DISK_UNDO_US_SUM,
+						(mon_type_t)us);
+					if (chain_p) {
+						MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_DISK_UNDO_LEN_SUM,
+							(mon_type_t)*chain_p);
+					}
+				}
+				break;
 			default: break;
 			}
+			/* Find time as separate metric. */
+			if (find_p && is_llt && *find_p > 0) {
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_FIND_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_FIND_US_SUM,
+					(mon_type_t)*find_p);
+			}
 		}
-	} __redo_timer(old_vers, &__path_tag);
+	} __redo_timer(old_vers, &__path_tag, &__find_us, &__chain_len, __is_llt);
 	page_id_t page_id = bpage->id; // cur bpage
 	buf_block_t* block = buf_page_get_block(bpage); // cur block
 	
@@ -903,11 +1026,22 @@ nvdimm_build_prev_vers_with_redo(
 	bool ret = false;
 	int apply_rec_cnt = 0;
 
-	apply_log_size = get_ppl_length_from_ppl_header(bpage);
+	/* PPL chain meta. For non-PPLized pages (e.g. warehouse) the
+	   chain pointers are NULL; we still proceed because the prebuilt
+	   cache may have a snapshot for this page. The disk-read /
+	   chain-apply path won't run if apply_log_size stays 0. */
+	apply_log_size = 0;
 	start_ptr = bpage->first_ppl_block_ptr;
-	byte *current_ptr = start_ptr + PPL_BLOCK_HDR_SIZE;
-    end_ptr = start_ptr + nvdimm_info->each_ppl_size;
-    byte *next_ppl = get_addr_from_ppl_index(nvdimm_info->ppl_start_pointer, mach_read_from_4(start_ptr + PPL_HDR_DYNAMIC_INDEX), nvdimm_info->each_ppl_size);
+	byte *current_ptr = NULL;
+	byte *next_ppl = NULL;
+	if (start_ptr != NULL) {
+		apply_log_size = get_ppl_length_from_ppl_header(bpage);
+		current_ptr = start_ptr + PPL_BLOCK_HDR_SIZE;
+		end_ptr = start_ptr + nvdimm_info->each_ppl_size;
+		next_ppl = get_addr_from_ppl_index(nvdimm_info->ppl_start_pointer,
+			mach_read_from_4(start_ptr + PPL_HDR_DYNAMIC_INDEX),
+			nvdimm_info->each_ppl_size);
+	}
     byte temp_buffer[400] ={0, }; // Temporary buffer to handle data that spans multiple segments
 	mlog_id_t log_type;
 	ulint log_body_length;
@@ -924,25 +1058,33 @@ nvdimm_build_prev_vers_with_redo(
 	}
 
 
-	// same page built right before -> reuse it
-	if(page_get_page_no(nvdimm_info->old_page)==page_get_page_no(page) && temp_old_page_ptr!=NULL){
-		resuse_prev_built_page = true;
-		__path_tag = 1; /* count cache reuse as Path A; may downgrade to 2 (B) if visibility fails */
-		goto get_rec_offset;
-	}
+	/* Removed racy global last-built-page cache (nvdimm_info->old_page
+	   reuse). Path B prebuilt cache handles cross-call reuse with
+	   proper readview matching; the global cache was thread-unsafe and
+	   could TOCTOU between the page_no check here and buf_frame_copy
+	   below, producing a temp_page from a different page → cyclic record
+	   list → hang in page_find_rec_with_heap_no. */
 
-	/* Prebuilt page lookup. add_prebuilt_page allocates a separate
-	   buf_block_t + frame at de-PPLization time. If found, copy that
-	   frame into temp_page and skip disk read + PPL apply by jumping
-	   straight to record extraction at get_rec_offset. */
-	temp_bpage = find_prebuilt_page_from_list(bpage, prebuilt_page_list);
+	/* Prebuilt page lookup (paper §5.2). Time the lookup separately
+	   so it can be excluded from path_*_us_sum (pure version-build
+	   cost) and tracked as its own metric. */
+	{
+		ib_uint64_t __find_start = ut_time_us(NULL);
+		temp_bpage = find_prebuilt_page_from_list(bpage, prebuilt_page_list,
+	                                           read_view,
+	                                           clust_index->table->name);
+		__find_us = (uint64_t)(ut_time_us(NULL) - __find_start);
+	}
 	if (temp_bpage != NULL) {
 		buf_block_t* pre_block = buf_page_get_block(temp_bpage);
 		if (pre_block != NULL && pre_block->frame != NULL) {
 			buf_frame_copy(temp_page, pre_block->frame);
 			used_prebuilt = true;
 		}
-		remove_prebuilt_page_from_list(temp_bpage, prebuilt_page_list);
+		/* Do NOT consume-on-read: paper §5.2 keeps prebuilt usable
+		   for the entire LLT lifetime; multiple records on the same
+		   page hit the same prebuilt repeatedly. Cleanup happens at
+		   LLT commit (not yet implemented). */
 		if (used_prebuilt) {
 			__path_tag = 1; /* Path A; may downgrade to 2 if visibility check fails below */
 			goto get_rec_offset;
@@ -966,16 +1108,15 @@ read_old_page:
 	//mutex_enter(buf_page_get_mutex(bpage));
 	//rw_lock_s_lock_gen(&((buf_block_t*) bpage)->lock,BUF_IO_READ);
 
-	bpage = buf_page_init_for_read(&err, BUF_READ_ANY_PAGE, page_id, page_size, false);
-
-	if (bpage == NULL) {
-		return(DB_FAIL);
-	}
-
-	//fprintf(stderr, "Before fil_io space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
-	//thd_wait_begin(NULL, THD_WAIT_DISKIO);
-	
-	err = fil_io(IORequestRead, true, page_id, page_size, 0, page_size.physical(), 
+	/* Read the disk version directly into our local old_page buffer.
+	   Do NOT go through buf_page_init_for_read — that function tries to
+	   register a NEW BP entry and returns NULL when the page is already
+	   cached (which is always our case, since caller holds an S-latch on
+	   the very page we want the disk version of). The previous call
+	   silently DB_FAIL'd 100% of the time, making this entire path C
+	   codepath dead. fil_io reads directly from the tablespace file
+	   into our heap buffer, bypassing BP. */
+	err = fil_io(IORequestRead, true, page_id, page_size, 0, page_size.physical(),
 			old_page, NULL);
 
 	//rw_lock_s_unlock_gen(&((buf_block_t*) bpage)->lock,BUF_IO_READ);
@@ -984,7 +1125,8 @@ read_old_page:
 	if(err!=DB_SUCCESS){
 		bpage->io_fix==BUF_IO_NONE;
 		fprintf(stderr, "failed to read an old page from the disk. space_id: %d page_no: %lu\n", page_id.space(), page_id.page_no());
-		return DB_FAIL;	
+		*old_vers = NULL;
+		return DB_FAIL;
 	}
 
 	//fprintf(stderr, "After fil_io space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
@@ -994,6 +1136,19 @@ read_old_page:
 	   not the stale nvdimm_info->old_page global cache. */
 	old_page_max_trx_id = page_get_max_trx_id(old_page);
 	cur_page_max_trx_id = page_get_max_trx_id(page);
+
+	/* If even the disk-loaded version is already newer than the view's
+	   snapshot threshold, forward apply can't help (each PPL moves
+	   max_trx forward). Instead of bailing out so the caller walks
+	   undo from the latest BP record (longest chain), use the disk
+	   frame's record as the undo starting point — its trx_id ≤ disk
+	   max so the undo walk from there is shorter. We tag path_tag=5
+	   and skip the apply loop; the existing nested undo block below
+	   will fire because the disk record is invisible. */
+	if (!read_view->changes_visible(old_page_max_trx_id,
+	                                clust_index->table->name)) {
+		__path_tag = 5;
+	}
 	
 
 	mtr_start(&temp_mtr);
@@ -1016,6 +1171,7 @@ read_old_page:
 		buf_frame_copy(temp_page, old_page);
 
 		temp_trx_id = old_page_max_trx_id;
+
 
         if ((end_ptr - current_ptr) < APPLY_LOG_HDR_SIZE) {
             size_t remaining = end_ptr - current_ptr;
@@ -1063,6 +1219,9 @@ read_old_page:
 				if (!current_ptr) {
 					// If there is no next segment, stop the loop
 					fprintf(stderr, "Error: Unable to fetch the next segment. Incomplete log body read. Expected: %zu, Got: %zu\n", log_body_length, copied_length);
+					*old_vers = NULL;
+					temp_mtr.discard_modifications();
+					mtr_commit(&temp_mtr);
 					return DB_ERROR;
 				}
 
@@ -1087,10 +1246,10 @@ read_old_page:
 			current_ptr += log_body_length; // Move past the log body
 			apply_log_size -= log_body_length;
 		}
-		/* Re-read max_trx from local old_page after apply. */
+		/* Re-read max_trx from local old_page after (possible) apply. */
 		old_page_max_trx_id = page_get_max_trx_id(old_page);
     }
-	
+
 	/* Loop exit interpretation:
 	   - apply_log_size == 0  : all PPLs applied and all were visible to the
 	                            LLT. Final old_page = LLT-visible version.
@@ -1098,13 +1257,23 @@ read_old_page:
 	   - apply_log_size  > 0  : visibility broke at some PPL. temp_page holds
 	                            the last-visible state (saved at top of the
 	                            iteration before the breaking apply). Keep
-	                            temp_page as-is.
-	   The original `start_ptr < end_ptr` was always true (start/end are
-	   block boundaries), incorrectly always overwriting temp_page. */
+	                            temp_page as-is. */
 	if (apply_log_size == 0) {
 		buf_frame_copy(temp_page, old_page);
 		temp_trx_id = old_page_max_trx_id;
 	}
+
+	/* Path C chain length = number of PPL log records forward-applied. */
+	__chain_len = IPL_apply_cnt;
+
+	/* Close the apply mtr now that forward apply is done. The
+	   nvdimm_recv_parse_or_apply_log_rec_body calls inside the loop
+	   above may have S-latched ancillary pages via temp_mtr; leaving
+	   the mtr open holds those latches until the thread's next
+	   mtr_commit, causing self-deadlock when the same thread later
+	   tries to X-latch a page it transitively S-latched here. */
+	temp_mtr.discard_modifications();
+	mtr_commit(&temp_mtr);
 
 	//fprintf(stderr, "finished apply: space_id: %d page_no: %lu IPL_apply_cnt: %d bpage: %lu\n", page_id.space(), page_id.page_no(), IPL_apply_cnt, bpage);
 
@@ -1127,6 +1296,7 @@ get_rec_offset:
 
 	if(*offsets==NULL){
 		fprintf(stderr, "offset NULL during redo version creation\n");
+		*old_vers = NULL;
 		return DB_FAIL;
 	}
 
@@ -1150,47 +1320,91 @@ get_rec_offset:
 			&temp_offset_heap);
 
 	if(temp_page_rec==NULL){
+		*old_vers = NULL;
 		return DB_FAIL;
-		//return DB_FAIL;
-	}else{
-		//page_rec_print(temp_page_rec, *offsets);
 	}
 
 	byte* buf = static_cast<byte*>(
 				mem_heap_alloc(
 					in_heap, rec_offs_size(temp_offsets)));
-	
+
 
 	*old_vers = rec_copy(buf, temp_page_rec, *offsets); // copy old vers to buf
 	rec_offs_make_valid(*old_vers, clust_index, *offsets);
 
 	if(rec_get_deleted_flag(*old_vers, true)){
+		*old_vers = NULL;
 		return DB_FAIL;
 	}
 
-	/* Simplified Path B: verify the extracted record is actually visible
-	   to the LLT's read view. If not, the prebuilt frame / disk-applied
-	   version is still too new for this LLT — return DB_FAIL so the
-	   caller falls back to the full undo path which can walk further
-	   back. (paper-optimal Path B would walk undo starting *from* the
-	   prebuilt frame; that requires a latched page and is left for a
-	   future Phase B.) */
+	/* paper §5.2 [2]: extracted record from prebuilt (or disk-applied)
+	   frame is too new for the LLT view. Walk undo backward starting
+	   from this version (instead of from the buffer-pool current
+	   version) — shorter walk than from the BP top.
+
+	   Note: temp_page_rec is in our local 16KB buffer (not in BP).
+	   row_vers_build_for_consistent_read has a debug assertion that
+	   the rec's page is in mtr's latch list; that assertion compiles
+	   out in release builds. Functionally the function only reads
+	   roll_ptr from rec and walks undo log pages (which ARE in BP). */
 	{
 		trx_id_t old_rec_trx_id = row_get_rec_trx_id(*old_vers, clust_index, *offsets);
 		if (!read_view->changes_visible(old_rec_trx_id, clust_index->table->name)) {
-			/* If we got here via Path A (used_prebuilt), the prebuilt
-			   was newer than LLT — flag as Path B fallback. */
+			/* Downgrade path tag based on prior state so destructor
+			   counts each terminal path separately:
+			     1 (path A)      → 2 (path B: prebuilt + nested undo)
+			     3 (path C pure) → 4 (path C + nested undo)
+			     5 (disk-too-new + undo) stays 5
+			*/
 			if (__path_tag == 1) {
 				__path_tag = 2;
+			} else if (__path_tag == 3) {
+				__path_tag = 4;
+				fprintf(stderr, "TR[PATH4_REDO_THEN_UNDO] page=%lu:%lu rec_trx=%lu\n",
+					(ulong)page_id.space(), (ulong)page_id.page_no(),
+					(ulong)old_rec_trx_id);
+				fflush(stderr);
+			}
+			rec_t* undo_old_vers = NULL;
+			ib_uint64_t __p2_start = ut_time_us(NULL);
+			tls_llt_undo_chain_len = 0;
+			dberr_t undo_err = row_vers_build_for_consistent_read(
+				temp_page_rec, mtr, clust_index, offsets,
+				read_view, offset_heap, in_heap,
+				&undo_old_vers, vrow);
+			uint64_t p2_us = (uint64_t)(ut_time_us(NULL) - __p2_start);
+			__chain_len = tls_llt_undo_chain_len;
+			/* Track p2 portion (pure undo walk time) only for path B,
+			   to preserve historical path_b vs path2_undo decomposition.
+			   Path 4 and 5 get their total time from destructor cases. */
+			if (__is_llt && __path_tag == 2) {
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH2_UNDO_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH2_UNDO_US_SUM,
+					(mon_type_t)p2_us);
+			}
+			/* Long-call trace: dump page_id + heap_no when one paper [2]
+			   undo walk takes > 100 ms — candidate for the long-latch
+			   semaphore wait. */
+			if (p2_us > 100000) {
+				ulint hn = (temp_page_rec != NULL) ?
+					page_rec_get_heap_no(temp_page_rec) : 0;
+				fprintf(stderr,
+					"PAPER2_LONG,page=%u:%u,heap_no=%lu,us=%lu,err=%d\n",
+					(unsigned)bpage->id.space(),
+					(unsigned)bpage->id.page_no(),
+					hn, (unsigned long)p2_us, (int)undo_err);
+				fflush(stderr);
+			}
+			if (undo_err == DB_SUCCESS && undo_old_vers != NULL) {
+				*old_vers = undo_old_vers;
+				return DB_SUCCESS;
 			}
 			*old_vers = NULL;
 			return DB_FAIL;
 		}
 	}
 
-	if(resuse_prev_built_page==false){
-		buf_frame_copy(nvdimm_info->old_page, temp_page);
-	}
+	/* Removed write-back to racy global cache. */
 
 	if (vrow && *vrow) {
 		*vrow = dtuple_copy(*vrow, in_heap);

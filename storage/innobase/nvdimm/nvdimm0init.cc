@@ -16,6 +16,10 @@ uint64_t ipl_org_apply_cnt = 0;
 
 std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map;
 
+trx_id_t g_oldest_active_view_ts = 0;
+__thread bool tls_llt_undo_is_fallback = false;
+__thread int tls_llt_undo_chain_len = 0;
+
 unsigned char* nvdimm_ptr = NULL;
 int nvdimm_fd = -1;
 nvdimm_system * nvdimm_info = NULL;

@@ -54,6 +54,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "ibuf0ibuf.h"
 #include "trx0undo.h"
 #include "trx0purge.h"
+#include "read0read.h"
 #include "log0log.h"
 #include "dict0stats_bg.h"
 #endif /* !UNIV_HOTBACKUP */
@@ -6509,7 +6510,19 @@ corrupt:
 		    && get_flag(&(bpage->flags), PPLIZED)
 		    && get_flag(&(bpage->flags), NORMALIZE)
 		    && bpage->id.space() == llt_space_id) {
-			add_prebuilt_page(bpage);
+			/* Save a prebuilt snapshot iff some active reader has a
+			   view started BEFORE this page's latest write. Such a
+			   reader can't see page.max_trx_id's update and will
+			   need the older version. If min_active_view_ts >=
+			   page.max_trx_id, all readers can use the current state
+			   directly → no prebuild needed. */
+			trx_id_t min_active = __atomic_load_n(
+				&g_oldest_active_view_ts, __ATOMIC_ACQUIRE);
+			trx_id_t page_max = page_get_max_trx_id(
+				((buf_block_t*) bpage)->frame);
+			if (min_active != 0 && min_active < page_max) {
+				add_prebuilt_page(bpage, page_max);
+			}
 		}
 #endif
 		if (uncompressed) {

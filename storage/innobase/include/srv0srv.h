@@ -395,6 +395,7 @@ extern ulong	srv_force_recovery_crash;
 #endif /* !DBUG_OFF */
 /* mvcc-ppl */
 extern ulint	llt_space_id;
+extern ulint	llt_space_id_wh;
 /* end */
 extern ulint	srv_fast_shutdown;	/*!< If this is 1, do not do a
 					

@@ -914,6 +914,9 @@ add_size:
 	if (strstr(node->name, "stock.ibd") != NULL) {
 		fprintf(stderr, "setting %s to %lu\n", node->name, space->id);
 		llt_space_id = space->id;
+	}else if (strstr(node->name, "warehouse.ibd") != NULL) {
+		fprintf(stderr, "setting %s (warehouse) to %lu\n", node->name, space->id);
+		llt_space_id_wh = space->id;
 	}else{
 		fprintf(stderr, "setting %s to %lu\n", node->name, space->id);
 	}

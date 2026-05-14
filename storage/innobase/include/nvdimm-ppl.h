@@ -340,14 +340,63 @@ extern uint64_t ipl_skip_apply_cnt;
 extern uint64_t ipl_org_apply_cnt;
 
 // for PPL-mvcc
-extern std::vector<buf_page_t*> prebuilt_page_list;
-extern buf_page_t * prebuilt_page_start_ptr;
+/* Oldest active read-view start_ts (= low_limit_id). 0 if none.
+   Writers run under trx_sys_mutex (so they don't race with each
+   other); the de-PPL reader reads lock-free. Cross-thread visibility
+   is provided by __atomic_store_n(RELEASE) / __atomic_load_n(ACQUIRE)
+   in callers, not by volatile. */
+extern trx_id_t g_oldest_active_view_ts;
+
+/* True iff this read view was tagged LLT via the `innodb_is_llt`
+   session variable at view-open time. */
+bool ppl_is_llt_view(const ReadView* view);
+
+/* TLS flag: set briefly around the row_vers_build_for_consistent_read
+   call site when the call is a PPL-MV fallback (path B / path C fail),
+   so the undo counter site can split direct undo (paper [4]) from
+   fallback-after-PPL-MV. */
+extern __thread bool tls_llt_undo_is_fallback;
+
+/* TLS scratch: row_vers_build_for_consistent_read writes its local
+   version_build_cnt here at function-end so callers can read the chain
+   walk length without changing the signature. Used by path B in
+   nvdimm0log.cc to populate LLT_PATH_B_LEN_SUM. */
+extern __thread int tls_llt_undo_chain_len;
+
+#include <tr1/unordered_map>
+/* page_id (space<<32 | page_no) → snapshot block. One entry per page;
+   add_prebuilt_page replaces and frees the old entry, giving O(1)
+   lookup, automatic dedup, and a bounded list size. */
+typedef std::tr1::unordered_map<uint64_t, buf_page_t*> prebuilt_page_map_t;
+extern prebuilt_page_map_t prebuilt_page_list;
 extern ib_mutex_t prebuilt_page_list_mutex;
 //for mvcc prebuilt page upon ppl normalization
-void init_prebuilt_page_cache(std::vector<buf_page_t*>& prebuilt_page_list);
-buf_page_t* add_prebuilt_page(buf_page_t* bpage);
-void remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>& prebuilt_page_list);
-buf_page_t* find_prebuilt_page_from_list(buf_page_t* prebuilt_page, std::vector<buf_page_t*>& prebuilt_page_list);
+void init_prebuilt_page_cache(prebuilt_page_map_t& prebuilt_page_list);
+/* PPL-MVCC prebuild snapshot. target_ts identifies which LLT view this
+   snapshot is meant to serve (paper Section 5.2 "Hybrid version
+   reconstruction"). Phase 1: stored as page.trx_id; Phase 2 will use it
+   for TS-based matching at find time. */
+buf_page_t* add_prebuilt_page(buf_page_t* bpage, trx_id_t target_ts);
+
+/* Snapshot all in-BP pages of `space_id` and add them to the prebuilt
+   cache tagged with `llt_ts`. Used at LLT view-open time for small,
+   highly-updated tables (e.g. warehouse) that aren't PPLized but whose
+   undo chains grow long, so LLT reads can hit prebuilt directly. */
+void ppl_snapshot_space_for_llt(ulint space_id, trx_id_t llt_ts);
+
+/* Free every entry in the prebuilt cache. Called on LLT view close
+   (paper §5.2: prebuilt versions are discarded once the LLT commits). */
+void ppl_clear_prebuilt_cache(void);
+void remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, prebuilt_page_map_t& prebuilt_page_list);
+/* Phase 2: TS-based filtering. Among prebuild entries matching the
+   target page_id, return the one whose tag (entry->trx_id) is visible
+   to reader_view. NULL if no visible match — caller falls through to
+   the redo-based path (paper §5.2 [3]). */
+buf_page_t* find_prebuilt_page_from_list(
+	buf_page_t*			target_bpage,
+	prebuilt_page_map_t&		prebuilt_page_list,
+	ReadView*			reader_view,
+	const table_name_t&		table_name);
 dberr_t
 nvdimm_build_prev_vers_with_redo(
 	const rec_t*	rec,		/*!< in: record in a clustered index */

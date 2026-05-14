@@ -795,8 +795,17 @@ row_sel_build_prev_vers(
 
 	buf_block_t* block = buf_page_get_block(bpage);
 
-	if((dict_index_get_space(index) ==llt_space_id) && get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE) && page_get_max_trx_id(block->frame)!=0 ){
-		use_nvdimm_for_vers_build = true;
+	{
+		ulint sp = dict_index_get_space(index);
+		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh);
+		bool has_chain = get_flag(&(bpage->flags), PPLIZED)
+		              && !get_flag(&(bpage->flags), NORMALIZE);
+		bool maybe_prebuilt = (sp == llt_space_id_wh);
+		if (is_target
+		    && page_get_max_trx_id(block->frame) != 0
+		    && (has_chain || maybe_prebuilt)) {
+			use_nvdimm_for_vers_build = true;
+		}
 	}
 
 	// use_nvdimm_for_vers_build = false;
@@ -814,13 +823,19 @@ row_sel_build_prev_vers(
 	if(err!=DB_SUCCESS || !use_nvdimm_for_vers_build){
 
 	// undo-based version construction
-	//fprintf(stderr, "version build with undo bpage : %lu space_id: %lu page_no: %lu leaf_page: %d iplized: %d normalized: %lu oldest_modification: %lu max_trx_id: %lu\n", 
-	//bpage, bpage->id.space(), bpage->id.page_no(), page_is_leaf(block->frame), 
+	//fprintf(stderr, "version build with undo bpage : %lu space_id: %lu page_no: %lu leaf_page: %d iplized: %d normalized: %lu oldest_modification: %lu max_trx_id: %lu\n",
+	//bpage, bpage->id.space(), bpage->id.page_no(), page_is_leaf(block->frame),
 	//get_flag(bpage, IPLIZED), get_flag(bpage, NORMALIZE), bpage->oldest_modification, page_get_max_trx_id(block->frame));
 
+#ifdef UNIV_NVDIMM_PPL
+	tls_llt_undo_is_fallback = use_nvdimm_for_vers_build && err != DB_SUCCESS;
+#endif
 	err = row_vers_build_for_consistent_read(
 		rec, mtr, index, offsets, read_view, offset_heap,
 		*old_vers_heap, old_vers, NULL);
+#ifdef UNIV_NVDIMM_PPL
+	tls_llt_undo_is_fallback = false;
+#endif
 
 	}
 
@@ -3664,10 +3679,20 @@ row_sel_build_prev_vers_for_mysql(
 
 	buf_block_t* block = buf_page_get_block(bpage);
 
-	if((dict_index_get_space(clust_index) ==llt_space_id) && get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)
-	 && page_get_max_trx_id(block->frame)!=0 && page_is_leaf(block->frame) && bpage->io_fix==BUF_IO_NONE && buf_page_in_file(bpage)){ // undo_bufer_miss
-
-		use_nvdimm_for_vers_build = true;
+	{
+		ulint sp = dict_index_get_space(clust_index);
+		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh);
+		bool has_chain = get_flag(&(bpage->flags), PPLIZED)
+		              && !get_flag(&(bpage->flags), NORMALIZE);
+		bool maybe_prebuilt = (sp == llt_space_id_wh);
+		if (is_target
+		    && page_get_max_trx_id(block->frame) != 0
+		    && page_is_leaf(block->frame)
+		    && bpage->io_fix == BUF_IO_NONE
+		    && buf_page_in_file(bpage)
+		    && (has_chain || maybe_prebuilt)) {
+			use_nvdimm_for_vers_build = true;
+		}
 	}
 	//use_nvdimm_for_vers_build = false;
 
@@ -3692,10 +3717,15 @@ row_sel_build_prev_vers_for_mysql(
 	// bpage, bpage->id.space(), bpage->id.page_no(), page_is_leaf(block->frame),
 	// get_flag(bpage, IPLIZED), get_flag(bpage, NORMALIZE), bpage->oldest_modification, page_get_max_trx_id(block->frame), undo_buffer_miss);
 
-
+#ifdef UNIV_NVDIMM_PPL
+	tls_llt_undo_is_fallback = use_nvdimm_for_vers_build && err != DB_SUCCESS;
+#endif
 	err = row_vers_build_for_consistent_read(
 		rec, mtr, clust_index, offsets, read_view, offset_heap,
 		prebuilt->old_vers_heap, old_vers, vrow);
+#ifdef UNIV_NVDIMM_PPL
+	tls_llt_undo_is_fallback = false;
+#endif
 
 	}
 

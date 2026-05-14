@@ -98,6 +98,9 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "row0upd.h"
 #include "srv0mon.h"
 #include "srv0srv.h"
+#ifdef UNIV_NVDIMM_PPL
+#include "nvdimm-ppl.h"
+#endif
 #include "srv0start.h"
 #ifdef UNIV_DEBUG
 #include "trx0purge.h"
@@ -772,6 +775,11 @@ static MYSQL_THDVAR_BOOL(support_xa, PLUGIN_VAR_OPCMDARG,
   "Enable InnoDB support for the XA two-phase commit",
   /* check_func */ NULL, innodb_support_xa_update,
   /* default */ TRUE);
+
+static MYSQL_THDVAR_BOOL(is_llt, PLUGIN_VAR_OPCMDARG,
+  "PPL-MV: mark this session's transactions as LLT for separate metrics.",
+  /* check_func */ NULL, /* update_func */ NULL,
+  /* default */ FALSE);
 
 static MYSQL_THDVAR_BOOL(table_locks, PLUGIN_VAR_OPCMDARG,
   "Enable InnoDB locking in LOCK TABLES",
@@ -4290,6 +4298,26 @@ innobase_start_trx_and_assign_read_view(
 
 	if (trx->isolation_level == TRX_ISO_REPEATABLE_READ) {
 		trx_assign_read_view(trx);
+		/* Tag this view as LLT if the session var says so. Read at
+		   view-assign time so a SET SESSION before BEGIN sticks.
+		   Done unconditionally so vanilla build can also distinguish
+		   LLT vs OLTP readviews for measurement counters. */
+		if (trx->read_view != NULL) {
+			bool is_llt = THDVAR(thd, is_llt);
+			trx->read_view->m_is_llt = is_llt;
+#ifdef UNIV_NVDIMM_PPL
+			/* For non-PPLized hot tables (warehouse), pre-populate
+			   the prebuilt cache with the current page state — which
+			   equals the LLT's view at this moment — so subsequent
+			   LLT reads hit prebuilt directly instead of walking the
+			   long undo chain. */
+			if (is_llt && llt_space_id_wh != 0) {
+				ppl_snapshot_space_for_llt(
+					llt_space_id_wh,
+					trx->read_view->low_limit_id());
+			}
+#endif
+		}
 	} else {
 		push_warning_printf(thd, Sql_condition::SL_WARNING,
 				    HA_ERR_UNSUPPORTED,
@@ -20446,6 +20474,7 @@ static struct st_mysql_sys_var* innobase_system_variables[]= {
   MYSQL_SYSVAR(status_file),
   MYSQL_SYSVAR(strict_mode),
   MYSQL_SYSVAR(support_xa),
+  MYSQL_SYSVAR(is_llt),
   MYSQL_SYSVAR(sort_buffer_size),
   MYSQL_SYSVAR(online_alter_log_max_size),
   MYSQL_SYSVAR(sync_spin_loops),

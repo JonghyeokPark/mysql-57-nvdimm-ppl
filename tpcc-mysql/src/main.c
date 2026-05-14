@@ -478,10 +478,14 @@ int main( int argc, char *argv[] )
 
   /* EXEC SQL WHENEVER SQLERROR GOTO sqlerr; */
 
-  /* Spawn regular TPC-C threads. Under LLT, num_conn already includes
-     the +1 LLT slot, so spawn (num_conn-1) regular threads. */
+  /* Spawn regular TPC-C threads.
+     LLT mode: pick num_regular based on how many LLT slots are active below.
+       (A) stock-only:            num_regular = num_conn - 1
+       (B) stock + warehouse:     num_regular = num_conn - 2
+     Keep this in sync with the LLT spawn block further down. */
 #ifdef LLT
-  int num_regular = num_conn - 1;
+  int num_regular = num_conn - 1;        /* (A) stock-only */
+  /* int num_regular = num_conn - 2; */ /* (B) stock + warehouse */
 #else
   int num_regular = num_conn;
 #endif
@@ -506,14 +510,30 @@ int main( int argc, char *argv[] )
   }
 #endif
 
-  /* Spawn the LLT thread at the last slot (index num_conn-1) so the
-     join loop covers it. */
+  /* LLT spawn block. Warehouse-only single LLT is not viable (table is too
+     small — full scan returns instantly so the transaction is not actually
+     long-lived). Two supported modes:
+       (A) stock LLT only            -> leave STOCK below; keep WAREHOUSE commented;
+                                        num_regular = num_conn - 1
+       (B) both stock + warehouse    -> uncomment WAREHOUSE and switch STOCK slot
+                                        to num_conn-2;  num_regular = num_conn - 2
+     Slot convention in thread_long_tx: wh_scan = (t_num == num_conn - 1). */
 #ifdef LLT
   {
+    /* --- STOCK LLT --- */
+    t_num = num_conn - 1;  /* (A) stock-only */
+    /* t_num = num_conn - 2; */ /* (B) both: stock at num_conn-2 */
+    thd_arg[t_num].port= port;
+    thd_arg[t_num].number= t_num;
+    pthread_create(&t[t_num], NULL, (void*)thread_long_tx, (void *)&(thd_arg[t_num]));
+
+    /* --- WAREHOUSE LLT (only for mode B) --- */
+    /*
     t_num = num_conn - 1;
     thd_arg[t_num].port= port;
     thd_arg[t_num].number= t_num;
     pthread_create(&t[t_num], NULL, (void*)thread_long_tx, (void *)&(thd_arg[t_num]));
+    */
   }
 #endif
 	
@@ -792,60 +812,37 @@ int thread_long_tx(thread_arg * arg) {
 		goto sql_error;
 	}	
 	if (!is_long_running) {
-		fprintf(stdout, "start timer for long running transaction execution!\n"); fflush(stdout);
-		sleep(5); //lbh
+		fprintf(stdout, "LLT starting immediately (no delay).\n"); fflush(stdout);
 		is_long_running=1;
 	}
 
   int cnt = 0;
 
-	/* True LLT: BEGIN once with a consistent snapshot, then issue SELECTs
-	   repeatedly without committing. The read view stays anchored at the
-	   initial snapshot so OLTP updates that happen during the run force
-	   MVCC version reconstruction (undo chain or PPL-MV path) for every
-	   record LLT reads. Commit only at the end (when activate_transaction
-	   flips to 0). */
+	/* Open transaction LLT: SET innodb_is_llt + START TRANSACTION WITH
+	   CONSISTENT SNAPSHOT once at start. Readview anchored 600s →
+	   OLTP updates pile up in version chain → forces MVCC version
+	   reconstruction on every LLT read. */
+	rc = mysql_query(ctx[t_num], "SET SESSION innodb_is_llt = 1;");
+	if (rc != 0) goto sql_error;
 	rc = mysql_query(ctx[t_num], "start transaction with consistent snapshot;");
 	if (rc != 0) goto sql_error;
 
-	/* Bound each LLT SELECT to the remaining measurement window so the
-	   thread exits when the run ends. ER_QUERY_INTERRUPTED is treated
-	   like a normal end-of-iteration. */
-	char llt_q[512];
-	unsigned long llt_budget_ms = (unsigned long)measure_time * 1000UL;
 	while( activate_transaction ) {
-    cnt++;
-    unsigned old_clock = clock();
-		if(cnt%2==0){
-			snprintf(llt_q, sizeof(llt_q),
-				"select /*+ MAX_EXECUTION_TIME(%lu) */ s.*, w.w_name, w.w_ytd "
-				"from stock s join warehouse w on s.s_w_id = w.w_id "
-				"where s.s_i_id between 1 and 50000;", llt_budget_ms);
-		}else{
-			snprintf(llt_q, sizeof(llt_q),
-				"select /*+ MAX_EXECUTION_TIME(%lu) */ s.*, w.w_name, w.w_ytd "
-				"from stock s join warehouse w on s.s_w_id = w.w_id "
-				"where s.s_i_id between 50001 and 100000;", llt_budget_ms);
-		}
-		rc = mysql_query(ctx[t_num], llt_q);
-		if (rc != 0) {
-			unsigned int e = mysql_errno(ctx[t_num]);
-			if (e == 3024 /* ER_QUERY_TIMEOUT */ || e == 1317 /* ER_QUERY_INTERRUPTED */) {
-				break;
-			}
-			goto sql_error;
-		}
+		cnt++;
+		struct timespec ts_start, ts_end;
+		clock_gettime(CLOCK_MONOTONIC, &ts_start);
+		rc = mysql_query(ctx[t_num], "select * from stock s, warehouse w;");
+		if (rc != 0) goto sql_error;
 		MYSQL_RES *r=mysql_store_result(ctx[t_num]);
 		if(r!=NULL) mysql_free_result(r);
 		mysql_next_result(ctx[t_num]);
-		/* Do NOT commit: keep the snapshot alive across iterations. */
-    unsigned cur_clock = clock();
-
-    fprintf(stdout, "LLT query cnt: %d %d seconds (%d milliseconds).\n", cnt, (cur_clock - old_clock) / CLOCKS_PER_SEC, (cur_clock - old_clock) / (CLOCKS_PER_SEC / 1000) ); fflush(stdout);
+		/* No commit: keep readview anchored across iterations. */
+		clock_gettime(CLOCK_MONOTONIC, &ts_end);
+		long elapsed_ms = (ts_end.tv_sec - ts_start.tv_sec) * 1000L
+		                + (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000L;
+		fprintf(stdout, "LLT query cnt: %d %ld seconds (%ld milliseconds).\n",
+		        cnt, elapsed_ms / 1000, elapsed_ms); fflush(stdout);
 	}
-
-	/* Cleanup commit at end of measurement. */
-	mysql_commit(ctx[t_num]);
 
 sql_error:
 	fprintf(stderr, "SQL error! rc: %d\n", rc);

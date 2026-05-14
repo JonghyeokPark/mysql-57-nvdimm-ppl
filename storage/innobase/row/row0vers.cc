@@ -1191,6 +1191,9 @@ row_vers_build_for_consistent_read(
 	dberr_t		err;
 #ifdef UNIV_NVDIMM_PPL
 	ib_uint64_t	t_start_us = ut_time_us(NULL);
+#else
+	/* Vanilla baseline timer for stock-table undo cost measurement. */
+	ib_uint64_t	t_start_us = ut_time_us(NULL);
 #endif
 
 	ut_ad(dict_index_is_clust(index));
@@ -1283,10 +1286,15 @@ int buffer_miss_cnt = 0;
 	mem_heap_free(heap);
 
 #ifdef UNIV_NVDIMM_PPL
+	/* Expose chain length to caller (path B uses this to attribute its
+	   nested-undo walk to LLT_PATH_B_LEN_SUM). Always written; readers
+	   should reset before invocation if they want a fresh value. */
+	tls_llt_undo_chain_len = (int)version_build_cnt;
 	/* Per-table undo-chain + timing stats (innodb_metrics). */
 	{
 		uint64_t elapsed_us = (uint64_t)(ut_time_us(NULL) - t_start_us);
 		const char* tname = (index && index->table) ? index->table->name.m_name : "";
+		bool is_llt = ppl_is_llt_view(view);
 		if (tname && strstr(tname, "/stock") != NULL) {
 			MONITOR_INC(MONITOR_NVDIMM_PPL_UNDO_STOCK_CALLS);
 			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_STOCK_LEN_SUM,
@@ -1299,6 +1307,20 @@ int buffer_miss_cnt = 0;
 				(mon_type_t)elapsed_us);
 			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_STOCK_US_MAX,
 				(mon_type_t)elapsed_us);
+			if (is_llt) {
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_LEN_SUM,
+					(mon_type_t)version_build_cnt);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_US_SUM,
+					(mon_type_t)elapsed_us);
+				if (tls_llt_undo_is_fallback) {
+					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_FB_CALLS);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_FB_LEN_SUM,
+						(mon_type_t)version_build_cnt);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_FB_US_SUM,
+						(mon_type_t)elapsed_us);
+				}
+			}
 		} else if (tname && strstr(tname, "/warehouse") != NULL) {
 			MONITOR_INC(MONITOR_NVDIMM_PPL_UNDO_WH_CALLS);
 			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_WH_LEN_SUM,
@@ -1311,6 +1333,50 @@ int buffer_miss_cnt = 0;
 				(mon_type_t)elapsed_us);
 			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_WH_US_MAX,
 				(mon_type_t)elapsed_us);
+			if (is_llt) {
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_UNDO_WH_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_WH_LEN_SUM,
+					(mon_type_t)version_build_cnt);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_WH_US_SUM,
+					(mon_type_t)elapsed_us);
+			}
+		} else if (tname && strstr(tname, "/district") != NULL) {
+			if (is_llt) {
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_UNDO_DISTRICT_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_DISTRICT_LEN_SUM,
+					(mon_type_t)version_build_cnt);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_DISTRICT_US_SUM,
+					(mon_type_t)elapsed_us);
+			}
+		}
+	}
+#endif
+
+#ifndef UNIV_NVDIMM_PPL
+	/* Vanilla baseline: only count LLT readview calls (m_is_llt tagged
+	   via SET SESSION innodb_is_llt = 1). OLTP readviews are excluded so
+	   the chain-length / time stats reflect the actual LLT scan cost. */
+	if (view != NULL && view->m_is_llt) {
+		uint64_t elapsed_us = (uint64_t)(ut_time_us(NULL) - t_start_us);
+		const char* tname = (index && index->table) ? index->table->name.m_name : "";
+		if (tname && strstr(tname, "/stock") != NULL) {
+			MONITOR_INC(MONITOR_VANILLA_LLT_UNDO_STOCK_CALLS);
+			MONITOR_INC_VALUE(MONITOR_VANILLA_LLT_UNDO_STOCK_US_SUM,
+				(mon_type_t)elapsed_us);
+			MONITOR_INC_VALUE(MONITOR_VANILLA_LLT_UNDO_STOCK_LEN_SUM,
+				(mon_type_t)version_build_cnt);
+		} else if (tname && strstr(tname, "/warehouse") != NULL) {
+			MONITOR_INC(MONITOR_VANILLA_LLT_UNDO_WAREHOUSE_CALLS);
+			MONITOR_INC_VALUE(MONITOR_VANILLA_LLT_UNDO_WAREHOUSE_US_SUM,
+				(mon_type_t)elapsed_us);
+			MONITOR_INC_VALUE(MONITOR_VANILLA_LLT_UNDO_WAREHOUSE_LEN_SUM,
+				(mon_type_t)version_build_cnt);
+		} else if (tname && strstr(tname, "/district") != NULL) {
+			MONITOR_INC(MONITOR_VANILLA_LLT_UNDO_DISTRICT_CALLS);
+			MONITOR_INC_VALUE(MONITOR_VANILLA_LLT_UNDO_DISTRICT_US_SUM,
+				(mon_type_t)elapsed_us);
+			MONITOR_INC_VALUE(MONITOR_VANILLA_LLT_UNDO_DISTRICT_LEN_SUM,
+				(mon_type_t)version_build_cnt);
 		}
 	}
 #endif
