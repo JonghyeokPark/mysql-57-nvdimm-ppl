@@ -1241,19 +1241,22 @@ int buffer_miss_cnt = 0;
 			break;
 		}
 
-		/*mvcc-ppl */
-#ifdef UNIV_NVDIMM_PPL		
-		bool undo_buffer_miss = row_check_undo_page_buffer_miss(index, prev_version, offsets);
-
-		if(undo_buffer_miss && prev_version != NULL){
-			buffer_miss_cnt++;
-		}
-#endif				
 		version_build_cnt++;
 
 		*offsets = rec_get_offsets(
 			prev_version, index, *offsets, ULINT_UNDEFINED,
 			offset_heap);
+
+		/* mvcc-ppl: row_check reads roll_ptr via offsets — must be
+		   called AFTER offsets is updated for prev_version. Original
+		   ordering used STALE offsets (still for previous rec) which
+		   produced garbage roll_ptr → invalid rseg_id → NULL rseg deref. */
+#ifdef UNIV_NVDIMM_PPL
+		bool undo_buffer_miss = row_check_undo_page_buffer_miss(index, prev_version, offsets);
+		if(undo_buffer_miss && prev_version != NULL){
+			buffer_miss_cnt++;
+		}
+#endif
 
 #if defined UNIV_DEBUG || defined UNIV_BLOB_LIGHT_DEBUG
 		ut_a(!rec_offs_any_null_extern(prev_version, *offsets));

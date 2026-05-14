@@ -1048,9 +1048,8 @@ nvdimm_build_prev_vers_with_redo(
 	trx_id_t trx_id;
 
 
-	buf2 = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
-	temp_page = static_cast<byte*>(ut_align(buf2, UNIV_PAGE_SIZE));
-
+	/* temp_page allocation deferred to Path C entry. Prebuilt path
+	   points temp_page directly at pre_block->frame (no alloc). */
 
 	if(nvdimm_info->old_page==NULL){
 		nvdimm_info->old_page = (byte *)calloc(UNIV_PAGE_SIZE, sizeof(char));
@@ -1078,7 +1077,10 @@ nvdimm_build_prev_vers_with_redo(
 	if (temp_bpage != NULL) {
 		buf_block_t* pre_block = buf_page_get_block(temp_bpage);
 		if (pre_block != NULL && pre_block->frame != NULL) {
-			buf_frame_copy(temp_page, pre_block->frame);
+			/* Point temp_page directly at prebuilt frame instead of
+			   copying 16KB. Prebuilt cache stays alive for LLT lifetime,
+			   so the frame is stable for the duration of this function. */
+			temp_page = pre_block->frame;
 			used_prebuilt = true;
 		}
 		/* Do NOT consume-on-read: paper §5.2 keeps prebuilt usable
@@ -1092,10 +1094,6 @@ nvdimm_build_prev_vers_with_redo(
 	}
 	
 	__path_tag = 3; /* Path C attempted (disk read + PPL apply) */
-	if (apply_log_size < 64) {
-		*old_vers = NULL;
-		return DB_FAIL;
-	}
 
 read_old_page:
 	/* Read the old page from the disk */
@@ -1154,24 +1152,24 @@ read_old_page:
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 
+	/* Allocate temp_page only when entering Path C (prebuilt path uses
+	   pre_block->frame directly, no allocation needed). */
+	buf2 = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
+	temp_page = static_cast<byte*>(ut_align(buf2, UNIV_PAGE_SIZE));
+
 	/* Initialize temp_page to disk state so it's never uninitialized,
 	   even if the apply loop below doesn't iterate (e.g. disk's max_trx
 	   already not visible to LLT — extremely rare since LLT.start is
 	   usually older than disk-flushed trx). */
 	buf_frame_copy(temp_page, old_page);
 
-	/* 3. Traverse all the log records inside IPL region to find until which redo log we should apply based on trx_id
-	 Apply the redo log and find compare the max_trx_id of the old bpage with the readview trx_id */
-
-	 while (apply_log_size != 0 && read_view->changes_visible(old_page_max_trx_id, clust_index->table->name)  ) {
-		/* Save the current (still LLT-visible) version into temp_page
-		   before applying the next PPL. If the next apply makes the
-		   page no longer visible, we exit and temp_page holds the
-		   correct visible version. */
-		buf_frame_copy(temp_page, old_page);
-
+	/* 3. Traverse PPL log records and apply only those visible to LLT
+	   readview. PPL records are stored in commit-time order, so visibility
+	   is a monotone function: once we find a record invisible to the view,
+	   all subsequent records are also invisible. Break out without applying.
+	   Then old_page holds the last LLT-visible state. */
+	while (apply_log_size != 0) {
 		temp_trx_id = old_page_max_trx_id;
-
 
         if ((end_ptr - current_ptr) < APPLY_LOG_HDR_SIZE) {
             size_t remaining = end_ptr - current_ptr;
@@ -1204,6 +1202,13 @@ read_old_page:
 			trx_id = mach_read_from_8(current_ptr);
 			current_ptr += 8;
 			apply_log_size -= 8;
+		}
+
+		/* Visibility check on THIS PPL record's trx_id. PPL is in commit
+		   order so a single invisible record means all subsequent ones
+		   are too — break without applying. old_page state preserved. */
+		if (!read_view->changes_visible(trx_id, clust_index->table->name)) {
+			break;
 		}
 
 		if ((end_ptr - current_ptr) < log_body_length) {
@@ -1250,18 +1255,10 @@ read_old_page:
 		old_page_max_trx_id = page_get_max_trx_id(old_page);
     }
 
-	/* Loop exit interpretation:
-	   - apply_log_size == 0  : all PPLs applied and all were visible to the
-	                            LLT. Final old_page = LLT-visible version.
-	                            Use old_page as the final temp_page.
-	   - apply_log_size  > 0  : visibility broke at some PPL. temp_page holds
-	                            the last-visible state (saved at top of the
-	                            iteration before the breaking apply). Keep
-	                            temp_page as-is. */
-	if (apply_log_size == 0) {
-		buf_frame_copy(temp_page, old_page);
-		temp_trx_id = old_page_max_trx_id;
-	}
+	/* After loop, old_page holds all LLT-visible applied state.
+	   Copy once into temp_page (the rec extraction target). */
+	buf_frame_copy(temp_page, old_page);
+	temp_trx_id = old_page_max_trx_id;
 
 	/* Path C chain length = number of PPL log records forward-applied. */
 	__chain_len = IPL_apply_cnt;
@@ -1308,9 +1305,12 @@ get_rec_offset:
 
 	temp_page_rec = page_find_rec_with_heap_no(temp_page, heap_no);
 
-	//fprintf(stderr,"temp_page_rec: %lu rec: %lu\n", temp_page_resc, rec);
+	if (temp_page_rec == NULL) {
+		*old_vers = NULL;
+		return DB_FAIL;
+	}
 
-	ulint*		temp_offsets;
+	ulint*		temp_offsets = NULL;
 	mem_heap_t*	temp_offset_heap		= NULL;
 
 	temp_offset_heap = mem_heap_create(1024);
@@ -1318,11 +1318,6 @@ get_rec_offset:
 	temp_offsets = rec_get_offsets(
 			temp_page_rec, clust_index, temp_offsets, ULINT_UNDEFINED,
 			&temp_offset_heap);
-
-	if(temp_page_rec==NULL){
-		*old_vers = NULL;
-		return DB_FAIL;
-	}
 
 	byte* buf = static_cast<byte*>(
 				mem_heap_alloc(
@@ -1350,20 +1345,18 @@ get_rec_offset:
 	{
 		trx_id_t old_rec_trx_id = row_get_rec_trx_id(*old_vers, clust_index, *offsets);
 		if (!read_view->changes_visible(old_rec_trx_id, clust_index->table->name)) {
-			/* Downgrade path tag based on prior state so destructor
-			   counts each terminal path separately:
-			     1 (path A)      → 2 (path B: prebuilt + nested undo)
-			     3 (path C pure) → 4 (path C + nested undo)
-			     5 (disk-too-new + undo) stays 5
-			*/
+			/* #4 Old Page+Undo path removed: if Path C apply finished but
+			   result still invisible, return DB_FAIL so caller falls back
+			   to vanilla undo (#5 Latest+Undo from BP) instead of nested
+			   undo from disk page. Same for #5 (disk-too-new). */
+			if (__path_tag == 3 || __path_tag == 5) {
+				*old_vers = NULL;
+				return DB_FAIL;
+			}
+			/* Downgrade path tag based on prior state:
+			     1 (path A) → 2 (path B: prebuilt + nested undo) */
 			if (__path_tag == 1) {
 				__path_tag = 2;
-			} else if (__path_tag == 3) {
-				__path_tag = 4;
-				fprintf(stderr, "TR[PATH4_REDO_THEN_UNDO] page=%lu:%lu rec_trx=%lu\n",
-					(ulong)page_id.space(), (ulong)page_id.page_no(),
-					(ulong)old_rec_trx_id);
-				fflush(stderr);
 			}
 			rec_t* undo_old_vers = NULL;
 			ib_uint64_t __p2_start = ut_time_us(NULL);
