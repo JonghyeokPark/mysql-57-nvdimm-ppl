@@ -800,7 +800,7 @@ row_sel_build_prev_vers(
 		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh);
 		bool has_chain = get_flag(&(bpage->flags), PPLIZED)
 		              && !get_flag(&(bpage->flags), NORMALIZE);
-		bool maybe_prebuilt = (sp == llt_space_id_wh);
+		bool maybe_prebuilt = is_target;   /* stock + warehouse 둘 다 lookup 시도 */
 		if (is_target
 		    && page_get_max_trx_id(block->frame) != 0
 		    && (has_chain || maybe_prebuilt)) {
@@ -3684,7 +3684,7 @@ row_sel_build_prev_vers_for_mysql(
 		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh);
 		bool has_chain = get_flag(&(bpage->flags), PPLIZED)
 		              && !get_flag(&(bpage->flags), NORMALIZE);
-		bool maybe_prebuilt = (sp == llt_space_id_wh);
+		bool maybe_prebuilt = is_target;   /* stock + warehouse 둘 다 lookup 시도 */
 		if (is_target
 		    && page_get_max_trx_id(block->frame) != 0
 		    && page_is_leaf(block->frame)

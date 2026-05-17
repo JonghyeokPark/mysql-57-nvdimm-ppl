@@ -4305,18 +4305,6 @@ innobase_start_trx_and_assign_read_view(
 		if (trx->read_view != NULL) {
 			bool is_llt = THDVAR(thd, is_llt);
 			trx->read_view->m_is_llt = is_llt;
-#ifdef UNIV_NVDIMM_PPL
-			/* For non-PPLized hot tables (warehouse), pre-populate
-			   the prebuilt cache with the current page state — which
-			   equals the LLT's view at this moment — so subsequent
-			   LLT reads hit prebuilt directly instead of walking the
-			   long undo chain. */
-			if (is_llt && llt_space_id_wh != 0) {
-				ppl_snapshot_space_for_llt(
-					llt_space_id_wh,
-					trx->read_view->low_limit_id());
-			}
-#endif
 		}
 	} else {
 		push_warning_printf(thd, Sql_condition::SL_WARNING,

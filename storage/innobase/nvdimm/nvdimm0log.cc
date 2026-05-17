@@ -18,6 +18,7 @@
 #ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ppl.h"
 #include "mtr0log.h"
+#include <vector>
 #include "page0page.h"
 #include "buf0flu.h"
 #include "srv0srv.h"
@@ -32,15 +33,35 @@ bool ppl_is_llt_view(const ReadView* view) {
 	return view->m_is_llt;
 }
 
+/* Clock-sweep cache for prebuilt page snapshots.
+   16MB / 4KB page = 4096 slots. Each slot has a reference bit; on hit
+   set ref_bit=1; on insert without free slot, advance clock hand,
+   clearing ref_bit=1 entries to 0 and evicting the first ref_bit=0. */
+namespace {
+struct prebuilt_slot_t {
+	uint64_t     key;
+	buf_page_t*  page;
+	uint8_t      ref_bit;
+	uint32_t     refcount;   /* # of in-flight readers using this slot */
+	bool         used;
+	prebuilt_slot_t() : key(0), page(NULL), ref_bit(0), refcount(0), used(false) {}
+};
+const size_t PREBUILT_CACHE_CAP = (128ULL * 1024 * 1024) / 4096;   /* = 8192 */
+std::vector<prebuilt_slot_t> g_prebuilt_slots(PREBUILT_CACHE_CAP);
+std::tr1::unordered_map<uint64_t, size_t> g_prebuilt_slot_idx;
+size_t g_prebuilt_clock_hand = 0;
+}
+
 void ppl_clear_prebuilt_cache(void) {
 	mutex_enter(&prebuilt_page_list_mutex);
-	for (prebuilt_page_map_t::iterator it = prebuilt_page_list.begin();
-	     it != prebuilt_page_list.end(); ++it) {
-		buf_page_t* bp = it->second;
-		if (bp != NULL) {
-			ut_free(buf_page_get_block(bp));
+	for (size_t i = 0; i < PREBUILT_CACHE_CAP; i++) {
+		if (g_prebuilt_slots[i].used && g_prebuilt_slots[i].page != NULL) {
+			ut_free(buf_page_get_block(g_prebuilt_slots[i].page));
 		}
+		g_prebuilt_slots[i] = prebuilt_slot_t();
 	}
+	g_prebuilt_slot_idx.clear();
+	g_prebuilt_clock_hand = 0;
 	prebuilt_page_list.clear();
 	mutex_exit(&prebuilt_page_list_mutex);
 }
@@ -88,6 +109,23 @@ ib_mutex_t prebuilt_page_list_mutex;
 static inline uint64_t prebuilt_key(ulint space, ulint page_no) {
     return ((uint64_t)space << 32) | (uint32_t)page_no;
 }
+
+/* Per-thread out-parameter set by find_prebuilt_page_from_list; consumed
+   by PrebuiltGuard right after find. (size_t)-1 = no slot held. */
+static __thread size_t tls_last_prebuilt_slot_idx = (size_t)-1;
+
+/* RAII guard: auto-release on scope exit. Lock-free atomic_dec.
+   Evict requires refcount==0, so the slot stays valid while held. */
+namespace { struct PrebuiltGuard {
+    size_t slot_idx;
+    PrebuiltGuard() : slot_idx((size_t)-1) {}
+    ~PrebuiltGuard() {
+        if (slot_idx != (size_t)-1) {
+            os_atomic_decrement_uint32(
+                &g_prebuilt_slots[slot_idx].refcount, 1);
+        }
+    }
+}; }
 
 bool alloc_first_ppl_to_bpage(buf_page_t * bpage){
 	unsigned char * first_ppl_block_ptr = alloc_ppl_from_queue(normal_buf_pool_get(bpage->id));
@@ -755,37 +793,75 @@ add_prebuilt_page(buf_page_t* bpage, trx_id_t target_ts){
     buf_page_t* prebuilt_page = &prebuilt_block->page;
     uint64_t key = prebuilt_key(bpage->id.space(), bpage->id.page_no());
 
-    mutex_enter(&prebuilt_page_list_mutex);
-    prebuilt_page_map_t::iterator it = prebuilt_page_list.find(key);
     buf_page_t* old = NULL;
     buf_page_t* kept = NULL;
-    if (it != prebuilt_page_list.end()) {
-        buf_page_t* existing = it->second;
-        /* Lower target_ts = older snapshot = closer to LLT view's start.
-           If the existing entry is older-or-equal, keep it — overwriting
-           with a newer snapshot only makes the nested-undo walk from
-           prebuilt back to LLT view longer. Only replace when the new
-           snapshot is strictly older (rare). */
+    buf_page_t* evicted = NULL;
+    bool        discarded = false;
+
+    mutex_enter(&prebuilt_page_list_mutex);
+    std::tr1::unordered_map<uint64_t, size_t>::iterator idx_it
+        = g_prebuilt_slot_idx.find(key);
+    if (idx_it != g_prebuilt_slot_idx.end()) {
+        /* Same page: reuse slot, keep older trx_id (closer to LLT view). */
+        size_t slot = idx_it->second;
+        buf_page_t* existing = g_prebuilt_slots[slot].page;
         if (existing->trx_id <= target_ts) {
             kept = existing;
         } else {
             old = existing;
-            it->second = prebuilt_page;
+            g_prebuilt_slots[slot].page = prebuilt_page;
         }
+        g_prebuilt_slots[slot].ref_bit = 1;
     } else {
-        prebuilt_page_list.insert(std::make_pair(key, prebuilt_page));
+        /* New page: find empty slot or clock-evict (refcount==0 only). */
+        size_t slot = (size_t)-1;
+        for (size_t i = 0; i < PREBUILT_CACHE_CAP; i++) {
+            if (!g_prebuilt_slots[i].used) { slot = i; break; }
+        }
+        if (slot == (size_t)-1) {
+            /* Clock sweep: skip in-flight (refcount>0), clear ref_bit=1,
+               evict first ref_bit==0 && refcount==0. */
+            for (size_t tries = 0; tries < 2 * PREBUILT_CACHE_CAP; tries++) {
+                size_t i = (g_prebuilt_clock_hand + tries) % PREBUILT_CACHE_CAP;
+                if (g_prebuilt_slots[i].refcount > 0) continue;
+                if (g_prebuilt_slots[i].ref_bit == 0) {
+                    /* Evict: defer ut_free until mutex released. */
+                    evicted = g_prebuilt_slots[i].page;
+                    g_prebuilt_slot_idx.erase(g_prebuilt_slots[i].key);
+                    slot = i;
+                    g_prebuilt_clock_hand = (i + 1) % PREBUILT_CACHE_CAP;
+                    break;
+                }
+                g_prebuilt_slots[i].ref_bit = 0;
+            }
+        }
+        if (slot == (size_t)-1) {
+            /* Everyone is pinned (refcount>0) — give up, discard. */
+            discarded = true;
+        } else {
+            g_prebuilt_slots[slot].key = key;
+            g_prebuilt_slots[slot].page = prebuilt_page;
+            g_prebuilt_slots[slot].ref_bit = 1;
+            g_prebuilt_slots[slot].refcount = 0;
+            g_prebuilt_slots[slot].used = true;
+            g_prebuilt_slot_idx[key] = slot;
+        }
     }
     mutex_exit(&prebuilt_page_list_mutex);
 
     if (kept != NULL) {
-        /* Discard the newly-allocated copy; existing entry stays. */
         ut_free(prebuilt_block);
         return kept;
     }
+    if (discarded) {
+        ut_free(prebuilt_block);
+        return NULL;
+    }
     if (old != NULL) {
-        /* free the previous entry's raw allocation (the block itself
-           was the raw ut_malloc'd pointer). */
         ut_free(buf_page_get_block(old));
+    }
+    if (evicted != NULL) {
+        ut_free(buf_page_get_block(evicted));
     }
     return prebuilt_page;
 }
@@ -796,12 +872,16 @@ remove_prebuilt_page_from_list(buf_page_t* prebuilt_page, prebuilt_page_map_t& p
     if (prebuilt_page == NULL) return;
     uint64_t key = prebuilt_key(prebuilt_page->id.space(),
                                 prebuilt_page->id.page_no());
+    (void) prebuilt_page_list;
     buf_page_t* to_free = NULL;
     mutex_enter(&prebuilt_page_list_mutex);
-    prebuilt_page_map_t::iterator it = prebuilt_page_list.find(key);
-    if (it != prebuilt_page_list.end() && it->second == prebuilt_page) {
-        to_free = it->second;
-        prebuilt_page_list.erase(it);
+    std::tr1::unordered_map<uint64_t, size_t>::iterator idx_it
+        = g_prebuilt_slot_idx.find(key);
+    if (idx_it != g_prebuilt_slot_idx.end()
+        && g_prebuilt_slots[idx_it->second].page == prebuilt_page) {
+        to_free = g_prebuilt_slots[idx_it->second].page;
+        g_prebuilt_slots[idx_it->second] = prebuilt_slot_t();
+        g_prebuilt_slot_idx.erase(idx_it);
     }
     mutex_exit(&prebuilt_page_list_mutex);
     if (to_free != NULL) {
@@ -821,12 +901,21 @@ find_prebuilt_page_from_list(
        extraction, so we don't filter on tag here. */
     (void) reader_view;
     (void) table_name;
+    (void) prebuilt_page_list;
     if (target_bpage == NULL) return NULL;
     uint64_t key = prebuilt_key(target_bpage->id.space(),
                                 target_bpage->id.page_no());
+    buf_page_t* found = NULL;
     mutex_enter(&prebuilt_page_list_mutex);
-    prebuilt_page_map_t::iterator it = prebuilt_page_list.find(key);
-    buf_page_t* found = (it != prebuilt_page_list.end()) ? it->second : NULL;
+    std::tr1::unordered_map<uint64_t, size_t>::iterator idx_it
+        = g_prebuilt_slot_idx.find(key);
+    tls_last_prebuilt_slot_idx = (size_t)-1;
+    if (idx_it != g_prebuilt_slot_idx.end()) {
+        found = g_prebuilt_slots[idx_it->second].page;
+        g_prebuilt_slots[idx_it->second].ref_bit = 1;
+        g_prebuilt_slots[idx_it->second].refcount++;
+        tls_last_prebuilt_slot_idx = idx_it->second;
+    }
     mutex_exit(&prebuilt_page_list_mutex);
     bool is_llt = ppl_is_llt_view(reader_view);
     if (found == NULL) {
@@ -1067,12 +1156,14 @@ nvdimm_build_prev_vers_with_redo(
 	/* Prebuilt page lookup (paper §5.2). Time the lookup separately
 	   so it can be excluded from path_*_us_sum (pure version-build
 	   cost) and tracked as its own metric. */
+	PrebuiltGuard __pg;
 	{
 		ib_uint64_t __find_start = ut_time_us(NULL);
 		temp_bpage = find_prebuilt_page_from_list(bpage, prebuilt_page_list,
 	                                           read_view,
 	                                           clust_index->table->name);
 		__find_us = (uint64_t)(ut_time_us(NULL) - __find_start);
+		__pg.slot_idx = tls_last_prebuilt_slot_idx;   /* lock-free release on exit */
 	}
 	if (temp_bpage != NULL) {
 		buf_block_t* pre_block = buf_page_get_block(temp_bpage);
