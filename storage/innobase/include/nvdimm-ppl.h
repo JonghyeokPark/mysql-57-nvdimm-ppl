@@ -113,15 +113,18 @@ void nvdimm_free(const uint64_t pool_size);
 /* In apply log strucrute*/
 /* mtr_log_type(1) | mtr_body_len (2) | trx_id (8) | mtr_log_body(1 ~ 110) | */
 #define APPLY_LOG_HDR_SIZE 11UL
+#define OPPL_SEG_BYTES 4096UL
 
 
 enum ipl_flag {
   PPLIZED = 1,
   NORMALIZE = 2,
-  DIRTIFIED = 4,
+  OPPL_FLUSH = 4,
   IN_LOOK_UP = 8,
   DIRECTLY_WRITE = 16,
-  IN_PPL_BUF_POOL = 32
+  IN_PPL_BUF_POOL = 32,
+  OPPL_BACKED = 64,
+  OPPL_WRITE_SKIPPED = 128
 };
 
 typedef struct NVDIMM_SYSTEM
@@ -189,6 +192,16 @@ void all_ppl_apply_to_page(byte *start_ptr, ulint apply_log_size, buf_block_t *b
 byte* fetch_next_segment(byte* current_end, byte** new_end, byte** next_ppl);
 void apply_log_record(mlog_id_t log_type, byte* log_data, uint length, trx_id_t trx_id, buf_block_t* block, mtr_t* temp_mtr);
 // byte * ipl_complete_log_apply(byte * apply_ptr, uint * ppl_left_size, buf_block_t * block, mtr_t * temp_mtr);
+
+void oppl_init(void);
+bool oppl_should_track_page(buf_page_t* bpage);
+void oppl_mark_backed_for_ppl_max(buf_page_t* bpage);
+bool oppl_has_entry(const page_id_t& page_id);
+bool oppl_spill_page(buf_page_t* bpage);
+bool oppl_should_skip_dblwr_update(buf_page_t* bpage);
+void oppl_prefetch_on_read(const page_id_t& page_id);
+void oppl_apply_on_read(buf_block_t* block);
+void oppl_cleanup_after_write(buf_page_t* bpage, bool write_skipped);
 
 
 

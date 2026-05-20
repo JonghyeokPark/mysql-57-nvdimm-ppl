@@ -27,6 +27,418 @@
 #include "trx0sys.h"
 #include "row0vers.h"
 #include "trx0undo.h"
+#include <fcntl.h>
+#include <unistd.h>
+
+namespace {
+enum oppl_state_t {
+	OPPL_STATE_ACTIVE = 0,
+	OPPL_STATE_OVERFLOW
+};
+
+struct oppl_entry_t {
+	uint64_t	offset;
+	ulint	len;
+	uint8_t	state;
+	lsn_t	disk_lsn;	/* .ibd page LSN at spill time, raw fil_io read */
+	oppl_entry_t() : offset(0), len(0), state(OPPL_STATE_ACTIVE), disk_lsn(0) {}
+};
+
+static bool g_oppl_initialized = false;
+static int g_oppl_fd = -1;
+static uint64_t g_oppl_next_offset = 0;
+static ib_mutex_t g_oppl_mutex;
+static std::tr1::unordered_map<page_id_t, oppl_entry_t*> g_oppl_table;
+static const char* OPPL_DAT_PATH = "/mnt/test_data/oppl.dat";
+}
+
+void oppl_init(void)
+{
+	if (g_oppl_initialized) {
+		return;
+	}
+
+	mutex_create(LATCH_ID_STATIC_REGION, &g_oppl_mutex);
+	g_oppl_fd = ::open(OPPL_DAT_PATH, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	if (g_oppl_fd < 0) {
+		ib::warn() << "O-PPL: failed to open " << OPPL_DAT_PATH;
+	} else {
+		ib::info() << "O-PPL v0 init: " << OPPL_DAT_PATH;
+	}
+
+	g_oppl_next_offset = 0;
+	g_oppl_initialized = true;
+}
+
+bool oppl_should_track_page(buf_page_t* bpage)
+{
+	if (bpage == NULL || llt_space_id == 0) {
+		return false;
+	}
+
+	return bpage->id.space() == llt_space_id
+		&& __atomic_load_n(&g_oldest_active_view_ts, __ATOMIC_ACQUIRE) != 0;
+}
+
+void oppl_mark_backed_for_ppl_max(buf_page_t* bpage)
+{
+	if (oppl_should_track_page(bpage)) {
+		set_flag(&(bpage->flags), OPPL_BACKED);
+	}
+}
+
+bool oppl_has_entry(const page_id_t& page_id)
+{
+	bool found = false;
+
+	if (!g_oppl_initialized) {
+		return false;
+	}
+
+	mutex_enter(&g_oppl_mutex);
+	found = g_oppl_table.find(page_id) != g_oppl_table.end();
+	mutex_exit(&g_oppl_mutex);
+
+	return found;
+}
+
+static ulint
+oppl_linearize_ppl_chain(buf_page_t* bpage, byte* out, ulint cap)
+{
+	if (bpage == NULL || bpage->first_ppl_block_ptr == NULL || out == NULL) {
+		return 0;
+	}
+
+	ulint total = get_ppl_length_from_ppl_header(bpage);
+	if (total == 0) {
+		total = bpage->ppl_length;
+	}
+	if (total == 0 || total > cap) {
+		return 0;
+	}
+
+	byte* start = bpage->first_ppl_block_ptr;
+	byte* cur = start + PPL_BLOCK_HDR_SIZE;
+	byte* end = start + nvdimm_info->each_ppl_size;
+	byte* next_ppl = get_addr_from_ppl_index(
+		nvdimm_info->ppl_start_pointer,
+		mach_read_from_4(start + PPL_HDR_DYNAMIC_INDEX),
+		nvdimm_info->each_ppl_size);
+
+	ulint copied = 0;
+	ulint remain = total;
+
+	while (remain > 0) {
+		if (cur >= end) {
+			cur = fetch_next_segment(cur, &end, &next_ppl);
+			if (cur == NULL) {
+				return 0;
+			}
+		}
+
+		ulint avail = end - cur;
+		ulint take = ut_min(remain, avail);
+		if (copied + take > cap) {
+			return 0;
+		}
+
+		memcpy(out + copied, cur, take);
+		copied += take;
+		cur += take;
+		remain -= take;
+	}
+
+	return copied;
+}
+
+struct oppl_pending_copy_t {
+	byte*	out;
+	ulint	cap;
+	ulint	copied;
+
+	void init(byte* target, ulint capacity, ulint start)
+	{
+		out = target;
+		cap = capacity;
+		copied = start;
+	}
+
+	bool operator()(const in_memory_ppl_buf_t::block_t* block)
+	{
+		ulint used = block->used();
+		if (copied + used > cap) {
+			return false;
+		}
+
+		memcpy(out + copied, block->begin(), used);
+		copied += used;
+		return true;
+	}
+};
+
+static ulint
+oppl_linearize_page_logs(buf_page_t* bpage, byte* out, ulint cap)
+{
+	ulint copied = oppl_linearize_ppl_chain(bpage, out, cap);
+	if (copied == 0) {
+		return 0;
+	}
+
+	buf_block_t* block = reinterpret_cast<buf_block_t*>(bpage);
+	ulint pending_len = block->in_memory_ppl_buf.size();
+	if (pending_len == 0) {
+		return copied;
+	}
+	if (copied + pending_len > cap) {
+		return 0;
+	}
+
+	oppl_pending_copy_t pending_copy;
+	pending_copy.init(out, cap, copied);
+	if (!block->in_memory_ppl_buf.for_each_block(pending_copy)) {
+		return 0;
+	}
+
+	return pending_copy.copied;
+}
+
+bool oppl_spill_page(buf_page_t* bpage)
+{
+	if (!g_oppl_initialized || g_oppl_fd < 0 || bpage == NULL) {
+		return false;
+	}
+
+	byte* chain = static_cast<byte*>(ut_malloc_nokey(OPPL_SEG_BYTES));
+	if (chain == NULL) {
+		return false;
+	}
+
+	ulint chain_len = oppl_linearize_page_logs(bpage, chain, OPPL_SEG_BYTES);
+	if (chain_len == 0) {
+		ut_free(chain);
+		return false;
+	}
+
+	bool ok = false;
+	bool reserved = false;
+	uint64_t off = 0;
+
+	mutex_enter(&g_oppl_mutex);
+	oppl_entry_t* entry = NULL;
+	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
+		g_oppl_table.find(bpage->id);
+	if (it == g_oppl_table.end()) {
+		entry = new oppl_entry_t();
+		entry->offset = g_oppl_next_offset;
+		g_oppl_next_offset += OPPL_SEG_BYTES;
+		g_oppl_table[bpage->id] = entry;
+	} else {
+		entry = it->second;
+	}
+
+	if (entry->state == OPPL_STATE_ACTIVE
+	    && entry->len + chain_len <= OPPL_SEG_BYTES) {
+		off = entry->offset + entry->len;
+		reserved = true;
+	} else {
+		entry->state = OPPL_STATE_OVERFLOW;
+	}
+	mutex_exit(&g_oppl_mutex);
+
+	if (reserved) {
+		ssize_t written = ::pwrite(g_oppl_fd, chain, chain_len, off);
+
+		/* Read .ibd page LSN via raw fil_io for LSN gate at apply time.
+		   This is the LSN .ibd will have after the upcoming write-skip;
+		   any later normal flush would advance it past this value. */
+		lsn_t disk_lsn_now = 0;
+		{
+			byte* buf1 = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
+			if (buf1 != NULL) {
+				byte* p = static_cast<byte*>(ut_align(buf1, UNIV_PAGE_SIZE));
+				bool found;
+				const page_size_t ps(fil_space_get_page_size(bpage->id.space(), &found));
+				if (found) {
+					dberr_t err = fil_io(IORequestRead, true, bpage->id, ps,
+						0, ps.physical(), p, NULL);
+					if (err == DB_SUCCESS) {
+						disk_lsn_now = mach_read_from_8(p + FIL_PAGE_LSN);
+					}
+				}
+				ut_free(buf1);
+			}
+		}
+
+		mutex_enter(&g_oppl_mutex);
+		std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it2 =
+			g_oppl_table.find(bpage->id);
+		if (it2 != g_oppl_table.end()
+		    && it2->second->state == OPPL_STATE_ACTIVE
+		    && it2->second->offset + it2->second->len == off
+		    && written == (ssize_t) chain_len) {
+			it2->second->len += chain_len;
+			if (it2->second->disk_lsn == 0) {
+				it2->second->disk_lsn = disk_lsn_now;
+			}
+			ok = true;
+			set_flag(&(bpage->flags), OPPL_BACKED);
+		} else if (it2 != g_oppl_table.end()) {
+			it2->second->state = OPPL_STATE_OVERFLOW;
+		}
+		mutex_exit(&g_oppl_mutex);
+	}
+
+	ut_free(chain);
+	return ok;
+}
+
+bool oppl_should_skip_dblwr_update(buf_page_t* bpage)
+{
+	if (!g_oppl_initialized
+	    || bpage == NULL
+	    || !get_flag(&(bpage->flags), OPPL_BACKED)) {
+		return false;
+	}
+	if (!get_flag(&(bpage->flags), PPLIZED)
+	    || !get_flag(&(bpage->flags), NORMALIZE)
+	    || bpage->normalize_cause != 2) {
+		return false;
+	}
+
+	bool active = false;
+	mutex_enter(&g_oppl_mutex);
+	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
+		g_oppl_table.find(bpage->id);
+	active = it != g_oppl_table.end()
+		&& it->second->state == OPPL_STATE_ACTIVE;
+	mutex_exit(&g_oppl_mutex);
+
+	return active;
+}
+
+void oppl_prefetch_on_read(const page_id_t& page_id)
+{
+	if (!g_oppl_initialized || g_oppl_fd < 0) {
+		return;
+	}
+
+	uint64_t disk_off = 0;
+	ulint disk_len = 0;
+
+	mutex_enter(&g_oppl_mutex);
+	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
+		g_oppl_table.find(page_id);
+	if (it != g_oppl_table.end()
+	    && it->second->state == OPPL_STATE_ACTIVE) {
+		disk_off = it->second->offset;
+		disk_len = it->second->len;
+	}
+	mutex_exit(&g_oppl_mutex);
+
+	if (disk_len > 0 && disk_len <= OPPL_SEG_BYTES) {
+		(void) ::posix_fadvise(
+			g_oppl_fd, static_cast<off_t>(disk_off),
+			static_cast<off_t>(disk_len), POSIX_FADV_WILLNEED);
+	}
+}
+
+static void
+oppl_apply_segment(byte* seg, ulint len, buf_block_t* block, mtr_t* mtr)
+{
+	ulint off = 0;
+
+	while (off + APPLY_LOG_HDR_SIZE <= len) {
+		mlog_id_t type = static_cast<mlog_id_t>(mach_read_from_1(seg + off));
+		ulint body_len = mach_read_from_2(seg + off + 1);
+		trx_id_t trx_id = mach_read_from_8(seg + off + 3);
+		off += APPLY_LOG_HDR_SIZE;
+
+		if (off + body_len > len) {
+			return;
+		}
+
+		apply_log_record(type, seg + off, body_len, trx_id, block, mtr);
+		off += body_len;
+	}
+}
+
+void oppl_apply_on_read(buf_block_t* block)
+{
+	if (!g_oppl_initialized || g_oppl_fd < 0 || block == NULL) {
+		return;
+	}
+
+	uint64_t disk_off = 0;
+	ulint disk_len = 0;
+	lsn_t entry_disk_lsn = 0;
+
+	mutex_enter(&g_oppl_mutex);
+	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
+		g_oppl_table.find(block->page.id);
+	if (it != g_oppl_table.end()
+	    && it->second->state == OPPL_STATE_ACTIVE) {
+		disk_off = it->second->offset;
+		disk_len = it->second->len;
+		entry_disk_lsn = it->second->disk_lsn;
+	}
+	mutex_exit(&g_oppl_mutex);
+
+	if (disk_len == 0 || disk_len > OPPL_SEG_BYTES) {
+		return;
+	}
+
+	{
+		lsn_t frame_lsn = mach_read_from_8(block->frame + FIL_PAGE_LSN);
+		if (entry_disk_lsn != 0 && frame_lsn != entry_disk_lsn) {
+			return;
+		}
+	}
+
+	byte* seg = static_cast<byte*>(ut_malloc_nokey(disk_len));
+	if (seg == NULL) {
+		return;
+	}
+
+	ssize_t r = ::pread(g_oppl_fd, seg, disk_len, disk_off);
+	if (r == (ssize_t) disk_len) {
+		mtr_t temp_mtr;
+		mtr_start(&temp_mtr);
+		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
+		oppl_apply_segment(seg, disk_len, block, &temp_mtr);
+		temp_mtr.discard_modifications();
+		mtr_commit(&temp_mtr);
+		set_flag(&(block->page.flags), OPPL_BACKED);
+	}
+
+	ut_free(seg);
+}
+
+void oppl_cleanup_after_write(buf_page_t* bpage, bool write_skipped)
+{
+	if (!g_oppl_initialized || bpage == NULL) {
+		return;
+	}
+	if (write_skipped) {
+		unset_flag(&(bpage->flags), OPPL_WRITE_SKIPPED);
+		return;
+	}
+
+	oppl_entry_t* entry = NULL;
+
+	mutex_enter(&g_oppl_mutex);
+	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
+		g_oppl_table.find(bpage->id);
+	if (it != g_oppl_table.end()) {
+		entry = it->second;
+		g_oppl_table.erase(it);
+	}
+	mutex_exit(&g_oppl_mutex);
+
+	if (entry != NULL) {
+		delete entry;
+		unset_flag(&(bpage->flags), OPPL_BACKED);
+	}
+}
 
 bool ppl_is_llt_view(const ReadView* view) {
 	if (view == NULL) return false;
@@ -416,6 +828,14 @@ void set_normalize_flag(buf_page_t * bpage, uint normalize_cause){
 	if(bpage->normalize_cause == 0){
 		bpage->normalize_cause = normalize_cause;
 	}
+	/* If normalize for any cause other than PPL_MAX (=2) — e.g. page reorganize,
+	   record movement, cleaner — and the page is OPPL_BACKED, mark OPPL_FLUSH so
+	   the next flush forces .ibd write + cleanup (entry erase). Otherwise the
+	   PPL chain accumulates entries that miss the bypassed redo types (page
+	   reorganize, list ops), and a later OPPL apply produces a corrupt frame. */
+	if (normalize_cause != 2 && get_flag(&(bpage->flags), OPPL_BACKED)) {
+		set_flag(&(bpage->flags), OPPL_FLUSH);
+	}
 	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE)){
 		set_normalize_flag_in_ppl_header(bpage->first_ppl_block_ptr, 1);
 	}
@@ -484,6 +904,8 @@ check_normalize_cause(buf_page_t * bpage){
 }
 
 void normalize_ppled_page(buf_page_t * bpage, page_id_t page_id){
+	bool keep_oppl_backed = get_flag(&(bpage->flags), OPPL_BACKED);
+
 	/* Capture cause and PPL byte count BEFORE clearing the bpage fields
 	   below, for innodb_metrics. */
 	{
@@ -519,7 +941,10 @@ void normalize_ppled_page(buf_page_t * bpage, page_id_t page_id){
 	else{
 		bpage->flags = 0;
 	}
-	
+	if (keep_oppl_backed) {
+		set_flag(&(bpage->flags), OPPL_BACKED);
+	}
+
 }
 
 
@@ -544,6 +969,9 @@ void set_for_ppled_page(buf_page_t* bpage){
 		set_flag(&(bpage->flags), IN_LOOK_UP);
 		bpage->first_ppl_block_ptr = it->second;
 		bpage->ppl_length = get_ppl_length_from_ppl_header(bpage);
+	}
+	if (oppl_has_entry(page_id)) {
+		set_flag(&(bpage->flags), OPPL_BACKED);
 	}
 }
 
@@ -609,6 +1037,8 @@ bool check_can_be_pplized(buf_page_t *bpage) {
 
 bool check_return_ppl_region(buf_page_t * bpage){
 	if(!get_flag(&(bpage->flags), PPLIZED)){
+		bool keep_oppl_backed = get_flag(&(bpage->flags), OPPL_BACKED);
+
 		bpage->first_ppl_block_ptr = NULL;
 		bpage->ppl_write_pointer = NULL;
 		bpage->trx_id = 0;
@@ -620,6 +1050,9 @@ bool check_return_ppl_region(buf_page_t * bpage){
 		}
 		else{
 			bpage->flags = 0;
+		}
+		if (keep_oppl_backed) {
+			set_flag(&(bpage->flags), OPPL_BACKED);
 		}
 	}
 	else{

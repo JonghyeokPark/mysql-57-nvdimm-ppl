@@ -191,10 +191,13 @@ buf_read_page_low(
 
 
 
-	IORequest	request(type | IORequest::READ);
-	*err = fil_io(
-		request, sync, page_id, page_size, 0, page_size.physical(),
-		dst, bpage);
+		IORequest	request(type | IORequest::READ);
+#ifdef UNIV_NVDIMM_PPL
+		oppl_prefetch_on_read(page_id);
+#endif
+		*err = fil_io(
+			request, sync, page_id, page_size, 0, page_size.physical(),
+			dst, bpage);
 
 	if (sync) {
 		thd_wait_end(NULL);
@@ -1047,10 +1050,13 @@ ppl_buf_read_page_low(
 
 
 
-	IORequest	request(type | IORequest::READ);
-	*err = fil_io(
-		request, sync, page_id, page_size, 0, page_size.physical(),
-		dst, bpage);
+		IORequest	request(type | IORequest::READ);
+#ifdef UNIV_NVDIMM_PPL
+		oppl_prefetch_on_read(page_id);
+#endif
+		*err = fil_io(
+			request, sync, page_id, page_size, 0, page_size.physical(),
+			dst, bpage);
 
 	if (sync) {
 		thd_wait_end(NULL);

@@ -140,10 +140,11 @@ unsigned char* nvdimm_create_or_initialize(const char* path, const uint64_t pool
       We call mync() instead of mfense()\n");
   /*Make NVDIMM structure*/
 
-   /* mvcc-ppl */
-  init_prebuilt_page_cache(prebuilt_page_list);
-  mutex_create(LATCH_ID_STATIC_REGION, &prebuilt_page_list_mutex);
-  /* end */
+	  /* mvcc-ppl */
+	  init_prebuilt_page_cache(prebuilt_page_list);
+	  mutex_create(LATCH_ID_STATIC_REGION, &prebuilt_page_list_mutex);
+	  oppl_init();
+	  /* end */
   
   return nvdimm_ptr;
 }

@@ -878,6 +878,7 @@ buf_flush_write_complete(
 	}
 #ifdef UNIV_NVDIMM_PPL
 	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE))	return;
+	if(oppl_should_skip_dblwr_update(bpage))	return;
 #endif /* UNIV_NVDIMM_PPL */
 
 	buf_dblwr_update(bpage, flush_type);
@@ -1162,13 +1163,45 @@ buf_flush_write_block_low(
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
 	adds an overhead during flushing. */
-#ifdef UNIV_NVDIMM_PPL
-	if(check_can_be_pplized(bpage)){
-		if(get_flag(&(bpage->flags), DIRECTLY_WRITE)){
-			goto jump_to_io_complete;
+	#ifdef UNIV_NVDIMM_PPL
+		/* OPPL_FLUSH 또는 (OPPL_BACKED + NORMALIZE + cause!=2):
+		   OPPL 보장 불가 → spill 안 함, .ibd write 진행,
+		   cleanup_after_write가 entry erase + OPPL_BACKED unset. */
+		if (get_flag(&(bpage->flags), OPPL_FLUSH)
+		    || (get_flag(&(bpage->flags), OPPL_BACKED)
+		        && get_flag(&(bpage->flags), NORMALIZE)
+		        && bpage->normalize_cause != 2)) {
+			unset_flag(&(bpage->flags), OPPL_FLUSH);
+			/* fall through to real .ibd write below */
+		}
+		else if (get_flag(&(bpage->flags), OPPL_BACKED)
+		    && get_flag(&(bpage->flags), PPLIZED)
+		    && get_flag(&(bpage->flags), NORMALIZE)
+		    && bpage->normalize_cause == 2) {
+			if (oppl_spill_page(bpage)) {
+				set_flag(&(bpage->flags), OPPL_WRITE_SKIPPED);
+				if(sync){
+					buf_page_io_complete(bpage, true);
+				}
+				else{
+					buf_page_io_complete(bpage, false);
+				}
+				return;
+			}
+		}
+
+		if(check_can_be_pplized(bpage)){
+			if(get_flag(&(bpage->flags), DIRECTLY_WRITE)){
+				if (get_flag(&(bpage->flags), OPPL_BACKED)) {
+					set_flag(&(bpage->flags), OPPL_WRITE_SKIPPED);
+				}
+				goto jump_to_io_complete;
 		}
 		if(copy_memory_log_to_nvdimm(bpage)){
 jump_to_io_complete:
+			if (get_flag(&(bpage->flags), OPPL_BACKED)) {
+				set_flag(&(bpage->flags), OPPL_WRITE_SKIPPED);
+			}
 			if(sync){
 				buf_page_io_complete(bpage, true);
 			}
