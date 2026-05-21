@@ -38,10 +38,8 @@ enum oppl_state_t {
 
 struct oppl_entry_t {
 	uint64_t	offset;
-	ulint	len;
 	uint8_t	state;
-	lsn_t	disk_lsn;	/* .ibd page LSN at spill time, raw fil_io read */
-	oppl_entry_t() : offset(0), len(0), state(OPPL_STATE_ACTIVE), disk_lsn(0) {}
+	oppl_entry_t() : offset(0), state(OPPL_STATE_ACTIVE) {}
 };
 
 static bool g_oppl_initialized = false;
@@ -220,8 +218,8 @@ bool oppl_spill_page(buf_page_t* bpage)
 	}
 
 	bool ok = false;
-	bool reserved = false;
-	uint64_t off = 0;
+	uint64_t seg_off = 0;
+	bool active = false;
 
 	mutex_enter(&g_oppl_mutex);
 	oppl_entry_t* entry = NULL;
@@ -235,57 +233,44 @@ bool oppl_spill_page(buf_page_t* bpage)
 	} else {
 		entry = it->second;
 	}
-
-	if (entry->state == OPPL_STATE_ACTIVE
-	    && entry->len + chain_len <= OPPL_SEG_BYTES) {
-		off = entry->offset + entry->len;
-		reserved = true;
-	} else {
-		entry->state = OPPL_STATE_OVERFLOW;
+	if (entry->state == OPPL_STATE_ACTIVE) {
+		seg_off = entry->offset;
+		active = true;
 	}
 	mutex_exit(&g_oppl_mutex);
 
-	if (reserved) {
-		ssize_t written = ::pwrite(g_oppl_fd, chain, chain_len, off);
+	if (active) {
+		/* Read current cumulative length from segment header (8B big-endian).
+		   Same 4KB block as chunks → page cache hit, no extra disk IO. */
+		byte hdr[OPPL_SEG_HEADER_SIZE];
+		ulint cum_len = 0;
+		ssize_t hr = ::pread(g_oppl_fd, hdr, OPPL_SEG_HEADER_SIZE, seg_off);
+		if (hr == (ssize_t) OPPL_SEG_HEADER_SIZE) {
+			cum_len = mach_read_from_8(hdr);
+		}
 
-		/* Read .ibd page LSN via raw fil_io for LSN gate at apply time.
-		   This is the LSN .ibd will have after the upcoming write-skip;
-		   any later normal flush would advance it past this value. */
-		lsn_t disk_lsn_now = 0;
-		{
-			byte* buf1 = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
-			if (buf1 != NULL) {
-				byte* p = static_cast<byte*>(ut_align(buf1, UNIV_PAGE_SIZE));
-				bool found;
-				const page_size_t ps(fil_space_get_page_size(bpage->id.space(), &found));
-				if (found) {
-					dberr_t err = fil_io(IORequestRead, true, bpage->id, ps,
-						0, ps.physical(), p, NULL);
-					if (err == DB_SUCCESS) {
-						disk_lsn_now = mach_read_from_8(p + FIL_PAGE_LSN);
-					}
+		if (cum_len + chain_len + OPPL_SEG_HEADER_SIZE <= OPPL_SEG_BYTES) {
+			uint64_t chunk_off = seg_off + OPPL_SEG_HEADER_SIZE + cum_len;
+			ssize_t written = ::pwrite(g_oppl_fd, chain, chain_len, chunk_off);
+			if (written == (ssize_t) chain_len) {
+				byte new_hdr[OPPL_SEG_HEADER_SIZE];
+				memset(new_hdr, 0, OPPL_SEG_HEADER_SIZE);
+				mach_write_to_8(new_hdr, cum_len + chain_len);
+				ssize_t hw = ::pwrite(g_oppl_fd, new_hdr, OPPL_SEG_HEADER_SIZE, seg_off);
+				if (hw == (ssize_t) OPPL_SEG_HEADER_SIZE) {
+					ok = true;
+					set_flag(&(bpage->flags), OPPL_BACKED);
 				}
-				ut_free(buf1);
 			}
-		}
-
-		mutex_enter(&g_oppl_mutex);
-		std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it2 =
-			g_oppl_table.find(bpage->id);
-		if (it2 != g_oppl_table.end()
-		    && it2->second->state == OPPL_STATE_ACTIVE
-		    && it2->second->offset + it2->second->len == off
-		    && written == (ssize_t) chain_len) {
-			it2->second->len += chain_len;
-			if (it2->second->disk_lsn == 0) {
-				it2->second->disk_lsn = disk_lsn_now;
+		} else {
+			mutex_enter(&g_oppl_mutex);
+			std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it2 =
+				g_oppl_table.find(bpage->id);
+			if (it2 != g_oppl_table.end()) {
+				it2->second->state = OPPL_STATE_OVERFLOW;
 			}
-			ok = true;
-			set_flag(&(bpage->flags), OPPL_BACKED);
-		} else if (it2 != g_oppl_table.end()) {
-			it2->second->state = OPPL_STATE_OVERFLOW;
+			mutex_exit(&g_oppl_mutex);
 		}
-		mutex_exit(&g_oppl_mutex);
 	}
 
 	ut_free(chain);
@@ -323,7 +308,7 @@ void oppl_prefetch_on_read(const page_id_t& page_id)
 	}
 
 	uint64_t disk_off = 0;
-	ulint disk_len = 0;
+	bool active = false;
 
 	mutex_enter(&g_oppl_mutex);
 	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
@@ -331,14 +316,15 @@ void oppl_prefetch_on_read(const page_id_t& page_id)
 	if (it != g_oppl_table.end()
 	    && it->second->state == OPPL_STATE_ACTIVE) {
 		disk_off = it->second->offset;
-		disk_len = it->second->len;
+		active = true;
 	}
 	mutex_exit(&g_oppl_mutex);
 
-	if (disk_len > 0 && disk_len <= OPPL_SEG_BYTES) {
+	if (active) {
+		/* len 모르니 segment 전체 (4KB)를 prefetch. */
 		(void) ::posix_fadvise(
 			g_oppl_fd, static_cast<off_t>(disk_off),
-			static_cast<off_t>(disk_len), POSIX_FADV_WILLNEED);
+			static_cast<off_t>(OPPL_SEG_BYTES), POSIX_FADV_WILLNEED);
 	}
 }
 
@@ -368,31 +354,34 @@ void oppl_apply_on_read(buf_block_t* block)
 		return;
 	}
 
-	uint64_t disk_off = 0;
-	ulint disk_len = 0;
-	lsn_t entry_disk_lsn = 0;
+	uint64_t seg_off = 0;
+	bool active = false;
 
 	mutex_enter(&g_oppl_mutex);
 	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
 		g_oppl_table.find(block->page.id);
 	if (it != g_oppl_table.end()
 	    && it->second->state == OPPL_STATE_ACTIVE) {
-		disk_off = it->second->offset;
-		disk_len = it->second->len;
-		entry_disk_lsn = it->second->disk_lsn;
+		seg_off = it->second->offset;
+		active = true;
 	}
 	mutex_exit(&g_oppl_mutex);
 
-	if (disk_len == 0 || disk_len > OPPL_SEG_BYTES) {
+	if (!active) {
 		return;
 	}
 
-	{
-		lsn_t frame_lsn = mach_read_from_8(block->frame + FIL_PAGE_LSN);
-		if (entry_disk_lsn != 0 && frame_lsn != entry_disk_lsn) {
-			return;
-		}
+	/* Read cumulative length from segment header (same 4KB block → cache hit). */
+	byte hdr[OPPL_SEG_HEADER_SIZE];
+	ssize_t hr = ::pread(g_oppl_fd, hdr, OPPL_SEG_HEADER_SIZE, seg_off);
+	if (hr != (ssize_t) OPPL_SEG_HEADER_SIZE) {
+		return;
 	}
+	ulint disk_len = mach_read_from_8(hdr);
+	if (disk_len == 0 || disk_len + OPPL_SEG_HEADER_SIZE > OPPL_SEG_BYTES) {
+		return;
+	}
+	uint64_t disk_off = seg_off + OPPL_SEG_HEADER_SIZE;
 
 	byte* seg = static_cast<byte*>(ut_malloc_nokey(disk_len));
 	if (seg == NULL) {
@@ -1509,7 +1498,6 @@ nvdimm_build_prev_vers_with_redo(
 	bool			found;
 	const page_size_t	page_size(fil_space_get_page_size(id, &found));
 
-	byte*	buf2;
 	byte*	temp_page;
 	dberr_t		err = DB_SUCCESS;
 	buf_block_t* temp_block;
@@ -1524,8 +1512,12 @@ nvdimm_build_prev_vers_with_redo(
 	ulint cur_len = 0;
 	int IPL_apply_cnt = 0;
 	byte* temp_old_page_ptr = nvdimm_info->old_page;
-	byte* buf1;
 	byte* old_page;
+	/* page-aligned stack buffers (4KB literal — htap config uses 4K pages) —
+	   replaces ut_malloc(2*PAGE) + ut_align pattern that leaked 16KB per
+	   Path C call. */
+	byte old_page_buf[4096] __attribute__((aligned(4096)));
+	byte temp_page_buf[4096] __attribute__((aligned(4096)));
 	ulint final_ipl_log;
 	ulint ipl_log_offset;
 	rec_t* final_ipl_rec = NULL;
@@ -1622,8 +1614,7 @@ nvdimm_build_prev_vers_with_redo(
 read_old_page:
 	/* Read the old page from the disk */
 
-	buf1 = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
-	old_page = static_cast<byte*>(ut_align(buf1, UNIV_PAGE_SIZE));
+	old_page = old_page_buf;
 
 
 	//fprintf(stderr, "Before locking space_id: %d page_no: %lu lock: %lu\n", page_id.space(), page_id.page_no(), block->lock);
@@ -1676,10 +1667,9 @@ read_old_page:
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 
-	/* Allocate temp_page only when entering Path C (prebuilt path uses
-	   pre_block->frame directly, no allocation needed). */
-	buf2 = static_cast<byte*>(ut_malloc_nokey(2 * UNIV_PAGE_SIZE));
-	temp_page = static_cast<byte*>(ut_align(buf2, UNIV_PAGE_SIZE));
+	/* Path C uses stack-allocated page-aligned buffer (prebuilt path sets
+	   temp_page = pre_block->frame above instead). */
+	temp_page = temp_page_buf;
 
 	/* Initialize temp_page to disk state so it's never uninitialized,
 	   even if the apply loop below doesn't iterate (e.g. disk's max_trx

@@ -114,6 +114,10 @@ void nvdimm_free(const uint64_t pool_size);
 /* mtr_log_type(1) | mtr_body_len (2) | trx_id (8) | mtr_log_body(1 ~ 110) | */
 #define APPLY_LOG_HDR_SIZE 11UL
 #define OPPL_SEG_BYTES 4096UL
+/* OPPL segment 첫 8B = cumulative chunks length (uint64 big-endian).
+   in-memory oppl_entry_t에서 len을 빼고 disk header에 두기 위함.
+   같은 4KB block이라 pread/pwrite cache hit, 추가 disk IO 없음. */
+#define OPPL_SEG_HEADER_SIZE 8UL
 
 
 enum ipl_flag {
