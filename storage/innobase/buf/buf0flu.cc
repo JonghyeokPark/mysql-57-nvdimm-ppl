@@ -878,7 +878,7 @@ buf_flush_write_complete(
 	}
 #ifdef UNIV_NVDIMM_PPL
 	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE))	return;
-	if(oppl_should_skip_dblwr_update(bpage))	return;
+	if(get_flag(&(bpage->flags), OPPL_WRITE_SKIPPED))	return;
 #endif /* UNIV_NVDIMM_PPL */
 
 	buf_dblwr_update(bpage, flush_type);

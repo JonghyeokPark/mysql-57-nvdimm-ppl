@@ -1168,7 +1168,8 @@ can_page_be_pplized(
 	   non-index page byte layout → page corruption. */
 	ulint ptype = mach_read_from_2(((buf_block_t*)buf_page)->frame + FIL_PAGE_TYPE);
 	if(!is_system_or_undo_tablespace(space) &&
-		!get_flag(&(buf_page->flags), NORMALIZE) &&
+		(!get_flag(&(buf_page->flags), NORMALIZE)
+		 || get_flag(&(buf_page->flags), OPPL_BACKED)) &&
 		(ptype == FIL_PAGE_INDEX || ptype == FIL_PAGE_RTREE) &&
 		page_is_leaf(((buf_block_t *)buf_page)->frame) &&
 		buf_page_in_file(buf_page) &&
@@ -1498,7 +1499,6 @@ nvdimm_build_prev_vers_with_redo(
 	bool			found;
 	const page_size_t	page_size(fil_space_get_page_size(id, &found));
 
-	byte*	temp_page;
 	dberr_t		err = DB_SUCCESS;
 	buf_block_t* temp_block;
 	bool resuse_prev_built_page = false;
@@ -1517,7 +1517,6 @@ nvdimm_build_prev_vers_with_redo(
 	   replaces ut_malloc(2*PAGE) + ut_align pattern that leaked 16KB per
 	   Path C call. */
 	byte old_page_buf[4096] __attribute__((aligned(4096)));
-	byte temp_page_buf[4096] __attribute__((aligned(4096)));
 	ulint final_ipl_log;
 	ulint ipl_log_offset;
 	rec_t* final_ipl_rec = NULL;
@@ -1593,10 +1592,10 @@ nvdimm_build_prev_vers_with_redo(
 	if (temp_bpage != NULL) {
 		buf_block_t* pre_block = buf_page_get_block(temp_bpage);
 		if (pre_block != NULL && pre_block->frame != NULL) {
-			/* Point temp_page directly at prebuilt frame instead of
+			/* Point old_page directly at prebuilt frame instead of
 			   copying 16KB. Prebuilt cache stays alive for LLT lifetime,
 			   so the frame is stable for the duration of this function. */
-			temp_page = pre_block->frame;
+			old_page = pre_block->frame;
 			used_prebuilt = true;
 		}
 		/* Do NOT consume-on-read: paper §5.2 keeps prebuilt usable
@@ -1667,15 +1666,7 @@ read_old_page:
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
 
-	/* Path C uses stack-allocated page-aligned buffer (prebuilt path sets
-	   temp_page = pre_block->frame above instead). */
-	temp_page = temp_page_buf;
-
-	/* Initialize temp_page to disk state so it's never uninitialized,
-	   even if the apply loop below doesn't iterate (e.g. disk's max_trx
-	   already not visible to LLT — extremely rare since LLT.start is
-	   usually older than disk-flushed trx). */
-	buf_frame_copy(temp_page, old_page);
+	/* Path C: apply directly on old_page (no temp_page copy). */
 
 	/* 3. Traverse PPL log records and apply only those visible to LLT
 	   readview. PPL records are stored in commit-time order, so visibility
@@ -1769,9 +1760,7 @@ read_old_page:
 		old_page_max_trx_id = page_get_max_trx_id(old_page);
     }
 
-	/* After loop, old_page holds all LLT-visible applied state.
-	   Copy once into temp_page (the rec extraction target). */
-	buf_frame_copy(temp_page, old_page);
+	/* After loop, old_page holds all LLT-visible applied state. */
 	temp_trx_id = old_page_max_trx_id;
 
 	/* Path C chain length = number of PPL log records forward-applied. */
@@ -1791,12 +1780,10 @@ read_old_page:
 	/* 4. After getting the right version of the IPL page, store the right record to the old_vers record */
 
 get_rec_offset:
-	if (used_prebuilt) {
-		/* temp_page already populated from prebuilt frame above.
-		   Don't overwrite it with nvdimm_info->old_page. */
-	} else if (resuse_prev_built_page == true) {
-		buf_frame_copy(temp_page, nvdimm_info->old_page);
-	}
+	/* old_page already populated:
+	   - prebuilt: pre_block->frame
+	   - Path C: fil_io + apply
+	*/
 
 	*offsets = rec_get_offsets(
 			rec, clust_index, *offsets, ULINT_UNDEFINED,
@@ -1817,7 +1804,7 @@ get_rec_offset:
 	ulint rec_slot_index = page_dir_find_owner_slot(rec);
 	ulint heap_no = page_rec_get_heap_no(rec);
 
-	temp_page_rec = page_find_rec_with_heap_no(temp_page, heap_no);
+	temp_page_rec = page_find_rec_with_heap_no(old_page, heap_no);
 
 	if (temp_page_rec == NULL) {
 		*old_vers = NULL;
@@ -1896,10 +1883,11 @@ get_rec_offset:
 				ulint hn = (temp_page_rec != NULL) ?
 					page_rec_get_heap_no(temp_page_rec) : 0;
 				fprintf(stderr,
-					"PAPER2_LONG,page=%u:%u,heap_no=%lu,us=%lu,err=%d\n",
+					"PAPER2_LONG,page=%u:%u,heap_no=%lu,us=%lu,chain=%d,err=%d\n",
 					(unsigned)bpage->id.space(),
 					(unsigned)bpage->id.page_no(),
-					hn, (unsigned long)p2_us, (int)undo_err);
+					hn, (unsigned long)p2_us,
+					tls_llt_undo_chain_len, (int)undo_err);
 				fflush(stderr);
 			}
 			if (undo_err == DB_SUCCESS && undo_old_vers != NULL) {
