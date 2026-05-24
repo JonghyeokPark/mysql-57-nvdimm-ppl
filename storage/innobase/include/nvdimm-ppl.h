@@ -127,8 +127,7 @@ enum ipl_flag {
   IN_LOOK_UP = 8,
   DIRECTLY_WRITE = 16,
   IN_PPL_BUF_POOL = 32,
-  OPPL_BACKED = 64,
-  OPPL_WRITE_SKIPPED = 128
+  OPPL_BACKED = 64
 };
 
 typedef struct NVDIMM_SYSTEM
@@ -202,10 +201,8 @@ bool oppl_should_track_page(buf_page_t* bpage);
 void oppl_mark_backed_for_ppl_max(buf_page_t* bpage);
 bool oppl_has_entry(const page_id_t& page_id);
 bool oppl_spill_page(buf_page_t* bpage);
-bool oppl_should_skip_dblwr_update(buf_page_t* bpage);
 void oppl_prefetch_on_read(const page_id_t& page_id);
-void oppl_apply_on_read(buf_block_t* block);
-void oppl_cleanup_after_write(buf_page_t* bpage, bool write_skipped);
+void oppl_drain_all(void);
 
 
 

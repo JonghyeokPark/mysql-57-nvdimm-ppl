@@ -18,7 +18,11 @@
 #ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ppl.h"
 #include "mtr0log.h"
+#include "fil0fil.h"
 #include <vector>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <errno.h>
 #include "page0page.h"
 #include "buf0flu.h"
 #include "srv0srv.h"
@@ -57,7 +61,7 @@ void oppl_init(void)
 	}
 
 	mutex_create(LATCH_ID_STATIC_REGION, &g_oppl_mutex);
-	g_oppl_fd = ::open(OPPL_DAT_PATH, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	g_oppl_fd = ::open(OPPL_DAT_PATH, O_RDWR | O_CREAT | O_TRUNC | O_DIRECT, 0644);
 	if (g_oppl_fd < 0) {
 		ib::warn() << "O-PPL: failed to open " << OPPL_DAT_PATH;
 	} else {
@@ -98,6 +102,41 @@ bool oppl_has_entry(const page_id_t& page_id)
 	mutex_exit(&g_oppl_mutex);
 
 	return found;
+}
+
+/* Load snapshot + chunks for LLT version build via single 8KB O_DIRECT
+   pread. slot_buf_8k must be 4KB-aligned; first 4KB = snapshot, next
+   4KB = 8B header + chunks. Returns chunks_ptr/chunks_len out-params. */
+bool oppl_load_for_llt(const page_id_t& page_id,
+		byte* slot_buf_8k,
+		byte** chunks_ptr_out, ulint* chunks_len_out)
+{
+	if (!g_oppl_initialized || g_oppl_fd < 0) return false;
+	uint64_t slot_off = 0;
+	mutex_enter(&g_oppl_mutex);
+	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
+		g_oppl_table.find(page_id);
+	if (it == g_oppl_table.end()) {
+		mutex_exit(&g_oppl_mutex);
+		return false;
+	}
+	slot_off = it->second->offset;
+	mutex_exit(&g_oppl_mutex);
+
+	const size_t SLOT = 2 * OPPL_SEG_BYTES;  /* 8KB */
+	ssize_t r = ::pread(g_oppl_fd, slot_buf_8k, SLOT, slot_off);
+	if (r != (ssize_t)SLOT) return false;
+
+	byte* chunks_region = slot_buf_8k + OPPL_SEG_BYTES;
+	ulint cl = (ulint)mach_read_from_8(chunks_region);
+	if (cl == 0 || cl + OPPL_SEG_HEADER_SIZE > OPPL_SEG_BYTES) {
+		*chunks_ptr_out = NULL;
+		*chunks_len_out = 0;
+		return true;
+	}
+	*chunks_ptr_out = chunks_region + OPPL_SEG_HEADER_SIZE;
+	*chunks_len_out = cl;
+	return true;
 }
 
 static ulint
@@ -205,100 +244,78 @@ bool oppl_spill_page(buf_page_t* bpage)
 	if (!g_oppl_initialized || g_oppl_fd < 0 || bpage == NULL) {
 		return false;
 	}
+	/* OPPL is stock-only AND only meaningful while an LLT view is active. */
+	if (bpage->id.space() != llt_space_id) {
+		return false;
+	}
+	if (__atomic_load_n(&g_oldest_active_view_ts, __ATOMIC_ACQUIRE) == 0) {
+		return false;
+	}
+
+	/* Entry check only. Exists → caller flushes normally, no OPPL action. */
+	uint64_t slot_off = 0;
+	mutex_enter(&g_oppl_mutex);
+	if (g_oppl_table.find(bpage->id) != g_oppl_table.end()) {
+		mutex_exit(&g_oppl_mutex);
+		return false;
+	}
+	oppl_entry_t* entry = new oppl_entry_t();
+	entry->offset = g_oppl_next_offset;
+	/* 8KB per entry: 4KB snapshot + 8B header + up to 4088B chunks */
+	g_oppl_next_offset += 2 * OPPL_SEG_BYTES;
+	g_oppl_table[bpage->id] = entry;
+	slot_off = entry->offset;
+	mutex_exit(&g_oppl_mutex);
 
 	byte* chain = static_cast<byte*>(ut_malloc_nokey(OPPL_SEG_BYTES));
 	if (chain == NULL) {
 		return false;
 	}
-
 	ulint chain_len = oppl_linearize_page_logs(bpage, chain, OPPL_SEG_BYTES);
-	if (chain_len == 0) {
-		ut_free(chain);
-		return false;
+
+	/* Snapshot disk .ibd page via copy_file_range. */
+	bool snap_ok = false;
+	fil_space_t* space = fil_space_get(bpage->id.space());
+	if (space != NULL) {
+		fil_node_t* node = UT_LIST_GET_FIRST(space->chain);
+		if (node != NULL && node->is_open) {
+			off_t src = (off_t)(bpage->id.page_no() * OPPL_SEG_BYTES);
+			off_t dst = (off_t)slot_off;
+			ssize_t r = syscall(SYS_copy_file_range,
+				node->handle.m_file, &src,
+				g_oppl_fd, &dst,
+				(size_t)OPPL_SEG_BYTES, 0u);
+			snap_ok = (r == (ssize_t)OPPL_SEG_BYTES);
+		}
 	}
 
 	bool ok = false;
-	uint64_t seg_off = 0;
-	bool active = false;
-
-	mutex_enter(&g_oppl_mutex);
-	oppl_entry_t* entry = NULL;
-	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
-		g_oppl_table.find(bpage->id);
-	if (it == g_oppl_table.end()) {
-		entry = new oppl_entry_t();
-		entry->offset = g_oppl_next_offset;
-		g_oppl_next_offset += OPPL_SEG_BYTES;
-		g_oppl_table[bpage->id] = entry;
-	} else {
-		entry = it->second;
-	}
-	if (entry->state == OPPL_STATE_ACTIVE) {
-		seg_off = entry->offset;
-		active = true;
-	}
-	mutex_exit(&g_oppl_mutex);
-
-	if (active) {
-		/* Read current cumulative length from segment header (8B big-endian).
-		   Same 4KB block as chunks → page cache hit, no extra disk IO. */
+	if (snap_ok) {
+		uint64_t chunks_off = slot_off + OPPL_SEG_BYTES;
 		byte hdr[OPPL_SEG_HEADER_SIZE];
-		ulint cum_len = 0;
-		ssize_t hr = ::pread(g_oppl_fd, hdr, OPPL_SEG_HEADER_SIZE, seg_off);
-		if (hr == (ssize_t) OPPL_SEG_HEADER_SIZE) {
-			cum_len = mach_read_from_8(hdr);
-		}
-
-		if (cum_len + chain_len + OPPL_SEG_HEADER_SIZE <= OPPL_SEG_BYTES) {
-			uint64_t chunk_off = seg_off + OPPL_SEG_HEADER_SIZE + cum_len;
-			ssize_t written = ::pwrite(g_oppl_fd, chain, chain_len, chunk_off);
-			if (written == (ssize_t) chain_len) {
-				byte new_hdr[OPPL_SEG_HEADER_SIZE];
-				memset(new_hdr, 0, OPPL_SEG_HEADER_SIZE);
-				mach_write_to_8(new_hdr, cum_len + chain_len);
-				ssize_t hw = ::pwrite(g_oppl_fd, new_hdr, OPPL_SEG_HEADER_SIZE, seg_off);
-				if (hw == (ssize_t) OPPL_SEG_HEADER_SIZE) {
-					ok = true;
-					set_flag(&(bpage->flags), OPPL_BACKED);
+		memset(hdr, 0, OPPL_SEG_HEADER_SIZE);
+		mach_write_to_8(hdr, chain_len);
+		ssize_t hw = ::pwrite(g_oppl_fd, hdr, OPPL_SEG_HEADER_SIZE, chunks_off);
+		if (hw == (ssize_t)OPPL_SEG_HEADER_SIZE) {
+			ssize_t cw = ::pwrite(g_oppl_fd, chain, chain_len,
+				chunks_off + OPPL_SEG_HEADER_SIZE);
+			if (cw == (ssize_t)chain_len) {
+				ok = true;
+				set_flag(&(bpage->flags), OPPL_BACKED);
+				static ulint __cap_ok = 0;
+				if (++__cap_ok <= 5 || __cap_ok % 1000 == 0) {
+					fprintf(stderr,
+						"OPPL=CAPTURE call=%lu page=(%u,%u) slot=%lu chain=%lu\n",
+						__cap_ok,
+						bpage->id.space(), bpage->id.page_no(),
+						(unsigned long)slot_off, (unsigned long)chain_len);
 				}
 			}
-		} else {
-			mutex_enter(&g_oppl_mutex);
-			std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it2 =
-				g_oppl_table.find(bpage->id);
-			if (it2 != g_oppl_table.end()) {
-				it2->second->state = OPPL_STATE_OVERFLOW;
-			}
-			mutex_exit(&g_oppl_mutex);
 		}
 	}
 
 	ut_free(chain);
 	return ok;
-}
-
-bool oppl_should_skip_dblwr_update(buf_page_t* bpage)
-{
-	if (!g_oppl_initialized
-	    || bpage == NULL
-	    || !get_flag(&(bpage->flags), OPPL_BACKED)) {
-		return false;
-	}
-	if (!get_flag(&(bpage->flags), PPLIZED)
-	    || !get_flag(&(bpage->flags), NORMALIZE)
-	    || bpage->normalize_cause != 2) {
-		return false;
-	}
-
-	bool active = false;
-	mutex_enter(&g_oppl_mutex);
-	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
-		g_oppl_table.find(bpage->id);
-	active = it != g_oppl_table.end()
-		&& it->second->state == OPPL_STATE_ACTIVE;
-	mutex_exit(&g_oppl_mutex);
-
-	return active;
 }
 
 void oppl_prefetch_on_read(const page_id_t& page_id)
@@ -328,105 +345,22 @@ void oppl_prefetch_on_read(const page_id_t& page_id)
 	}
 }
 
-static void
-oppl_apply_segment(byte* seg, ulint len, buf_block_t* block, mtr_t* mtr)
+/* Bulk-erase all OPPL entries; called when oldest LLT view closes.
+   Bpage OPPL_BACKED flags are left as-is — next spill will recreate the
+   entry; reads without an entry fall through to normal Path C. */
+void oppl_drain_all(void)
 {
-	ulint off = 0;
-
-	while (off + APPLY_LOG_HDR_SIZE <= len) {
-		mlog_id_t type = static_cast<mlog_id_t>(mach_read_from_1(seg + off));
-		ulint body_len = mach_read_from_2(seg + off + 1);
-		trx_id_t trx_id = mach_read_from_8(seg + off + 3);
-		off += APPLY_LOG_HDR_SIZE;
-
-		if (off + body_len > len) {
-			return;
-		}
-
-		apply_log_record(type, seg + off, body_len, trx_id, block, mtr);
-		off += body_len;
-	}
-}
-
-void oppl_apply_on_read(buf_block_t* block)
-{
-	if (!g_oppl_initialized || g_oppl_fd < 0 || block == NULL) {
-		return;
-	}
-
-	uint64_t seg_off = 0;
-	bool active = false;
-
+	if (!g_oppl_initialized) return;
 	mutex_enter(&g_oppl_mutex);
-	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
-		g_oppl_table.find(block->page.id);
-	if (it != g_oppl_table.end()
-	    && it->second->state == OPPL_STATE_ACTIVE) {
-		seg_off = it->second->offset;
-		active = true;
+	ulint n = g_oppl_table.size();
+	for (std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
+			g_oppl_table.begin(); it != g_oppl_table.end(); ++it) {
+		delete it->second;
 	}
+	g_oppl_table.clear();
+	g_oppl_next_offset = 0;
 	mutex_exit(&g_oppl_mutex);
-
-	if (!active) {
-		return;
-	}
-
-	/* Read cumulative length from segment header (same 4KB block → cache hit). */
-	byte hdr[OPPL_SEG_HEADER_SIZE];
-	ssize_t hr = ::pread(g_oppl_fd, hdr, OPPL_SEG_HEADER_SIZE, seg_off);
-	if (hr != (ssize_t) OPPL_SEG_HEADER_SIZE) {
-		return;
-	}
-	ulint disk_len = mach_read_from_8(hdr);
-	if (disk_len == 0 || disk_len + OPPL_SEG_HEADER_SIZE > OPPL_SEG_BYTES) {
-		return;
-	}
-	uint64_t disk_off = seg_off + OPPL_SEG_HEADER_SIZE;
-
-	byte* seg = static_cast<byte*>(ut_malloc_nokey(disk_len));
-	if (seg == NULL) {
-		return;
-	}
-
-	ssize_t r = ::pread(g_oppl_fd, seg, disk_len, disk_off);
-	if (r == (ssize_t) disk_len) {
-		mtr_t temp_mtr;
-		mtr_start(&temp_mtr);
-		mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);
-		oppl_apply_segment(seg, disk_len, block, &temp_mtr);
-		temp_mtr.discard_modifications();
-		mtr_commit(&temp_mtr);
-		set_flag(&(block->page.flags), OPPL_BACKED);
-	}
-
-	ut_free(seg);
-}
-
-void oppl_cleanup_after_write(buf_page_t* bpage, bool write_skipped)
-{
-	if (!g_oppl_initialized || bpage == NULL) {
-		return;
-	}
-	if (write_skipped) {
-		unset_flag(&(bpage->flags), OPPL_WRITE_SKIPPED);
-		return;
-	}
-
-	oppl_entry_t* entry = NULL;
-
-	mutex_enter(&g_oppl_mutex);
-	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
-		g_oppl_table.find(bpage->id);
-	if (it != g_oppl_table.end()) {
-		entry = it->second;
-		g_oppl_table.erase(it);
-	}
-	mutex_exit(&g_oppl_mutex);
-
-	if (entry != NULL) {
-		delete entry;
-		unset_flag(&(bpage->flags), OPPL_BACKED);
-	}
+	fprintf(stderr, "OPPL=DRAIN entries=%lu\n", (unsigned long)n);
 }
 
 bool ppl_is_llt_view(const ReadView* view) {
@@ -778,8 +712,7 @@ void all_ppl_apply_to_page(byte *start_ptr, ulint apply_log_size, buf_block_t *b
 
 // Helper function to handle log data that spans segment boundaries
 byte* fetch_next_segment(byte* current_end, byte** new_end, byte** next_ppl) {
-	if(next_ppl == NULL){
-		fprintf(stderr, "Error : fetch_next_segment\n");
+	if(next_ppl == NULL || *next_ppl == NULL){
 		return NULL;
 	}
 	*new_end = *next_ppl + nvdimm_info->each_ppl_size;
@@ -1555,6 +1488,34 @@ nvdimm_build_prev_vers_with_redo(
 			mach_read_from_4(start_ptr + PPL_HDR_DYNAMIC_INDEX),
 			nvdimm_info->each_ppl_size);
 	}
+
+	/* OPPL-first: if entry exists, use disk snapshot + chunks instead of
+	   .ibd fil_io + NVDIMM chain. Snapshot is frozen at first-spill time
+	   → undo from snap_rec is shorter than from BP-latest. Single 8KB
+	   O_DIRECT pread covers both snapshot (first 4KB) and chunks. */
+	byte oppl_slot_buf[2 * OPPL_SEG_BYTES] __attribute__((aligned(4096)));
+	byte* oppl_snap_buf = oppl_slot_buf;
+	byte* oppl_chunks_ptr = NULL;
+	ulint oppl_chunks_len = 0;
+	bool from_oppl = false;
+	if (__is_llt && oppl_load_for_llt(bpage->id, oppl_slot_buf,
+		&oppl_chunks_ptr, &oppl_chunks_len)) {
+		from_oppl = true;
+		apply_log_size = oppl_chunks_len;
+		current_ptr = oppl_chunks_ptr;
+		end_ptr = (oppl_chunks_ptr != NULL)
+			? oppl_chunks_ptr + oppl_chunks_len
+			: NULL;
+		next_ppl = NULL;
+		static ulint __oppl_path = 0;
+		if (++__oppl_path <= 5 || __oppl_path % 10000 == 0) {
+			fprintf(stderr,
+				"OPPL=READ_PATH call=%lu page=(%u,%u) chunks=%lu\n",
+				__oppl_path,
+				bpage->id.space(), bpage->id.page_no(),
+				(unsigned long)oppl_chunks_len);
+		}
+	}
     byte temp_buffer[400] ={0, }; // Temporary buffer to handle data that spans multiple segments
 	mlog_id_t log_type;
 	ulint log_body_length;
@@ -1582,12 +1543,10 @@ nvdimm_build_prev_vers_with_redo(
 	   cost) and tracked as its own metric. */
 	PrebuiltGuard __pg;
 	{
-		ib_uint64_t __find_start = ut_time_us(NULL);
-		temp_bpage = find_prebuilt_page_from_list(bpage, prebuilt_page_list,
-	                                           read_view,
-	                                           clust_index->table->name);
-		__find_us = (uint64_t)(ut_time_us(NULL) - __find_start);
-		__pg.slot_idx = tls_last_prebuilt_slot_idx;   /* lock-free release on exit */
+		/* DISABLED: prebuilt cache lookup. Forces all paths through Path C
+		   (disk + apply) so snapshot+chunks coverage is measured directly. */
+		temp_bpage = NULL;
+		__pg.slot_idx = tls_last_prebuilt_slot_idx;
 	}
 	if (temp_bpage != NULL) {
 		buf_block_t* pre_block = buf_page_get_block(temp_bpage);
@@ -1628,8 +1587,13 @@ read_old_page:
 	   silently DB_FAIL'd 100% of the time, making this entire path C
 	   codepath dead. fil_io reads directly from the tablespace file
 	   into our heap buffer, bypassing BP. */
-	err = fil_io(IORequestRead, true, page_id, page_size, 0, page_size.physical(),
-			old_page, NULL);
+	if (from_oppl) {
+		buf_frame_copy(old_page, oppl_snap_buf);
+		err = DB_SUCCESS;
+	} else {
+		err = fil_io(IORequestRead, true, page_id, page_size, 0, page_size.physical(),
+				old_page, NULL);
+	}
 
 	//rw_lock_s_unlock_gen(&((buf_block_t*) bpage)->lock,BUF_IO_READ);
 	//mutex_exit(buf_page_get_mutex(bpage));		
@@ -1661,7 +1625,66 @@ read_old_page:
 	                                clust_index->table->name)) {
 		__path_tag = 5;
 	}
-	
+
+	/* OPPL 3-way decision (per user spec):
+	   1) snap rec visible AND chunks all invisible → use snap directly (no apply)
+	   2) snap rec too new (X > view) → undo back from snap rec
+	   3) else → forward apply chunks (existing loop below) */
+	if (from_oppl) {
+		*offsets = rec_get_offsets(rec, clust_index, *offsets,
+			ULINT_UNDEFINED, offset_heap);
+		if (*offsets == NULL) { *old_vers = NULL; return DB_FAIL; }
+		ulint heap_no = page_rec_get_heap_no(rec);
+		const rec_t* snap_rec = page_find_rec_with_heap_no(old_page, heap_no);
+		if (snap_rec == NULL) { *old_vers = NULL; return DB_FAIL; }
+		trx_id_t snap_trx = row_get_rec_trx_id(snap_rec, clust_index, *offsets);
+		bool snap_visible = read_view->changes_visible(
+			snap_trx, clust_index->table->name);
+
+		if (!snap_visible) {
+			/* Branch 2: snap rec too new → undo from snap rec */
+			__path_tag = 4;  /* Path C nested undo (OldPage+Undo) */
+			rec_t* undo_old_vers = NULL;
+			tls_llt_undo_chain_len = 0;
+			dberr_t undo_err = row_vers_build_for_consistent_read(
+				snap_rec, mtr, clust_index, offsets,
+				read_view, offset_heap, in_heap,
+				&undo_old_vers, vrow);
+			__chain_len = tls_llt_undo_chain_len;
+			if (undo_err == DB_SUCCESS && undo_old_vers != NULL) {
+				*old_vers = undo_old_vers;
+				return DB_SUCCESS;
+			}
+			*old_vers = NULL;
+			return DB_FAIL;
+		}
+
+		bool chunks_have_visible = false;
+		if (oppl_chunks_len > 0 && oppl_chunks_ptr != NULL) {
+			/* PPL is in commit order — peek first chunk trx_id.
+			   header layout: 1B type + 2B body_len + 8B trx_id */
+			trx_id_t first_chunk_trx =
+				mach_read_from_8(oppl_chunks_ptr + 3);
+			chunks_have_visible = read_view->changes_visible(
+				first_chunk_trx, clust_index->table->name);
+		}
+
+		if (!chunks_have_visible) {
+			/* Branch 1: snap is latest visible, no chunks needed */
+			__path_tag = 1;  /* repurposed: Snap-only (was Path A) */
+			byte* buf = static_cast<byte*>(mem_heap_alloc(
+				in_heap, rec_offs_size(*offsets)));
+			*old_vers = rec_copy(buf, snap_rec, *offsets);
+			rec_offs_make_valid(*old_vers, clust_index, *offsets);
+			if (rec_get_deleted_flag(*old_vers, true)) {
+				*old_vers = NULL;
+				return DB_FAIL;
+			}
+			return DB_SUCCESS;
+		}
+		/* Branch 3: fall through to apply loop */
+		__path_tag = 2;  /* repurposed: Snap+Redo (was Path B) */
+	}
 
 	mtr_start(&temp_mtr);
 	mtr_set_log_mode(&temp_mtr, MTR_LOG_NONE);

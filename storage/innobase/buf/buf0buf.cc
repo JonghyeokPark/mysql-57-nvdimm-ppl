@@ -6241,9 +6241,6 @@ buf_page_io_complete(
 
 	io_type = buf_page_get_io_fix(bpage);
 	ut_ad(io_type == BUF_IO_READ || io_type == BUF_IO_WRITE);
-#ifdef UNIV_NVDIMM_PPL
-	bool oppl_write_skipped = get_flag(&(bpage->flags), OPPL_WRITE_SKIPPED);
-#endif
 
 	if (io_type == BUF_IO_READ) {
 		ulint	read_page_no;
@@ -6470,22 +6467,15 @@ corrupt:
 		//}
 
 			// (anonymous): recovery
-			bool apply_oppl = bpage->id.space() == llt_space_id && oppl_has_entry(bpage->id);
-			bool apply_ppl = get_flag(&(bpage->flags), PPLIZED);
-			if (!nvdimm_recv_running && (apply_oppl || apply_ppl)){
+			if (!nvdimm_recv_running && get_flag(&(bpage->flags), PPLIZED)){
 				buf_pool_mutex_exit(buf_pool);
-				if (apply_oppl) {
-					oppl_apply_on_read((buf_block_t*) bpage);
-				}
-				if (apply_ppl) {
-					set_apply_info_and_log_apply((buf_block_t*) bpage);
+				set_apply_info_and_log_apply((buf_block_t*) bpage);
 
-					// PPL Cleaner Buffer Pool Flush
-					if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
-						log_flush_order_mutex_enter();
-						ppl_buf_flush_note_modification((buf_block_t*) bpage);
-						log_flush_order_mutex_exit();
-					}
+				// PPL Cleaner Buffer Pool Flush
+				if(get_flag(&(bpage->flags), IN_PPL_BUF_POOL)){
+					log_flush_order_mutex_enter();
+					ppl_buf_flush_note_modification((buf_block_t*) bpage);
+					log_flush_order_mutex_exit();
 				}
 
 				if (uncompressed) {
@@ -6519,7 +6509,8 @@ corrupt:
 		   a snapshot with cyclic record links. A reader then spins
 		   forever in page_find_rec_with_heap_no, holding its own page
 		   S-latch and freezing the server. */
-		if (uncompressed
+		if (false
+		    && uncompressed
 		    && srv_use_ppl_mvcc
 		    && get_flag(&(bpage->flags), PPLIZED)
 		    && get_flag(&(bpage->flags), NORMALIZE)
@@ -6552,7 +6543,6 @@ corrupt:
 			evict = true;
 			}
 			return_ipl = check_return_ppl_region(bpage);
-			oppl_cleanup_after_write(bpage, oppl_write_skipped);
 
 	#endif
 		buf_pool->stat.n_pages_written++;

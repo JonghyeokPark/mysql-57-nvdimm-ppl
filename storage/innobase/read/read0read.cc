@@ -810,6 +810,7 @@ MVCC::view_close(ReadView*& view, bool own_mutex)
 		/* paper §5.2: discard prebuilt versions when LLT view closes. */
 		if (was_llt) {
 			ppl_clear_prebuilt_cache();
+			oppl_drain_all();
 		}
 #endif
 

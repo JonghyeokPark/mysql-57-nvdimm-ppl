@@ -878,7 +878,6 @@ buf_flush_write_complete(
 	}
 #ifdef UNIV_NVDIMM_PPL
 	if(get_flag(&(bpage->flags), PPLIZED) && !get_flag(&(bpage->flags), NORMALIZE))	return;
-	if(get_flag(&(bpage->flags), OPPL_WRITE_SKIPPED))	return;
 #endif /* UNIV_NVDIMM_PPL */
 
 	buf_dblwr_update(bpage, flush_type);
@@ -1178,30 +1177,18 @@ buf_flush_write_block_low(
 		    && get_flag(&(bpage->flags), PPLIZED)
 		    && get_flag(&(bpage->flags), NORMALIZE)
 		    && bpage->normalize_cause == 2) {
-			if (oppl_spill_page(bpage)) {
-				set_flag(&(bpage->flags), OPPL_WRITE_SKIPPED);
-				if(sync){
-					buf_page_io_complete(bpage, true);
-				}
-				else{
-					buf_page_io_complete(bpage, false);
-				}
-				return;
-			}
+			/* Capture snapshot+chunks (NEW entry only) but DON'T skip
+			   .ibd write — latest must still flush to .ibd. */
+			oppl_spill_page(bpage);
+			/* fall through to real .ibd write below */
 		}
 
 		if(check_can_be_pplized(bpage)){
 			if(get_flag(&(bpage->flags), DIRECTLY_WRITE)){
-				if (get_flag(&(bpage->flags), OPPL_BACKED)) {
-					set_flag(&(bpage->flags), OPPL_WRITE_SKIPPED);
-				}
 				goto jump_to_io_complete;
 		}
 		if(copy_memory_log_to_nvdimm(bpage)){
 jump_to_io_complete:
-			if (get_flag(&(bpage->flags), OPPL_BACKED)) {
-				set_flag(&(bpage->flags), OPPL_WRITE_SKIPPED);
-			}
 			if(sync){
 				buf_page_io_complete(bpage, true);
 			}
