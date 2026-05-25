@@ -53,6 +53,7 @@ static ib_mutex_t g_oppl_mutex;
 static std::tr1::unordered_map<page_id_t, oppl_entry_t*> g_oppl_table;
 static const char* OPPL_DAT_PATH = "/mnt/test_data/oppl.dat";
 }
+ib_mutex_t g_oppl_cache_mutex;
 
 void oppl_init(void)
 {
@@ -61,6 +62,7 @@ void oppl_init(void)
 	}
 
 	mutex_create(LATCH_ID_STATIC_REGION, &g_oppl_mutex);
+	mutex_create(LATCH_ID_STATIC_REGION, &g_oppl_cache_mutex);
 	g_oppl_fd = ::open(OPPL_DAT_PATH, O_RDWR | O_CREAT | O_TRUNC | O_DIRECT, 0644);
 	if (g_oppl_fd < 0) {
 		ib::warn() << "O-PPL: failed to open " << OPPL_DAT_PATH;
@@ -104,14 +106,43 @@ bool oppl_has_entry(const page_id_t& page_id)
 	return found;
 }
 
-/* Load snapshot + chunks for LLT version build via single 8KB O_DIRECT
-   pread. slot_buf_8k must be 4KB-aligned; first 4KB = snapshot, next
-   4KB = 8B header + chunks. Returns chunks_ptr/chunks_len out-params. */
+/* OPPL cache: 256MB (32K slots × 8KB) clock-sweep eviction.
+   Modeled after prebuilt cache. Returns pointers INTO cache buffer —
+   valid until next acquire on different key OR oppl_cache_drain(). */
+namespace {
+struct oppl_cache_slot_t {
+	uint64_t key;            /* (space << 32) | page_no */
+	byte*    buf;            /* 8KB aligned, lazy alloc */
+	ulint    chunks_len;     /* 0 if snap-only */
+	uint8_t  ref_bit;
+	bool     used;
+	oppl_cache_slot_t() : key(0), buf(NULL), chunks_len(0), ref_bit(0), used(false) {}
+};
+const size_t OPPL_CACHE_CAP = (32ULL * 1024 * 1024) / (2 * OPPL_SEG_BYTES);  /* 4096 slots */
+std::vector<oppl_cache_slot_t> g_oppl_cache_slots(OPPL_CACHE_CAP);
+std::tr1::unordered_map<uint64_t, size_t> g_oppl_cache_idx;
+size_t g_oppl_cache_hand = 0;
+}
+
+void oppl_cache_drain(void) {
+	mutex_enter(&g_oppl_cache_mutex);
+	for (size_t i = 0; i < OPPL_CACHE_CAP; i++) {
+		if (g_oppl_cache_slots[i].buf) {
+			free(g_oppl_cache_slots[i].buf);
+		}
+		g_oppl_cache_slots[i] = oppl_cache_slot_t();
+	}
+	g_oppl_cache_idx.clear();
+	g_oppl_cache_hand = 0;
+	mutex_exit(&g_oppl_cache_mutex);
+}
+
+/* Cache-backed load. Returns pointers into cache buffer. */
 bool oppl_load_for_llt(const page_id_t& page_id,
-		byte* slot_buf_8k,
-		byte** chunks_ptr_out, ulint* chunks_len_out)
+		byte** snap_out, byte** chunks_ptr_out, ulint* chunks_len_out)
 {
 	if (!g_oppl_initialized || g_oppl_fd < 0) return false;
+
 	uint64_t slot_off = 0;
 	mutex_enter(&g_oppl_mutex);
 	std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator it =
@@ -123,19 +154,78 @@ bool oppl_load_for_llt(const page_id_t& page_id,
 	slot_off = it->second->offset;
 	mutex_exit(&g_oppl_mutex);
 
-	const size_t SLOT = 2 * OPPL_SEG_BYTES;  /* 8KB */
-	ssize_t r = ::pread(g_oppl_fd, slot_buf_8k, SLOT, slot_off);
-	if (r != (ssize_t)SLOT) return false;
+	uint64_t key = ((uint64_t)page_id.space() << 32) | page_id.page_no();
 
-	byte* chunks_region = slot_buf_8k + OPPL_SEG_BYTES;
-	ulint cl = (ulint)mach_read_from_8(chunks_region);
-	if (cl == 0 || cl + OPPL_SEG_HEADER_SIZE > OPPL_SEG_BYTES) {
-		*chunks_ptr_out = NULL;
-		*chunks_len_out = 0;
+	mutex_enter(&g_oppl_cache_mutex);
+	std::tr1::unordered_map<uint64_t, size_t>::iterator cidx =
+		g_oppl_cache_idx.find(key);
+	if (cidx != g_oppl_cache_idx.end()) {
+		size_t s = cidx->second;
+		g_oppl_cache_slots[s].ref_bit = 1;
+		*snap_out = g_oppl_cache_slots[s].buf;
+		*chunks_len_out = g_oppl_cache_slots[s].chunks_len;
+		*chunks_ptr_out = (*chunks_len_out > 0)
+			? g_oppl_cache_slots[s].buf + OPPL_SEG_BYTES + OPPL_SEG_HEADER_SIZE
+			: NULL;
+		mutex_exit(&g_oppl_cache_mutex);
 		return true;
 	}
-	*chunks_ptr_out = chunks_region + OPPL_SEG_HEADER_SIZE;
+
+	/* Miss: find empty or clock-evict (ref_bit==0). */
+	size_t slot = (size_t)-1;
+	for (size_t i = 0; i < OPPL_CACHE_CAP; i++) {
+		if (!g_oppl_cache_slots[i].used) { slot = i; break; }
+	}
+	if (slot == (size_t)-1) {
+		for (size_t tries = 0; tries < 2 * OPPL_CACHE_CAP; tries++) {
+			size_t i = (g_oppl_cache_hand + tries) % OPPL_CACHE_CAP;
+			if (g_oppl_cache_slots[i].ref_bit == 0) {
+				g_oppl_cache_idx.erase(g_oppl_cache_slots[i].key);
+				slot = i;
+				g_oppl_cache_hand = (i + 1) % OPPL_CACHE_CAP;
+				break;
+			}
+			g_oppl_cache_slots[i].ref_bit = 0;
+		}
+	}
+	if (slot == (size_t)-1) {
+		mutex_exit(&g_oppl_cache_mutex);
+		return false;
+	}
+
+	/* Lazy alloc: 8KB aligned. */
+	if (g_oppl_cache_slots[slot].buf == NULL) {
+		void* p = NULL;
+		if (posix_memalign(&p, 4096, 2 * OPPL_SEG_BYTES) != 0) {
+			mutex_exit(&g_oppl_cache_mutex);
+			return false;
+		}
+		g_oppl_cache_slots[slot].buf = static_cast<byte*>(p);
+	}
+
+	const size_t SLOT = 2 * OPPL_SEG_BYTES;
+	ssize_t r = ::pread(g_oppl_fd, g_oppl_cache_slots[slot].buf, SLOT, slot_off);
+	if (r != (ssize_t)SLOT) {
+		mutex_exit(&g_oppl_cache_mutex);
+		return false;
+	}
+
+	ulint cl = (ulint)mach_read_from_8(
+		g_oppl_cache_slots[slot].buf + OPPL_SEG_BYTES);
+	if (cl + OPPL_SEG_HEADER_SIZE > OPPL_SEG_BYTES) cl = 0;
+
+	g_oppl_cache_slots[slot].key = key;
+	g_oppl_cache_slots[slot].chunks_len = cl;
+	g_oppl_cache_slots[slot].ref_bit = 1;
+	g_oppl_cache_slots[slot].used = true;
+	g_oppl_cache_idx[key] = slot;
+
+	*snap_out = g_oppl_cache_slots[slot].buf;
 	*chunks_len_out = cl;
+	*chunks_ptr_out = (cl > 0)
+		? g_oppl_cache_slots[slot].buf + OPPL_SEG_BYTES + OPPL_SEG_HEADER_SIZE
+		: NULL;
+	mutex_exit(&g_oppl_cache_mutex);
 	return true;
 }
 
@@ -252,20 +342,29 @@ bool oppl_spill_page(buf_page_t* bpage)
 		return false;
 	}
 
-	/* Entry check only. Exists → caller flushes normally, no OPPL action. */
-	uint64_t slot_off = 0;
+	/* Quick exists check (short critical section). */
 	mutex_enter(&g_oppl_mutex);
-	if (g_oppl_table.find(bpage->id) != g_oppl_table.end()) {
-		mutex_exit(&g_oppl_mutex);
+	bool exists = (g_oppl_table.find(bpage->id) != g_oppl_table.end());
+	mutex_exit(&g_oppl_mutex);
+	if (exists) return false;
+
+	/* Allocate slot offset lock-free. 8KB per entry. */
+	uint64_t slot_off = __atomic_fetch_add(
+		&g_oppl_next_offset, 2 * OPPL_SEG_BYTES, __ATOMIC_RELAXED);
+
+	oppl_entry_t* entry = new oppl_entry_t();
+	entry->offset = slot_off;
+
+	/* Insert. Race: another thread may have inserted same page-id first. */
+	mutex_enter(&g_oppl_mutex);
+	std::pair<std::tr1::unordered_map<page_id_t, oppl_entry_t*>::iterator, bool>
+		ins = g_oppl_table.insert(std::make_pair(bpage->id, entry));
+	mutex_exit(&g_oppl_mutex);
+	if (!ins.second) {
+		/* Lost race — slot_off wasted (8KB hole in oppl.dat). Acceptable. */
+		delete entry;
 		return false;
 	}
-	oppl_entry_t* entry = new oppl_entry_t();
-	entry->offset = g_oppl_next_offset;
-	/* 8KB per entry: 4KB snapshot + 8B header + up to 4088B chunks */
-	g_oppl_next_offset += 2 * OPPL_SEG_BYTES;
-	g_oppl_table[bpage->id] = entry;
-	slot_off = entry->offset;
-	mutex_exit(&g_oppl_mutex);
 
 	byte* chain = static_cast<byte*>(ut_malloc_nokey(OPPL_SEG_BYTES));
 	if (chain == NULL) {
@@ -345,9 +444,9 @@ void oppl_prefetch_on_read(const page_id_t& page_id)
 	}
 }
 
-/* Bulk-erase all OPPL entries; called when oldest LLT view closes.
-   Bpage OPPL_BACKED flags are left as-is — next spill will recreate the
-   entry; reads without an entry fall through to normal Path C. */
+void oppl_cache_drain(void);
+
+/* Bulk-erase all OPPL entries + cache; called when oldest LLT view closes. */
 void oppl_drain_all(void)
 {
 	if (!g_oppl_initialized) return;
@@ -358,8 +457,9 @@ void oppl_drain_all(void)
 		delete it->second;
 	}
 	g_oppl_table.clear();
-	g_oppl_next_offset = 0;
 	mutex_exit(&g_oppl_mutex);
+	__atomic_store_n(&g_oppl_next_offset, 0, __ATOMIC_RELEASE);
+	oppl_cache_drain();
 	fprintf(stderr, "OPPL=DRAIN entries=%lu\n", (unsigned long)n);
 }
 
@@ -1491,14 +1591,13 @@ nvdimm_build_prev_vers_with_redo(
 
 	/* OPPL-first: if entry exists, use disk snapshot + chunks instead of
 	   .ibd fil_io + NVDIMM chain. Snapshot is frozen at first-spill time
-	   → undo from snap_rec is shorter than from BP-latest. Single 8KB
-	   O_DIRECT pread covers both snapshot (first 4KB) and chunks. */
-	byte oppl_slot_buf[2 * OPPL_SEG_BYTES] __attribute__((aligned(4096)));
-	byte* oppl_snap_buf = oppl_slot_buf;
+	   → undo from snap_rec is shorter than from BP-latest. Cache-backed:
+	   pointers valid for duration of this function call. */
+	byte* oppl_snap_buf = NULL;
 	byte* oppl_chunks_ptr = NULL;
 	ulint oppl_chunks_len = 0;
 	bool from_oppl = false;
-	if (__is_llt && oppl_load_for_llt(bpage->id, oppl_slot_buf,
+	if (__is_llt && oppl_load_for_llt(bpage->id, &oppl_snap_buf,
 		&oppl_chunks_ptr, &oppl_chunks_len)) {
 		from_oppl = true;
 		apply_log_size = oppl_chunks_len;
