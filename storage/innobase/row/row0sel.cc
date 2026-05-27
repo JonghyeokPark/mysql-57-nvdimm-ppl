@@ -800,10 +800,14 @@ row_sel_build_prev_vers(
 		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh);
 		bool has_chain = get_flag(&(bpage->flags), PPLIZED)
 		              && !get_flag(&(bpage->flags), NORMALIZE);
-		bool maybe_prebuilt = is_target;   /* stock + warehouse 둘 다 lookup 시도 */
+		bool has_oppl = oppl_has_entry(bpage->id);
+		/* Only use nvdimm path if page is actually PPLized (has chain) or
+		   has an OPPL entry (spilled snap). Non-PPLized pages going through
+		   nvdimm_build_prev_vers_with_redo would do an unnecessary fil_io
+		   that reads post-view .ibd content, triggering OLD_UNDO. */
 		if (is_target
 		    && page_get_max_trx_id(block->frame) != 0
-		    && (has_chain || maybe_prebuilt)) {
+		    && (has_chain || has_oppl)) {
 			use_nvdimm_for_vers_build = true;
 		}
 	}
@@ -812,7 +816,7 @@ row_sel_build_prev_vers(
 	if(use_nvdimm_for_vers_build){
 
 		//redo-based version constructions
-	//	fprintf(stderr, "version build with redo bpage : %lu space_id: %lu page_no: %lu max_trx_id: %lu\n", 
+	//	fprintf(stderr, "version build with redo bpage : %lu space_id: %lu page_no: %lu max_trx_id: %lu\n",
 	//	bpage, bpage->id.space(), bpage->id.page_no(), page_get_max_trx_id(block->frame));
 
 		err = nvdimm_build_prev_vers_with_redo(
@@ -3684,13 +3688,13 @@ row_sel_build_prev_vers_for_mysql(
 		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh);
 		bool has_chain = get_flag(&(bpage->flags), PPLIZED)
 		              && !get_flag(&(bpage->flags), NORMALIZE);
-		bool maybe_prebuilt = is_target;   /* stock + warehouse 둘 다 lookup 시도 */
+		bool has_oppl = oppl_has_entry(bpage->id);
 		if (is_target
 		    && page_get_max_trx_id(block->frame) != 0
 		    && page_is_leaf(block->frame)
 		    && bpage->io_fix == BUF_IO_NONE
 		    && buf_page_in_file(bpage)
-		    && (has_chain || maybe_prebuilt)) {
+		    && (has_chain || has_oppl)) {
 			use_nvdimm_for_vers_build = true;
 		}
 	}

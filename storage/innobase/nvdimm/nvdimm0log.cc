@@ -118,10 +118,36 @@ struct oppl_cache_slot_t {
 	bool     used;
 	oppl_cache_slot_t() : key(0), buf(NULL), chunks_len(0), ref_bit(0), used(false) {}
 };
-const size_t OPPL_CACHE_CAP = (32ULL * 1024 * 1024) / (2 * OPPL_SEG_BYTES);  /* 4096 slots */
+const size_t OPPL_CACHE_CAP = (1024ULL * 1024 * 1024) / (2 * OPPL_SEG_BYTES);  /* 131072 slots */
 std::vector<oppl_cache_slot_t> g_oppl_cache_slots(OPPL_CACHE_CAP);
 std::tr1::unordered_map<uint64_t, size_t> g_oppl_cache_idx;
 size_t g_oppl_cache_hand = 0;
+/* OLD-page cache key uses top bit so OPPL snap and OLD fil_io don't collide
+   on the same (space, page_no). Stock space_id is small so bit 63 is free. */
+const uint64_t OLD_CACHE_KEY_BIT = 1ULL << 63;
+}
+
+/* Clock-sweep slot finder. Handles empty slots AND ref_bit==0 evictable in
+   one pass starting from g_oppl_cache_hand. Caller holds g_oppl_cache_mutex.
+   Replaces the previous O(N) linear empty-scan + clock-sweep, which became
+   expensive when cache filled up. Returns slot index, or (size_t)-1 if all
+   slots pinned (shouldn't happen in practice). */
+static size_t oppl_cache_acquire_slot()
+{
+	for (size_t tries = 0; tries < 2 * OPPL_CACHE_CAP; tries++) {
+		size_t i = (g_oppl_cache_hand + tries) % OPPL_CACHE_CAP;
+		if (!g_oppl_cache_slots[i].used) {
+			g_oppl_cache_hand = (i + 1) % OPPL_CACHE_CAP;
+			return i;
+		}
+		if (g_oppl_cache_slots[i].ref_bit == 0) {
+			g_oppl_cache_idx.erase(g_oppl_cache_slots[i].key);
+			g_oppl_cache_hand = (i + 1) % OPPL_CACHE_CAP;
+			return i;
+		}
+		g_oppl_cache_slots[i].ref_bit = 0;
+	}
+	return (size_t)-1;
 }
 
 void oppl_cache_drain(void) {
@@ -171,23 +197,8 @@ bool oppl_load_for_llt(const page_id_t& page_id,
 		return true;
 	}
 
-	/* Miss: find empty or clock-evict (ref_bit==0). */
-	size_t slot = (size_t)-1;
-	for (size_t i = 0; i < OPPL_CACHE_CAP; i++) {
-		if (!g_oppl_cache_slots[i].used) { slot = i; break; }
-	}
-	if (slot == (size_t)-1) {
-		for (size_t tries = 0; tries < 2 * OPPL_CACHE_CAP; tries++) {
-			size_t i = (g_oppl_cache_hand + tries) % OPPL_CACHE_CAP;
-			if (g_oppl_cache_slots[i].ref_bit == 0) {
-				g_oppl_cache_idx.erase(g_oppl_cache_slots[i].key);
-				slot = i;
-				g_oppl_cache_hand = (i + 1) % OPPL_CACHE_CAP;
-				break;
-			}
-			g_oppl_cache_slots[i].ref_bit = 0;
-		}
-	}
+	/* Miss: clock-sweep for empty or evictable slot. */
+	size_t slot = oppl_cache_acquire_slot();
 	if (slot == (size_t)-1) {
 		mutex_exit(&g_oppl_cache_mutex);
 		return false;
@@ -225,6 +236,58 @@ bool oppl_load_for_llt(const page_id_t& page_id,
 	*chunks_ptr_out = (cl > 0)
 		? g_oppl_cache_slots[slot].buf + OPPL_SEG_BYTES + OPPL_SEG_HEADER_SIZE
 		: NULL;
+	mutex_exit(&g_oppl_cache_mutex);
+	return true;
+}
+
+/* OLD-page cache (shares g_oppl_cache_slots with OPPL snap; keys disambiguated
+   by OLD_CACHE_KEY_BIT). Structurally mirrors oppl_load_for_llt: single mutex
+   acquire, fil_io inside the function on miss, returns pointer to cache buf. */
+bool oppl_cache_load_old(
+	const page_id_t& page_id, const page_size_t& page_size, byte** out_ptr)
+{
+	uint64_t key = OLD_CACHE_KEY_BIT
+		| ((uint64_t)page_id.space() << 32) | page_id.page_no();
+	mutex_enter(&g_oppl_cache_mutex);
+	std::tr1::unordered_map<uint64_t, size_t>::iterator cidx =
+		g_oppl_cache_idx.find(key);
+	if (cidx != g_oppl_cache_idx.end()) {
+		size_t s = cidx->second;
+		g_oppl_cache_slots[s].ref_bit = 1;
+		*out_ptr = g_oppl_cache_slots[s].buf;
+		mutex_exit(&g_oppl_cache_mutex);
+		return true;
+	}
+
+	size_t slot = oppl_cache_acquire_slot();
+	if (slot == (size_t)-1) {
+		mutex_exit(&g_oppl_cache_mutex);
+		return false;
+	}
+
+	if (g_oppl_cache_slots[slot].buf == NULL) {
+		void* p = NULL;
+		if (posix_memalign(&p, 4096, 2 * OPPL_SEG_BYTES) != 0) {
+			mutex_exit(&g_oppl_cache_mutex);
+			return false;
+		}
+		g_oppl_cache_slots[slot].buf = static_cast<byte*>(p);
+	}
+
+	dberr_t err = fil_io(IORequestRead, true, page_id, page_size, 0,
+			page_size.physical(), g_oppl_cache_slots[slot].buf, NULL);
+	if (err != DB_SUCCESS) {
+		mutex_exit(&g_oppl_cache_mutex);
+		return false;
+	}
+
+	g_oppl_cache_slots[slot].key = key;
+	g_oppl_cache_slots[slot].chunks_len = 0;
+	g_oppl_cache_slots[slot].ref_bit = 1;
+	g_oppl_cache_slots[slot].used = true;
+	g_oppl_cache_idx[key] = slot;
+
+	*out_ptr = g_oppl_cache_slots[slot].buf;
 	mutex_exit(&g_oppl_cache_mutex);
 	return true;
 }
@@ -1373,14 +1436,6 @@ find_prebuilt_page_from_list(
         tls_last_prebuilt_slot_idx = idx_it->second;
     }
     mutex_exit(&prebuilt_page_list_mutex);
-    bool is_llt = ppl_is_llt_view(reader_view);
-    if (found == NULL) {
-        MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_MISS);
-        if (is_llt) MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PREBUILD_MISS);
-    } else {
-        MONITOR_INC(MONITOR_NVDIMM_PPL_PREBUILD_HIT);
-        if (is_llt) MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PREBUILD_HIT);
-    }
     return found;
 }
 
@@ -1406,31 +1461,28 @@ nvdimm_build_prev_vers_with_redo(
 					column data */
 	buf_page_t* bpage ){
 
-	/* Per-path tag for accounting:
-	     0 = none/early-error
-	     1 = Path A (prebuilt direct success — visible)
-	     2 = Path B (prebuilt found, visibility failed → DB_FAIL → undo)
-	     3 = Path C (disk + PPL apply) */
+	/* Per-path tag for accounting (LLT 7-path breakdown):
+	     0 = early-error / unaccounted
+	     1 = SNAP_MATCH (OPPL snap visible, no chunks)
+	     2 = SNAP_REDO  (OPPL snap + chunks forward apply)
+	     3 = OLD path   (.ibd fil_io; chain==0 → OLD_MATCH, chain>0 → OLD_REDO)
+	     4 = SNAP_UNDO  (OPPL snap too new → undo walk from snap_rec)
+	     5 = OLD_UNDO   (.ibd disk too new → undo walk from disk_rec) */
 	int __path_tag = 0;
 	bool __is_llt = ppl_is_llt_view(read_view);
-	uint64_t __find_us = 0;  /* time spent in find_prebuilt */
-	int __chain_len = 0;     /* path B nested-undo or path C apply-count */
-	/* RAII timer + outcome accounting. */
+	int __chain_len = 0;
+	/* RAII timer + outcome accounting. Time = entry → return. */
 	struct RedoBuildStats {
 		rec_t** old_vers_p;
 		int* path_p;
-		uint64_t* find_p;
 		int* chain_p;
 		bool is_llt;
 		ib_uint64_t start;
-		RedoBuildStats(rec_t** ov, int* pp, uint64_t* fp, int* cp, bool llt)
-			: old_vers_p(ov), path_p(pp), find_p(fp), chain_p(cp),
+		RedoBuildStats(rec_t** ov, int* pp, int* cp, bool llt)
+			: old_vers_p(ov), path_p(pp), chain_p(cp),
 			  is_llt(llt), start(ut_time_us(NULL)) {}
 		~RedoBuildStats() {
-			uint64_t total = (uint64_t)(ut_time_us(NULL) - start);
-			uint64_t fus = find_p ? *find_p : 0;
-			/* pure version-construction time = total - find */
-			uint64_t us = (total > fus) ? (total - fus) : 0;
+			uint64_t us = (uint64_t)(ut_time_us(NULL) - start);
 			MONITOR_INC(MONITOR_NVDIMM_PPL_REDO_BUILD_CALLS);
 			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_REDO_BUILD_US_SUM, (mon_type_t)us);
 			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_REDO_BUILD_US_MAX, (mon_type_t)us);
@@ -1443,72 +1495,42 @@ nvdimm_build_prev_vers_with_redo(
 			} else {
 				MONITOR_INC(MONITOR_NVDIMM_PPL_REDO_OUT_NULL);
 			}
+			if (!is_llt || !old_vers_p || *old_vers_p == NULL) return;
+			int chain = chain_p ? *chain_p : 0;
 			switch (*path_p) {
-			case 1: /* Path A */
-				MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_A_CALLS);
-				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_PATH_A_US_SUM, (mon_type_t)us);
-				MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_PATH_A_US_MAX, (mon_type_t)us);
-				if (is_llt) {
-					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_A_CALLS);
-					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_A_US_SUM, (mon_type_t)us);
-				}
+			case 1: /* SNAP_MATCH */
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_SNAP_MATCH_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_SNAP_MATCH_US_SUM, (mon_type_t)us);
 				break;
-			case 2: /* Path B fallback */
-				MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_B_FALLBACK);
-				if (is_llt) {
-					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_B_FALLBACK);
-					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_B_US_SUM, (mon_type_t)us);
-					if (chain_p) {
-						MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_B_LEN_SUM,
-							(mon_type_t)*chain_p);
-					}
-				}
+			case 2: /* SNAP_REDO */
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_SNAP_REDO_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_SNAP_REDO_US_SUM, (mon_type_t)us);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_SNAP_REDO_LEN_SUM, (mon_type_t)chain);
 				break;
-			case 3: /* Path C pure: disk + forward apply, result visible */
-				if (old_vers_p && *old_vers_p != NULL) {
-					MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_C_CALLS);
-					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_PATH_C_US_SUM, (mon_type_t)us);
-					MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_PATH_C_US_MAX, (mon_type_t)us);
-					if (is_llt) {
-						MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_C_CALLS);
-						MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_US_SUM, (mon_type_t)us);
-						if (chain_p) {
-							MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_LEN_SUM,
-								(mon_type_t)*chain_p);
-						}
-					}
+			case 3: /* OLD path — both clean (chain==0) and apply (chain>0) */
+				if (chain == 0) {
+					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_OLD_MATCH_CALLS);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_OLD_MATCH_US_SUM, (mon_type_t)us);
 				} else {
-					MONITOR_INC(MONITOR_NVDIMM_PPL_PATH_C_FAIL);
+					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_OLD_REDO_CALLS);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_OLD_REDO_US_SUM, (mon_type_t)us);
+					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_OLD_REDO_LEN_SUM, (mon_type_t)chain);
 				}
 				break;
-			case 4: /* Path C + nested undo (Old Page + Undo) */
-				if (is_llt && old_vers_p && *old_vers_p != NULL) {
-					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_C_NESTED_UNDO_CALLS);
-					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_NESTED_UNDO_US_SUM,
-						(mon_type_t)us);
-				}
+			case 4: /* SNAP_UNDO */
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_SNAP_UNDO_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_SNAP_UNDO_US_SUM, (mon_type_t)us);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_SNAP_UNDO_LEN_SUM, (mon_type_t)chain);
 				break;
-			case 5: /* Disk too new → undo from disk frame */
-				if (is_llt && old_vers_p && *old_vers_p != NULL) {
-					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH_C_DISK_UNDO_CALLS);
-					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_DISK_UNDO_US_SUM,
-						(mon_type_t)us);
-					if (chain_p) {
-						MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH_C_DISK_UNDO_LEN_SUM,
-							(mon_type_t)*chain_p);
-					}
-				}
+			case 5: /* OLD_UNDO: disk frame too new → undo from disk_rec */
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_OLD_UNDO_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_OLD_UNDO_US_SUM, (mon_type_t)us);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_OLD_UNDO_LEN_SUM, (mon_type_t)chain);
 				break;
 			default: break;
 			}
-			/* Find time as separate metric. */
-			if (find_p && is_llt && *find_p > 0) {
-				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_FIND_CALLS);
-				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_FIND_US_SUM,
-					(mon_type_t)*find_p);
-			}
 		}
-	} __redo_timer(old_vers, &__path_tag, &__find_us, &__chain_len, __is_llt);
+	} __redo_timer(old_vers, &__path_tag, &__chain_len, __is_llt);
 	page_id_t page_id = bpage->id; // cur bpage
 	buf_block_t* block = buf_page_get_block(bpage); // cur block
 	
@@ -1689,6 +1711,16 @@ read_old_page:
 	if (from_oppl) {
 		buf_frame_copy(old_page, oppl_snap_buf);
 		err = DB_SUCCESS;
+	} else if (__is_llt) {
+		byte* old_cache_ptr = NULL;
+		if (oppl_cache_load_old(page_id, page_size, &old_cache_ptr)) {
+			buf_frame_copy(old_page, old_cache_ptr);
+			err = DB_SUCCESS;
+		} else {
+			/* Cache full or acquire/alloc failed → direct fil_io fallback. */
+			err = fil_io(IORequestRead, true, page_id, page_size, 0,
+					page_size.physical(), old_page, NULL);
+		}
 	} else {
 		err = fil_io(IORequestRead, true, page_id, page_size, 0, page_size.physical(),
 				old_page, NULL);
@@ -1712,17 +1744,59 @@ read_old_page:
 	old_page_max_trx_id = page_get_max_trx_id(old_page);
 	cur_page_max_trx_id = page_get_max_trx_id(page);
 
-	/* If even the disk-loaded version is already newer than the view's
-	   snapshot threshold, forward apply can't help (each PPL moves
-	   max_trx forward). Instead of bailing out so the caller walks
-	   undo from the latest BP record (longest chain), use the disk
-	   frame's record as the undo starting point — its trx_id ≤ disk
-	   max so the undo walk from there is shorter. We tag path_tag=5
-	   and skip the apply loop; the existing nested undo block below
-	   will fire because the disk record is invisible. */
-	if (!read_view->changes_visible(old_page_max_trx_id,
-	                                clust_index->table->name)) {
-		__path_tag = 5;
+	/* For OLD path (from_oppl=false): check the SPECIFIC record's trx_id,
+	   not page_max_trx_id. Page max can be high due to other records being
+	   updated, while our record might still be visible. */
+	if (!from_oppl) {
+		*offsets = rec_get_offsets(rec, clust_index, *offsets,
+			ULINT_UNDEFINED, offset_heap);
+		if (*offsets == NULL) { *old_vers = NULL; return DB_FAIL; }
+		ulint heap_no_chk = page_rec_get_heap_no(rec);
+		const rec_t* disk_rec_chk = page_find_rec_with_heap_no(old_page, heap_no_chk);
+		if (disk_rec_chk == NULL) { *old_vers = NULL; return DB_FAIL; }
+		trx_id_t disk_rec_trx = row_get_rec_trx_id(disk_rec_chk, clust_index, *offsets);
+		if (!read_view->changes_visible(disk_rec_trx,
+				clust_index->table->name)) {
+			/* OLD_UNDO: this specific disk_rec too new → undo walk from disk_rec.
+			   Shorter chain than LATEST_UNDO_STOCK (disk_rec.trx ≤ BP latest). */
+			__path_tag = 5;
+			static ulint __old_undo_log_cnt = 0;
+			++__old_undo_log_cnt;
+			bool has_oppl_entry = oppl_has_entry(bpage->id);
+			/* Read BP latest rec's trx_id for comparison — if equals
+			   disk_rec_trx, we likely read from BP instead of .ibd. */
+			trx_id_t bp_rec_trx = row_get_rec_trx_id(rec, clust_index, *offsets);
+			trx_id_t bp_page_max = page_get_max_trx_id(page);
+			fprintf(stderr,
+				"OLD_UNDO_TRACE n=%lu page=(%u,%u) heap_no=%lu "
+				"disk_trx=%llu bp_trx=%llu disk_max=%llu bp_max=%llu "
+				"view_low=%llu has_oppl=%d apply_log_size=%lu\n",
+				__old_undo_log_cnt,
+				bpage->id.space(), bpage->id.page_no(),
+				(unsigned long)heap_no_chk,
+				(unsigned long long)disk_rec_trx,
+				(unsigned long long)bp_rec_trx,
+				(unsigned long long)old_page_max_trx_id,
+				(unsigned long long)bp_page_max,
+				(unsigned long long)read_view->low_limit_id(),
+				has_oppl_entry ? 1 : 0,
+				(unsigned long)apply_log_size);
+			rec_t* undo_old_vers = NULL;
+			tls_llt_undo_chain_len = 0;
+			dberr_t undo_err = row_vers_build_for_consistent_read(
+				disk_rec_chk, mtr, clust_index, offsets,
+				read_view, offset_heap, in_heap,
+				&undo_old_vers, vrow);
+			__chain_len = tls_llt_undo_chain_len;
+			if (undo_err == DB_SUCCESS && undo_old_vers != NULL) {
+				*old_vers = undo_old_vers;
+				return DB_SUCCESS;
+			}
+			*old_vers = NULL;
+			return DB_FAIL;
+		}
+		/* disk_rec visible — fall through to apply loop; will be OLD_MATCH
+		   if apply_log_size==0, or OLD_REDO if chunks applied. */
 	}
 
 	/* OPPL 3-way decision (per user spec):
@@ -1990,14 +2064,6 @@ get_rec_offset:
 				&undo_old_vers, vrow);
 			uint64_t p2_us = (uint64_t)(ut_time_us(NULL) - __p2_start);
 			__chain_len = tls_llt_undo_chain_len;
-			/* Track p2 portion (pure undo walk time) only for path B,
-			   to preserve historical path_b vs path2_undo decomposition.
-			   Path 4 and 5 get their total time from destructor cases. */
-			if (__is_llt && __path_tag == 2) {
-				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_PATH2_UNDO_CALLS);
-				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_PATH2_UNDO_US_SUM,
-					(mon_type_t)p2_us);
-			}
 			/* Long-call trace: dump page_id + heap_no when one paper [2]
 			   undo walk takes > 100 ms — candidate for the long-latch
 			   semaphore wait. */

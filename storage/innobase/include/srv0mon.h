@@ -431,9 +431,8 @@ enum monitor_id_t {
 	MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE5,   /* PPL pool init */
 	MONITOR_NVDIMM_PPL_NORMALIZE_CAUSE6,   /* LSN gap (eager normalize) */
 	MONITOR_NVDIMM_PPL_LOG_BYTES_TOTAL,
-	MONITOR_NVDIMM_PPL_PREBUILD_HIT,
-	MONITOR_NVDIMM_PPL_PREBUILD_MISS,
-	/* MVCC undo chain length stats (per-call). avg = len_sum / calls. */
+	/* MVCC undo chain length stats (per-call, aggregate over OLTP+LLT).
+	   avg = len_sum / calls. */
 	MONITOR_NVDIMM_PPL_UNDO_STOCK_CALLS,
 	MONITOR_NVDIMM_PPL_UNDO_STOCK_LEN_SUM,
 	MONITOR_NVDIMM_PPL_UNDO_STOCK_LEN_MAX,
@@ -447,84 +446,51 @@ enum monitor_id_t {
 	MONITOR_NVDIMM_PPL_UNDO_STOCK_US_MAX,
 	MONITOR_NVDIMM_PPL_UNDO_WH_US_SUM,
 	MONITOR_NVDIMM_PPL_UNDO_WH_US_MAX,
-	MONITOR_NVDIMM_PPL_REDO_BUILD_CALLS,    /* nvdimm_build_prev_vers_with_redo calls */
+	MONITOR_NVDIMM_PPL_REDO_BUILD_CALLS,    /* nvdimm_build_prev_vers_with_redo total invocations */
 	MONITOR_NVDIMM_PPL_REDO_BUILD_US_SUM,
 	MONITOR_NVDIMM_PPL_REDO_BUILD_US_MAX,
 	MONITOR_NVDIMM_PPL_REDO_OUT_VERS,       /* returned old_vers != NULL */
 	MONITOR_NVDIMM_PPL_REDO_OUT_NULL,       /* returned old_vers = NULL */
-	MONITOR_NVDIMM_PPL_REDO_OUT_FAIL,       /* DB_FAIL → caller falls back to undo */
-	/* Per-path stats (mutually exclusive within nvdimm_build_prev_vers_with_redo) */
-	MONITOR_NVDIMM_PPL_PATH_A_CALLS,        /* prebuilt direct success */
-	MONITOR_NVDIMM_PPL_PATH_A_US_SUM,
-	MONITOR_NVDIMM_PPL_PATH_A_US_MAX,
-	MONITOR_NVDIMM_PPL_PATH_B_FALLBACK,     /* prebuilt found but visibility failed → DB_FAIL → undo */
-	MONITOR_NVDIMM_PPL_PATH_C_CALLS,        /* disk read + PPL forward apply */
-	MONITOR_NVDIMM_PPL_PATH_C_US_SUM,
-	MONITOR_NVDIMM_PPL_PATH_C_US_MAX,
-	MONITOR_NVDIMM_PPL_PATH_C_FAIL,         /* Path C taken but resulted in DB_FAIL */
 
-	/* LLT-only versions of the above. A call is "LLT" iff its read
-	   view's low_limit_id matches g_oldest_active_view_ts. These
-	   counters separate LLT-induced version-build work from OLTP
-	   short-view work that gets mixed into the table-wide totals. */
-	MONITOR_NVDIMM_PPL_LLT_PATH_A_CALLS,
-	MONITOR_NVDIMM_PPL_LLT_PATH_A_US_SUM,
-	MONITOR_NVDIMM_PPL_LLT_PATH_B_FALLBACK,
-	MONITOR_NVDIMM_PPL_LLT_PATH_B_US_SUM,
-	MONITOR_NVDIMM_PPL_LLT_PATH_C_CALLS,
-	MONITOR_NVDIMM_PPL_LLT_PATH_C_US_SUM,
+	/* ===== LLT 7-path version build breakdown =====
+	   Each call to nvdimm_build_prev_vers_with_redo with an LLT readview
+	   falls into exactly one path (or the caller falls back to LATEST_UNDO).
+	   Time = entry → "visible old_vers" return (includes internal walks).
+
+	   SNAP_* paths: OPPL cache hit (4KB snapshot in oppl.dat used as base)
+	   OLD_*  paths: OPPL miss → fil_io of current .ibd page as base
+	   LATEST_UNDO: nvdimm returned DB_FAIL → caller walks undo from BP latest
+
+	     MATCH = base already visible, no apply needed
+	     REDO  = base + forward apply PPL chunks until visible
+	     UNDO  = base too new → backward undo walk to visible */
+	MONITOR_NVDIMM_PPL_LLT_SNAP_MATCH_CALLS,
+	MONITOR_NVDIMM_PPL_LLT_SNAP_MATCH_US_SUM,
+	MONITOR_NVDIMM_PPL_LLT_SNAP_REDO_CALLS,
+	MONITOR_NVDIMM_PPL_LLT_SNAP_REDO_US_SUM,
+	MONITOR_NVDIMM_PPL_LLT_SNAP_REDO_LEN_SUM,
+	MONITOR_NVDIMM_PPL_LLT_SNAP_UNDO_CALLS,
+	MONITOR_NVDIMM_PPL_LLT_SNAP_UNDO_US_SUM,
+	MONITOR_NVDIMM_PPL_LLT_SNAP_UNDO_LEN_SUM,
+	MONITOR_NVDIMM_PPL_LLT_OLD_MATCH_CALLS,
+	MONITOR_NVDIMM_PPL_LLT_OLD_MATCH_US_SUM,
+	MONITOR_NVDIMM_PPL_LLT_OLD_REDO_CALLS,
+	MONITOR_NVDIMM_PPL_LLT_OLD_REDO_US_SUM,
+	MONITOR_NVDIMM_PPL_LLT_OLD_REDO_LEN_SUM,
+	MONITOR_NVDIMM_PPL_LLT_OLD_UNDO_CALLS,
+	MONITOR_NVDIMM_PPL_LLT_OLD_UNDO_US_SUM,
+	MONITOR_NVDIMM_PPL_LLT_OLD_UNDO_LEN_SUM,
+	MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_STOCK_CALLS,
+	MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_STOCK_US_SUM,
+	MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_STOCK_LEN_SUM,
+	MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_WAREHOUSE_CALLS,
+	MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_WAREHOUSE_US_SUM,
+	MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_WAREHOUSE_LEN_SUM,
+	MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_DISTRICT_CALLS,
+	MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_DISTRICT_US_SUM,
+	MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_DISTRICT_LEN_SUM,
 	MONITOR_NVDIMM_PPL_LLT_REDO_BUILD_CALLS,
 	MONITOR_NVDIMM_PPL_LLT_REDO_BUILD_US_SUM,
-	MONITOR_NVDIMM_PPL_LLT_PREBUILD_HIT,
-	MONITOR_NVDIMM_PPL_LLT_PREBUILD_MISS,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_CALLS,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_US_SUM,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_LEN_SUM,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_WH_CALLS,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_WH_US_SUM,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_WH_LEN_SUM,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_DISTRICT_CALLS,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_DISTRICT_US_SUM,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_DISTRICT_LEN_SUM,
-	/* Subset of LLT stock undo: calls that came in via PPL-MV
-	   path B fallback (vs. direct paper [4]). direct = total - fallback. */
-	MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_FB_CALLS,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_FB_US_SUM,
-	MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_FB_LEN_SUM,
-	/* LLT only: time spent in find_prebuilt_page_from_list itself,
-	   subtracted out of path_*_us_sum so those reflect pure
-	   version-construction cost (frame copy / disk + chain / undo
-	   walk) without the lookup overhead. */
-	MONITOR_NVDIMM_PPL_LLT_FIND_US_SUM,
-	MONITOR_NVDIMM_PPL_LLT_FIND_CALLS,
-	/* Paper [2]'s internal undo from prebuilt frame (called from
-	   inside nvdimm_build_prev_vers_with_redo). Subtracted from
-	   undo_stock_us_sum to derive pure paper [4] direct-undo time.
-	   NOTE: only counts path B (path A → downgrade) nested undo
-	   after the split — path C's nested undo goes to
-	   PATH_C_NESTED_UNDO_* below. */
-	MONITOR_NVDIMM_PPL_LLT_PATH2_UNDO_CALLS,
-	MONITOR_NVDIMM_PPL_LLT_PATH2_UNDO_US_SUM,
-	/* Per-path chain length (records walked / applied). Path A has no
-	   chain. Path B chain = nested undo records traversed. Path C chain
-	   = PPL log records forward-applied. Combined with calls counter
-	   gives avg chain depth per path. */
-	MONITOR_NVDIMM_PPL_LLT_PATH_B_LEN_SUM,
-	MONITOR_NVDIMM_PPL_LLT_PATH_C_LEN_SUM,
-	/* Path C nested undo: disk + forward apply succeeded, but the
-	   resulting record's trx_id is still not visible to the view, so
-	   we walk undo from the disk-applied frame. Separates 5-way
-	   breakdown: "Old Page + Redo only" (path_c − this) vs
-	   "Old Page + Undo" (this). */
-	MONITOR_NVDIMM_PPL_LLT_PATH_C_NESTED_UNDO_CALLS,
-	MONITOR_NVDIMM_PPL_LLT_PATH_C_NESTED_UNDO_US_SUM,
-	/* Disk-too-new + undo from disk: read disk old_page, find it's
-	   already newer than view → skip forward apply, do nested undo
-	   from disk frame's record. Shorter walk than falling back to
-	   "latest BP + undo" (path 5). */
-	MONITOR_NVDIMM_PPL_LLT_PATH_C_DISK_UNDO_CALLS,
-	MONITOR_NVDIMM_PPL_LLT_PATH_C_DISK_UNDO_US_SUM,
-	MONITOR_NVDIMM_PPL_LLT_PATH_C_DISK_UNDO_LEN_SUM,
 
 	/* Vanilla (no PPL) baseline counters for the LLT "Latest page + Undo"
 	   path. Recorded only when UNIV_NVDIMM_PPL is not defined; mirrors

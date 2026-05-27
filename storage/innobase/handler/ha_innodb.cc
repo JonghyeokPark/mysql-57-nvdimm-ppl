@@ -4305,6 +4305,20 @@ innobase_start_trx_and_assign_read_view(
 		if (trx->read_view != NULL) {
 			bool is_llt = THDVAR(thd, is_llt);
 			trx->read_view->m_is_llt = is_llt;
+#ifdef UNIV_NVDIMM_PPL
+			/* g_oldest_active_view_ts tracks LLT-only oldest view.
+			   Updated here (after m_is_llt is set) so OLTP views
+			   don't trigger OPPL capture. */
+			if (is_llt) {
+				trx_id_t new_ts = trx->read_view->low_limit_id();
+				trx_id_t cur = __atomic_load_n(
+					&g_oldest_active_view_ts, __ATOMIC_RELAXED);
+				if (cur == 0 || new_ts < cur) {
+					__atomic_store_n(&g_oldest_active_view_ts,
+						new_ts, __ATOMIC_RELEASE);
+				}
+			}
+#endif
 		}
 	} else {
 		push_warning_printf(thd, Sql_condition::SL_WARNING,

@@ -605,20 +605,8 @@ MVCC::view_open(ReadView*& view, trx_t* trx)
 		   it to true after assign-read-view if the session var
 		   `innodb_is_llt` is set. */
 		view->m_is_llt = false;
-#ifdef UNIV_NVDIMM_PPL
-		/* PPL-MV: track oldest active view's start_ts. We're under
-		   trx_sys_mutex so writers don't race; just check-then-store
-		   with RELEASE so de-PPL readers see the new value. */
-		{
-			trx_id_t new_ts = view->low_limit_id();
-			trx_id_t cur = __atomic_load_n(
-				&g_oldest_active_view_ts, __ATOMIC_RELAXED);
-			if (cur == 0 || new_ts < cur) {
-				__atomic_store_n(&g_oldest_active_view_ts,
-					new_ts, __ATOMIC_RELEASE);
-			}
-		}
-#endif
+		/* g_oldest_active_view_ts is now updated only for LLT views,
+		   in ha_innodb.cc after m_is_llt is set. */
 	}
 
 	trx_sys_mutex_exit();
@@ -777,14 +765,13 @@ MVCC::view_close(ReadView*& view, bool own_mutex)
 		view = reinterpret_cast<ReadView*>(p & ~1);
 
 #ifdef UNIV_NVDIMM_PPL
-		/* PPL-MVCC: if this view was the global oldest, recompute
-		   the new oldest among the remaining active views. We're
-		   inside trx_sys_mutex so iterating m_views is safe. */
+		/* PPL-MVCC: if this LLT view was the global oldest, recompute
+		   the new oldest among the remaining active LLT views. */
 		trx_id_t closing_ts = view->low_limit_id();
+		bool was_llt = view->m_is_llt;
 		trx_id_t cur = __atomic_load_n(
 			&g_oldest_active_view_ts, __ATOMIC_RELAXED);
-		bool need_recompute = (cur == closing_ts);
-		bool was_llt = view->m_is_llt;
+		bool need_recompute = was_llt && (cur == closing_ts);
 #endif
 
 		view->close();
@@ -798,7 +785,7 @@ MVCC::view_close(ReadView*& view, bool own_mutex)
 			for (ReadView* v = UT_LIST_GET_FIRST(m_views);
 			     v != NULL;
 			     v = UT_LIST_GET_NEXT(m_view_list, v)) {
-				if (v->is_closed()) continue;
+				if (v->is_closed() || !v->m_is_llt) continue;
 				trx_id_t v_ts = v->low_limit_id();
 				if (new_oldest == 0 || v_ts < new_oldest) {
 					new_oldest = v_ts;

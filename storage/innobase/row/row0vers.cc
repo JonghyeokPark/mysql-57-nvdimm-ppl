@@ -1310,19 +1310,15 @@ int buffer_miss_cnt = 0;
 				(mon_type_t)elapsed_us);
 			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_STOCK_US_MAX,
 				(mon_type_t)elapsed_us);
-			if (is_llt) {
-				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_CALLS);
-				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_LEN_SUM,
+			/* LLT: only count LATEST_UNDO_STOCK (fallback after nvdimm DB_FAIL).
+			   Non-fallback stock undo is the internal walk inside SNAP_UNDO,
+			   already accounted there. */
+			if (is_llt && tls_llt_undo_is_fallback) {
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_STOCK_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_STOCK_LEN_SUM,
 					(mon_type_t)version_build_cnt);
-				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_US_SUM,
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_STOCK_US_SUM,
 					(mon_type_t)elapsed_us);
-				if (tls_llt_undo_is_fallback) {
-					MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_FB_CALLS);
-					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_FB_LEN_SUM,
-						(mon_type_t)version_build_cnt);
-					MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_STOCK_FB_US_SUM,
-						(mon_type_t)elapsed_us);
-				}
 			}
 		} else if (tname && strstr(tname, "/warehouse") != NULL) {
 			MONITOR_INC(MONITOR_NVDIMM_PPL_UNDO_WH_CALLS);
@@ -1336,19 +1332,21 @@ int buffer_miss_cnt = 0;
 				(mon_type_t)elapsed_us);
 			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_WH_US_MAX,
 				(mon_type_t)elapsed_us);
+			/* Warehouse never goes through OPPL → every LLT undo here
+			   is LATEST_UNDO_WAREHOUSE (from BP latest). */
 			if (is_llt) {
-				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_UNDO_WH_CALLS);
-				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_WH_LEN_SUM,
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_WAREHOUSE_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_WAREHOUSE_LEN_SUM,
 					(mon_type_t)version_build_cnt);
-				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_WH_US_SUM,
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_WAREHOUSE_US_SUM,
 					(mon_type_t)elapsed_us);
 			}
 		} else if (tname && strstr(tname, "/district") != NULL) {
 			if (is_llt) {
-				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_UNDO_DISTRICT_CALLS);
-				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_DISTRICT_LEN_SUM,
+				MONITOR_INC(MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_DISTRICT_CALLS);
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_DISTRICT_LEN_SUM,
 					(mon_type_t)version_build_cnt);
-				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_UNDO_DISTRICT_US_SUM,
+				MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_LLT_LATEST_UNDO_DISTRICT_US_SUM,
 					(mon_type_t)elapsed_us);
 			}
 		}

@@ -1182,6 +1182,16 @@ buf_flush_write_block_low(
 			oppl_spill_page(bpage);
 			/* fall through to real .ibd write below */
 		}
+		else if (bpage->id.space() == llt_space_id
+		    && get_flag(&(bpage->flags), NORMALIZE)
+		    && !get_flag(&(bpage->flags), OPPL_BACKED)
+			&& bpage->normalize_cause == 2) {
+			/* Stock + LLT active + non-OPPL + about to .ibd write:
+			   spill snapshot first so future LLT reads find SNAP path
+			   instead of going OLD path + reading post-flush .ibd. */
+			oppl_spill_page(bpage);
+			/* fall through to real .ibd write below */
+		}
 
 		if(check_can_be_pplized(bpage)){
 			if(get_flag(&(bpage->flags), DIRECTLY_WRITE)){
