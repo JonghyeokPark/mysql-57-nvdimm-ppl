@@ -977,7 +977,9 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 
 		if(get_flag(&(buf_page->flags), PPLIZED)){
 			if(get_ppl_length_from_ppl_header(buf_page) + log_len > nvdimm_info->max_ppl_size){
-				if (buf_page->id.space() == llt_space_id) {
+				if (buf_page->id.space() == llt_space_id
+				 || buf_page->id.space() == llt_space_id_wh
+				 || buf_page->id.space() == llt_space_id_dist) {
 					oppl_mark_backed_for_ppl_max(buf_page);
 				}
 				if (get_flag(&(buf_page->flags), OPPL_BACKED)) {
@@ -989,7 +991,43 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 		copy_log_to_ppl_directly(body, log_len, type, buf_page, trx_id);
 	}
 	else{
-		if(((buf_block_t *)buf_page)->in_memory_ppl_buf.size() + log_len > nvdimm_info->max_ppl_size){
+		/* Default PPL_MAX cap (256B). If page is OPPL-eligible AND not yet
+		   OPPL-backed, allow chain to grow up to ~OPPL segment size so the
+		   first spilled snap captures more pre-view entries.
+		   (Flag check is lock-free; OPPL_BACKED ↔ oppl_table entry 1:1.) */
+		ulint cap = nvdimm_info->max_ppl_size;
+		if ((buf_page->id.space() == llt_space_id
+		  || buf_page->id.space() == llt_space_id_wh
+		  || buf_page->id.space() == llt_space_id_dist)
+		 && !get_flag(&(buf_page->flags), OPPL_BACKED)) {
+			cap = OPPL_SEG_BYTES - OPPL_SEG_HEADER_SIZE - 64;
+		}
+		ulint cur_mem = ((buf_block_t *)buf_page)->in_memory_ppl_buf.size();
+		if(cur_mem + log_len > cap){
+			/* trace: 어떤 페이지/cap에서 reject 일어나는지 확인 */
+			static ulint __reject_default = 0;
+			static ulint __reject_extended = 0;
+			if (cap > nvdimm_info->max_ppl_size) {
+				++__reject_extended;
+				if (__reject_extended <= 20 || __reject_extended % 1000 == 0) {
+					fprintf(stderr,
+						"REJECT_EXT n=%lu page=(%u,%u) cur=%lu log=%lu cap=%lu\n",
+						__reject_extended,
+						buf_page->id.space(), buf_page->id.page_no(),
+						(unsigned long)cur_mem, (unsigned long)log_len,
+						(unsigned long)cap);
+				}
+			} else {
+				++__reject_default;
+				if (__reject_default <= 5 || __reject_default % 100000 == 0) {
+					fprintf(stderr,
+						"REJECT_DEF n=%lu page=(%u,%u) cur=%lu log=%lu cap=%lu\n",
+						__reject_default,
+						buf_page->id.space(), buf_page->id.page_no(),
+						(unsigned long)cur_mem, (unsigned long)log_len,
+						(unsigned long)cap);
+				}
+			}
 			set_normalize_flag(buf_page, 2);
 			return;
 		}

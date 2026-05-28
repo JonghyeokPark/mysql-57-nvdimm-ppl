@@ -80,7 +80,9 @@ bool oppl_should_track_page(buf_page_t* bpage)
 		return false;
 	}
 
-	return bpage->id.space() == llt_space_id
+	return (bpage->id.space() == llt_space_id
+	     || bpage->id.space() == llt_space_id_wh
+	     || bpage->id.space() == llt_space_id_dist)
 		&& __atomic_load_n(&g_oldest_active_view_ts, __ATOMIC_ACQUIRE) != 0;
 }
 
@@ -397,8 +399,10 @@ bool oppl_spill_page(buf_page_t* bpage)
 	if (!g_oppl_initialized || g_oppl_fd < 0 || bpage == NULL) {
 		return false;
 	}
-	/* OPPL is stock-only AND only meaningful while an LLT view is active. */
-	if (bpage->id.space() != llt_space_id) {
+	/* OPPL targets stock + warehouse + district; only meaningful while LLT view active. */
+	if (bpage->id.space() != llt_space_id
+	 && bpage->id.space() != llt_space_id_wh
+	 && bpage->id.space() != llt_space_id_dist) {
 		return false;
 	}
 	if (__atomic_load_n(&g_oldest_active_view_ts, __ATOMIC_ACQUIRE) == 0) {
@@ -1096,6 +1100,34 @@ bool check_can_be_skip(buf_page_t *bpage) {
 //Dynamic 영역을 가지고 있는 checkpoint page인지 확인하기.
 bool check_can_be_pplized(buf_page_t *bpage) {
     if (get_flag(&(bpage->flags), NORMALIZE)) {
+        /* trace: warehouse / district 페이지가 NORMALIZE 진입 시 in_memory PPL size 로깅 */
+        if (bpage->id.space() == llt_space_id_wh) {
+            ulint imem = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
+            ulint plen = bpage->ppl_length;
+            static ulint __wh_norm = 0;
+            ++__wh_norm;
+            if (__wh_norm <= 20 || __wh_norm % 5000 == 0) {
+                fprintf(stderr,
+                    "WH_NORMALIZE n=%lu page=(%u,%u) in_mem_ppl=%lu ppl_length=%lu PPLIZED=%d OPPL_BACKED=%d\n",
+                    __wh_norm,
+                    bpage->id.space(), bpage->id.page_no(),
+                    (unsigned long)imem, (unsigned long)plen,
+                    get_flag(&(bpage->flags), PPLIZED) ? 1 : 0,
+                    get_flag(&(bpage->flags), OPPL_BACKED) ? 1 : 0);
+            }
+        } else if (bpage->id.space() == llt_space_id_dist) {
+            ulint imem = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
+            ulint plen = bpage->ppl_length;
+            static ulint __dist_norm = 0;
+            ++__dist_norm;
+            fprintf(stderr,
+                "DIST_NORMALIZE n=%lu page=(%u,%u) in_mem_ppl=%lu ppl_length=%lu PPLIZED=%d OPPL_BACKED=%d\n",
+                __dist_norm,
+                bpage->id.space(), bpage->id.page_no(),
+                (unsigned long)imem, (unsigned long)plen,
+                get_flag(&(bpage->flags), PPLIZED) ? 1 : 0,
+                get_flag(&(bpage->flags), OPPL_BACKED) ? 1 : 0);
+        }
         return false;
     }
 

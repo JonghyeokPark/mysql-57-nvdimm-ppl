@@ -396,6 +396,7 @@ extern ulong	srv_force_recovery_crash;
 /* mvcc-ppl */
 extern ulint	llt_space_id;
 extern ulint	llt_space_id_wh;
+extern ulint	llt_space_id_dist;
 /* end */
 extern ulint	srv_fast_shutdown;	/*!< If this is 1, do not do a
 					

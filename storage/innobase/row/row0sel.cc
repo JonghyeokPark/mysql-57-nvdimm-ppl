@@ -797,7 +797,7 @@ row_sel_build_prev_vers(
 
 	{
 		ulint sp = dict_index_get_space(index);
-		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh);
+		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh || sp == llt_space_id_dist);
 		bool has_chain = get_flag(&(bpage->flags), PPLIZED)
 		              && !get_flag(&(bpage->flags), NORMALIZE);
 		bool has_oppl = oppl_has_entry(bpage->id);
@@ -3685,7 +3685,7 @@ row_sel_build_prev_vers_for_mysql(
 
 	{
 		ulint sp = dict_index_get_space(clust_index);
-		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh);
+		bool is_target = (sp == llt_space_id || sp == llt_space_id_wh || sp == llt_space_id_dist);
 		bool has_chain = get_flag(&(bpage->flags), PPLIZED)
 		              && !get_flag(&(bpage->flags), NORMALIZE);
 		bool has_oppl = oppl_has_entry(bpage->id);

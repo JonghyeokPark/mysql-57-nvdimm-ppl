@@ -1182,7 +1182,9 @@ buf_flush_write_block_low(
 			oppl_spill_page(bpage);
 			/* fall through to real .ibd write below */
 		}
-		else if (bpage->id.space() == llt_space_id
+		else if ((bpage->id.space() == llt_space_id
+		      || bpage->id.space() == llt_space_id_wh
+		      || bpage->id.space() == llt_space_id_dist)
 		    && get_flag(&(bpage->flags), NORMALIZE)
 		    && !get_flag(&(bpage->flags), OPPL_BACKED)
 			&& bpage->normalize_cause == 2) {
