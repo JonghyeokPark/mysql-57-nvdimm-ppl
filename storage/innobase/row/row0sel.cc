@@ -3690,9 +3690,7 @@ row_sel_build_prev_vers_for_mysql(
 		              && !get_flag(&(bpage->flags), NORMALIZE);
 		bool has_oppl = oppl_has_entry(bpage->id);
 		if (is_target
-		    && page_get_max_trx_id(block->frame) != 0
 		    && page_is_leaf(block->frame)
-		    && bpage->io_fix == BUF_IO_NONE
 		    && buf_page_in_file(bpage)
 		    && (has_chain || has_oppl)) {
 			use_nvdimm_for_vers_build = true;

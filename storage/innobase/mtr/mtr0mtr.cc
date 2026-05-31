@@ -41,6 +41,7 @@ Created 11/26/1995 Heikki Tuuri
 
 #ifdef UNIV_NVDIMM_PPL
 #include "nvdimm-ppl.h"
+#include "data0type.h"
 #endif
 
 /** Iterate over a memo block in reverse. */
@@ -1004,30 +1005,6 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 		}
 		ulint cur_mem = ((buf_block_t *)buf_page)->in_memory_ppl_buf.size();
 		if(cur_mem + log_len > cap){
-			/* trace: 어떤 페이지/cap에서 reject 일어나는지 확인 */
-			static ulint __reject_default = 0;
-			static ulint __reject_extended = 0;
-			if (cap > nvdimm_info->max_ppl_size) {
-				++__reject_extended;
-				if (__reject_extended <= 20 || __reject_extended % 1000 == 0) {
-					fprintf(stderr,
-						"REJECT_EXT n=%lu page=(%u,%u) cur=%lu log=%lu cap=%lu\n",
-						__reject_extended,
-						buf_page->id.space(), buf_page->id.page_no(),
-						(unsigned long)cur_mem, (unsigned long)log_len,
-						(unsigned long)cap);
-				}
-			} else {
-				++__reject_default;
-				if (__reject_default <= 5 || __reject_default % 100000 == 0) {
-					fprintf(stderr,
-						"REJECT_DEF n=%lu page=(%u,%u) cur=%lu log=%lu cap=%lu\n",
-						__reject_default,
-						buf_page->id.space(), buf_page->id.page_no(),
-						(unsigned long)cur_mem, (unsigned long)log_len,
-						(unsigned long)cap);
-				}
-			}
 			set_normalize_flag(buf_page, 2);
 			return;
 		}

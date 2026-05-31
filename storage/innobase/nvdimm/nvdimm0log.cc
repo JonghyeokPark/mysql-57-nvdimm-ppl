@@ -31,6 +31,7 @@
 #include "trx0sys.h"
 #include "row0vers.h"
 #include "trx0undo.h"
+#include "data0type.h"
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -368,30 +369,131 @@ struct oppl_pending_copy_t {
 	}
 };
 
+/* Parse rec_off (page byte offset of the record) from a type=41
+   MLOG_COMP_REC_UPDATE_IN_PLACE body. ULINT_UNDEFINED on failure. */
+static ulint
+oppl_t41_rec_off(const byte* body, ulint body_len)
+{
+	const byte* p  = body;
+	const byte* eb = body + body_len;
+	if ((ulint)(eb - p) < 4) return ULINT_UNDEFINED;
+	ulint nd = mach_read_from_2(p); p += 2;
+	p += 2; /* n_uniq */
+	if ((ulint)(eb - p) < nd * 2) return ULINT_UNDEFINED;
+	p += nd * 2;
+	if (p >= eb) return ULINT_UNDEFINED;
+	p += 1; /* flags */
+	mach_parse_compressed(&p, eb); /* pos */
+	if (p == NULL || (ulint)(eb - p) < DATA_ROLL_PTR_LEN) return ULINT_UNDEFINED;
+	p += DATA_ROLL_PTR_LEN;
+	mach_u64_parse_compressed(&p, eb); /* trx_id */
+	if (p == NULL || (ulint)(eb - p) < 2) return ULINT_UNDEFINED;
+	return mach_read_from_2(p);
+}
+
+/* View-aware coalescing of a linearized PPL entry stream (warehouse/district
+   hot pages). Entry layout: 1B type + 2B body_len + 8B trx_id + body.
+     - trx >= view_low (post-view): dropped — the current LLT view can't see
+       these; they are not needed to rebuild its visible version.
+     - trx <  view_low (pre-view): for type=41 keep only the LATEST entry per
+       rec_off (older same-record redo is shadowed by it for this view); other
+       types kept verbatim.
+   Time order is preserved in the output. Returns bytes written to `out`. */
+static ulint
+oppl_compact_view(const byte* raw, ulint raw_len, trx_id_t view_low,
+                  byte* out, ulint cap)
+{
+	const ulint MAXE = 8192;
+	ulint* offs = static_cast<ulint*>(ut_malloc_nokey(MAXE * sizeof(ulint)));
+	byte*  keep = static_cast<byte*>(ut_malloc_nokey(MAXE));
+	if (offs == NULL || keep == NULL) {
+		if (offs) ut_free(offs);
+		if (keep) ut_free(keep);
+		/* Fallback: straight copy if it fits. */
+		if (raw_len <= cap) { memcpy(out, raw, raw_len); return raw_len; }
+		return 0;
+	}
+
+	/* 1. index entry boundaries */
+	ulint n = 0, pos = 0;
+	while (pos + APPLY_LOG_HDR_SIZE <= raw_len && n < MAXE) {
+		ulint body_len = mach_read_from_2(raw + pos + 1);
+		if (pos + APPLY_LOG_HDR_SIZE + body_len > raw_len) break;
+		offs[n++] = pos;
+		pos += APPLY_LOG_HDR_SIZE + body_len;
+	}
+
+	/* 2. decide keep, newest -> oldest */
+	ulint seen[1024]; ulint seen_n = 0;
+	for (ulint i = n; i-- > 0; ) {
+		const byte* e = raw + offs[i];
+		mlog_id_t type = (mlog_id_t)mach_read_from_1(e);
+		ulint body_len = mach_read_from_2(e + 1);
+		trx_id_t trx = mach_read_from_8(e + 3);
+		const byte* body = e + APPLY_LOG_HDR_SIZE;
+		if (trx >= view_low) { keep[i] = 0; continue; }      /* post-view: drop */
+		if (type != 41) { keep[i] = 1; continue; }
+		ulint ro = oppl_t41_rec_off(body, body_len);
+		if (ro == ULINT_UNDEFINED) { keep[i] = 1; continue; }
+		bool dup = false;
+		for (ulint k = 0; k < seen_n; k++) if (seen[k] == ro) { dup = true; break; }
+		if (dup) { keep[i] = 0; continue; }                  /* shadowed */
+		if (seen_n < 1024) seen[seen_n++] = ro;
+		keep[i] = 1;
+	}
+
+	/* 3. emit kept entries in time order */
+	ulint w = 0;
+	for (ulint i = 0; i < n; i++) {
+		if (!keep[i]) continue;
+		ulint body_len = mach_read_from_2(raw + offs[i] + 1);
+		ulint elen = APPLY_LOG_HDR_SIZE + body_len;
+		if (w + elen > cap) break;
+		memcpy(out + w, raw + offs[i], elen);
+		w += elen;
+	}
+
+	ut_free(offs);
+	ut_free(keep);
+	return w;
+}
+
 static ulint
 oppl_linearize_page_logs(buf_page_t* bpage, byte* out, ulint cap)
 {
-	ulint copied = oppl_linearize_ppl_chain(bpage, out, cap);
-	if (copied == 0) {
-		return 0;
-	}
+	/* Gather NVDIMM chain + in_memory_ppl_buf into a scratch buffer in
+	   time order, then compact for warehouse/district. */
+	const ulint RAW_CAP = 128 * 1024;
+	byte* raw = static_cast<byte*>(ut_malloc_nokey(RAW_CAP));
+	if (raw == NULL) return 0;
 
+	ulint raw_len = oppl_linearize_ppl_chain(bpage, raw, RAW_CAP);
 	buf_block_t* block = reinterpret_cast<buf_block_t*>(bpage);
 	ulint pending_len = block->in_memory_ppl_buf.size();
-	if (pending_len == 0) {
-		return copied;
-	}
-	if (copied + pending_len > cap) {
-		return 0;
-	}
-
-	oppl_pending_copy_t pending_copy;
-	pending_copy.init(out, cap, copied);
-	if (!block->in_memory_ppl_buf.for_each_block(pending_copy)) {
-		return 0;
+	if (pending_len > 0 && raw_len + pending_len <= RAW_CAP) {
+		oppl_pending_copy_t pending_copy;
+		pending_copy.init(raw, RAW_CAP, raw_len);
+		if (block->in_memory_ppl_buf.for_each_block(pending_copy)) {
+			raw_len = pending_copy.copied;
+		}
 	}
 
-	return pending_copy.copied;
+	if (raw_len == 0) { ut_free(raw); return 0; }
+
+	ulint result;
+	if (bpage->id.space() == llt_space_id_wh
+	 || bpage->id.space() == llt_space_id_dist) {
+		trx_id_t view_low = __atomic_load_n(
+			&g_oldest_active_view_ts, __ATOMIC_ACQUIRE);
+		result = oppl_compact_view(raw, raw_len, view_low, out, cap);
+	} else {
+		/* stock and others: straight copy (already fits cap). */
+		if (raw_len <= cap) { memcpy(out, raw, raw_len); result = raw_len; }
+		else result = 0;
+	}
+
+	ut_free(raw);
+	return result;
 }
 
 bool oppl_spill_page(buf_page_t* bpage)
@@ -408,6 +510,8 @@ bool oppl_spill_page(buf_page_t* bpage)
 	if (__atomic_load_n(&g_oldest_active_view_ts, __ATOMIC_ACQUIRE) == 0) {
 		return false;
 	}
+
+	bool __wh = (bpage->id.space() == llt_space_id_wh);
 
 	/* Quick exists check (short critical section). */
 	mutex_enter(&g_oppl_mutex);
@@ -468,13 +572,14 @@ bool oppl_spill_page(buf_page_t* bpage)
 			if (cw == (ssize_t)chain_len) {
 				ok = true;
 				set_flag(&(bpage->flags), OPPL_BACKED);
-				static ulint __cap_ok = 0;
-				if (++__cap_ok <= 5 || __cap_ok % 1000 == 0) {
-					fprintf(stderr,
-						"OPPL=CAPTURE call=%lu page=(%u,%u) slot=%lu chain=%lu\n",
-						__cap_ok,
-						bpage->id.space(), bpage->id.page_no(),
-						(unsigned long)slot_off, (unsigned long)chain_len);
+				if (bpage->id.space() == llt_space_id_wh) {
+					static ulint __cap_ok = 0;
+					if (++__cap_ok <= 30 || __cap_ok % 1000 == 0)
+						fprintf(stderr,
+							"OPPL=CAPTURE call=%lu page=(%u,%u) slot=%lu chain=%lu\n",
+							__cap_ok,
+							bpage->id.space(), bpage->id.page_no(),
+							(unsigned long)slot_off, (unsigned long)chain_len);
 				}
 			}
 		}
@@ -527,7 +632,7 @@ void oppl_drain_all(void)
 	mutex_exit(&g_oppl_mutex);
 	__atomic_store_n(&g_oppl_next_offset, 0, __ATOMIC_RELEASE);
 	oppl_cache_drain();
-	fprintf(stderr, "OPPL=DRAIN entries=%lu\n", (unsigned long)n);
+	(void)n;
 }
 
 bool ppl_is_llt_view(const ReadView* view) {
@@ -1101,33 +1206,33 @@ bool check_can_be_skip(buf_page_t *bpage) {
 bool check_can_be_pplized(buf_page_t *bpage) {
     if (get_flag(&(bpage->flags), NORMALIZE)) {
         /* trace: warehouse / district 페이지가 NORMALIZE 진입 시 in_memory PPL size 로깅 */
-        if (bpage->id.space() == llt_space_id_wh) {
-            ulint imem = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
-            ulint plen = bpage->ppl_length;
-            static ulint __wh_norm = 0;
-            ++__wh_norm;
-            if (__wh_norm <= 20 || __wh_norm % 5000 == 0) {
-                fprintf(stderr,
-                    "WH_NORMALIZE n=%lu page=(%u,%u) in_mem_ppl=%lu ppl_length=%lu PPLIZED=%d OPPL_BACKED=%d\n",
-                    __wh_norm,
-                    bpage->id.space(), bpage->id.page_no(),
-                    (unsigned long)imem, (unsigned long)plen,
-                    get_flag(&(bpage->flags), PPLIZED) ? 1 : 0,
-                    get_flag(&(bpage->flags), OPPL_BACKED) ? 1 : 0);
-            }
-        } else if (bpage->id.space() == llt_space_id_dist) {
-            ulint imem = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
-            ulint plen = bpage->ppl_length;
-            static ulint __dist_norm = 0;
-            ++__dist_norm;
-            fprintf(stderr,
-                "DIST_NORMALIZE n=%lu page=(%u,%u) in_mem_ppl=%lu ppl_length=%lu PPLIZED=%d OPPL_BACKED=%d\n",
-                __dist_norm,
-                bpage->id.space(), bpage->id.page_no(),
-                (unsigned long)imem, (unsigned long)plen,
-                get_flag(&(bpage->flags), PPLIZED) ? 1 : 0,
-                get_flag(&(bpage->flags), OPPL_BACKED) ? 1 : 0);
-        }
+        // if (bpage->id.space() == llt_space_id_wh) {
+        //     ulint imem = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
+        //     ulint plen = bpage->ppl_length;
+        //     static ulint __wh_norm = 0;
+        //     ++__wh_norm;
+        //     if (__wh_norm <= 20 || __wh_norm % 5000 == 0) {
+        //         fprintf(stderr,
+        //             "WH_NORMALIZE n=%lu page=(%u,%u) in_mem_ppl=%lu ppl_length=%lu PPLIZED=%d OPPL_BACKED=%d\n",
+        //             __wh_norm,
+        //             bpage->id.space(), bpage->id.page_no(),
+        //             (unsigned long)imem, (unsigned long)plen,
+        //             get_flag(&(bpage->flags), PPLIZED) ? 1 : 0,
+        //             get_flag(&(bpage->flags), OPPL_BACKED) ? 1 : 0);
+        //     }
+        // } else if (bpage->id.space() == llt_space_id_dist) {
+        //     ulint imem = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
+        //     ulint plen = bpage->ppl_length;
+        //     static ulint __dist_norm = 0;
+        //     ++__dist_norm;
+        //     fprintf(stderr,
+        //         "DIST_NORMALIZE n=%lu page=(%u,%u) in_mem_ppl=%lu ppl_length=%lu PPLIZED=%d OPPL_BACKED=%d\n",
+        //         __dist_norm,
+        //         bpage->id.space(), bpage->id.page_no(),
+        //         (unsigned long)imem, (unsigned long)plen,
+        //         get_flag(&(bpage->flags), PPLIZED) ? 1 : 0,
+        //         get_flag(&(bpage->flags), OPPL_BACKED) ? 1 : 0);
+        // }
         return false;
     }
 
@@ -1301,7 +1406,7 @@ can_page_be_pplized(
 		(ptype == FIL_PAGE_INDEX || ptype == FIL_PAGE_RTREE) &&
 		page_is_leaf(((buf_block_t *)buf_page)->frame) &&
 		buf_page_in_file(buf_page) &&
-		page_id.page_no() > 7){
+		page_id.page_no() > 3){
 		return true;
 	}
 	set_normalize_flag(buf_page, 4);
