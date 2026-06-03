@@ -118,10 +118,11 @@ struct oppl_cache_slot_t {
 	byte*    buf;            /* 8KB aligned, lazy alloc */
 	ulint    chunks_len;     /* 0 if snap-only */
 	uint8_t  ref_bit;
+	int      refcount;       /* >0 = pinned: in use by a reader, must not evict */
 	bool     used;
-	oppl_cache_slot_t() : key(0), buf(NULL), chunks_len(0), ref_bit(0), used(false) {}
+	oppl_cache_slot_t() : key(0), buf(NULL), chunks_len(0), ref_bit(0), refcount(0), used(false) {}
 };
-const size_t OPPL_CACHE_CAP = (1024ULL * 1024 * 1024) / (2 * OPPL_SEG_BYTES);  /* 131072 slots */
+const size_t OPPL_CACHE_CAP = (16ULL * 1024 * 1024) / (2 * OPPL_SEG_BYTES);  /* 131072 slots */
 std::vector<oppl_cache_slot_t> g_oppl_cache_slots(OPPL_CACHE_CAP);
 std::tr1::unordered_map<uint64_t, size_t> g_oppl_cache_idx;
 size_t g_oppl_cache_hand = 0;
@@ -142,6 +143,9 @@ static size_t oppl_cache_acquire_slot()
 		if (!g_oppl_cache_slots[i].used) {
 			g_oppl_cache_hand = (i + 1) % OPPL_CACHE_CAP;
 			return i;
+		}
+		if (g_oppl_cache_slots[i].refcount > 0) {
+			continue;  /* pinned: a reader holds slot pointers — never evict */
 		}
 		if (g_oppl_cache_slots[i].ref_bit == 0) {
 			g_oppl_cache_idx.erase(g_oppl_cache_slots[i].key);
@@ -166,9 +170,15 @@ void oppl_cache_drain(void) {
 	mutex_exit(&g_oppl_cache_mutex);
 }
 
-/* Cache-backed load. Returns pointers into cache buffer. */
+/* Cache-backed load. Copies the 8KB slot (snap + chunks) into the
+   slot, PINS it (refcount++) and returns pointers INTO the slot buffer plus
+   the slot index in *pinned_slot_out. The caller must oppl_cache_unpin() that
+   slot when done. While pinned, oppl_cache_acquire_slot() skips the slot, so it
+   can't be evicted/overwritten mid-use — fixes the use-after-eviction race
+   without copying. */
 bool oppl_load_for_llt(const page_id_t& page_id,
-		byte** snap_out, byte** chunks_ptr_out, ulint* chunks_len_out)
+		byte** snap_out, byte** chunks_ptr_out, ulint* chunks_len_out,
+		size_t* pinned_slot_out)
 {
 	if (!g_oppl_initialized || g_oppl_fd < 0) return false;
 
@@ -191,8 +201,10 @@ bool oppl_load_for_llt(const page_id_t& page_id,
 	if (cidx != g_oppl_cache_idx.end()) {
 		size_t s = cidx->second;
 		g_oppl_cache_slots[s].ref_bit = 1;
-		*snap_out = g_oppl_cache_slots[s].buf;
+		g_oppl_cache_slots[s].refcount++;
+		*pinned_slot_out = s;
 		*chunks_len_out = g_oppl_cache_slots[s].chunks_len;
+		*snap_out = g_oppl_cache_slots[s].buf;
 		*chunks_ptr_out = (*chunks_len_out > 0)
 			? g_oppl_cache_slots[s].buf + OPPL_SEG_BYTES + OPPL_SEG_HEADER_SIZE
 			: NULL;
@@ -219,7 +231,14 @@ bool oppl_load_for_llt(const page_id_t& page_id,
 
 	const size_t SLOT = 2 * OPPL_SEG_BYTES;
 	ssize_t r = ::pread(g_oppl_fd, g_oppl_cache_slots[slot].buf, SLOT, slot_off);
-	if (r != (ssize_t)SLOT) {
+	/* The most-recently-spilled slot is NOT padded to the full 8KB: spill
+	   writes snap(4KB) + header + chunks only, so the file tail = slot_off +
+	   4096 + header + chunk_len < slot_off + 8192 until the NEXT spill extends
+	   it. Requiring exactly 8192 made the newest entry unreadable → its page
+	   (has_oppl=1) wrongly fell to OLD_REDO. Accept a short read as long as
+	   snapshot + chunk-length header are present, then validate the chunk bytes
+	   are fully there. */
+	if (r < (ssize_t)(OPPL_SEG_BYTES + OPPL_SEG_HEADER_SIZE)) {
 		mutex_exit(&g_oppl_cache_mutex);
 		return false;
 	}
@@ -227,13 +246,19 @@ bool oppl_load_for_llt(const page_id_t& page_id,
 	ulint cl = (ulint)mach_read_from_8(
 		g_oppl_cache_slots[slot].buf + OPPL_SEG_BYTES);
 	if (cl + OPPL_SEG_HEADER_SIZE > OPPL_SEG_BYTES) cl = 0;
+	if (r < (ssize_t)(OPPL_SEG_BYTES + OPPL_SEG_HEADER_SIZE + cl)) {
+		mutex_exit(&g_oppl_cache_mutex);
+		return false;
+	}
 
 	g_oppl_cache_slots[slot].key = key;
 	g_oppl_cache_slots[slot].chunks_len = cl;
 	g_oppl_cache_slots[slot].ref_bit = 1;
+	g_oppl_cache_slots[slot].refcount++;
 	g_oppl_cache_slots[slot].used = true;
 	g_oppl_cache_idx[key] = slot;
 
+	*pinned_slot_out = slot;
 	*snap_out = g_oppl_cache_slots[slot].buf;
 	*chunks_len_out = cl;
 	*chunks_ptr_out = (cl > 0)
@@ -243,11 +268,31 @@ bool oppl_load_for_llt(const page_id_t& page_id,
 	return true;
 }
 
+/* Unpin a slot previously pinned by oppl_load_for_llt / oppl_cache_load_old. */
+void oppl_cache_unpin(size_t slot)
+{
+	mutex_enter(&g_oppl_cache_mutex);
+	if (slot < OPPL_CACHE_CAP && g_oppl_cache_slots[slot].refcount > 0) {
+		g_oppl_cache_slots[slot].refcount--;
+	}
+	mutex_exit(&g_oppl_cache_mutex);
+}
+
+namespace {
+/* RAII: auto-unpins the pinned cache slot on every function exit path. */
+struct OpplUnpinGuard {
+	size_t slot;
+	OpplUnpinGuard() : slot((size_t)-1) {}
+	~OpplUnpinGuard() { if (slot != (size_t)-1) oppl_cache_unpin(slot); }
+};
+}
+
 /* OLD-page cache (shares g_oppl_cache_slots with OPPL snap; keys disambiguated
    by OLD_CACHE_KEY_BIT). Structurally mirrors oppl_load_for_llt: single mutex
    acquire, fil_io inside the function on miss, returns pointer to cache buf. */
 bool oppl_cache_load_old(
-	const page_id_t& page_id, const page_size_t& page_size, byte** out_ptr)
+	const page_id_t& page_id, const page_size_t& page_size,
+	byte** out_ptr, size_t* pinned_slot_out)
 {
 	uint64_t key = OLD_CACHE_KEY_BIT
 		| ((uint64_t)page_id.space() << 32) | page_id.page_no();
@@ -257,6 +302,8 @@ bool oppl_cache_load_old(
 	if (cidx != g_oppl_cache_idx.end()) {
 		size_t s = cidx->second;
 		g_oppl_cache_slots[s].ref_bit = 1;
+		g_oppl_cache_slots[s].refcount++;
+		*pinned_slot_out = s;
 		*out_ptr = g_oppl_cache_slots[s].buf;
 		mutex_exit(&g_oppl_cache_mutex);
 		return true;
@@ -287,9 +334,11 @@ bool oppl_cache_load_old(
 	g_oppl_cache_slots[slot].key = key;
 	g_oppl_cache_slots[slot].chunks_len = 0;
 	g_oppl_cache_slots[slot].ref_bit = 1;
+	g_oppl_cache_slots[slot].refcount++;
 	g_oppl_cache_slots[slot].used = true;
 	g_oppl_cache_idx[key] = slot;
 
+	*pinned_slot_out = slot;
 	*out_ptr = g_oppl_cache_slots[slot].buf;
 	mutex_exit(&g_oppl_cache_mutex);
 	return true;
@@ -391,6 +440,29 @@ oppl_t41_rec_off(const byte* body, ulint body_len)
 	return mach_read_from_2(p);
 }
 
+/* Parse the record's embedded DB_TRX_ID (sys field written by the update),
+   from a type=41 body. 0 on failure. This is the trx stored IN the record,
+   which may differ from the apply-log entry header trx_id. */
+static ib_uint64_t
+oppl_t41_rec_trx(const byte* body, ulint body_len)
+{
+	const byte* p  = body;
+	const byte* eb = body + body_len;
+	if ((ulint)(eb - p) < 4) return 0;
+	ulint nd = mach_read_from_2(p); p += 2;
+	p += 2; /* n_uniq */
+	if ((ulint)(eb - p) < nd * 2) return 0;
+	p += nd * 2;
+	if (p >= eb) return 0;
+	p += 1; /* flags */
+	mach_parse_compressed(&p, eb); /* pos */
+	if (p == NULL || (ulint)(eb - p) < DATA_ROLL_PTR_LEN) return 0;
+	p += DATA_ROLL_PTR_LEN;
+	ib_uint64_t rtrx = mach_u64_parse_compressed(&p, eb);
+	if (p == NULL) return 0;
+	return rtrx;
+}
+
 /* View-aware coalescing of a linearized PPL entry stream (warehouse/district
    hot pages). Entry layout: 1B type + 2B body_len + 8B trx_id + body.
      - trx >= view_low (post-view): dropped — the current LLT view can't see
@@ -401,7 +473,7 @@ oppl_t41_rec_off(const byte* body, ulint body_len)
    Time order is preserved in the output. Returns bytes written to `out`. */
 static ulint
 oppl_compact_view(const byte* raw, ulint raw_len, trx_id_t view_low,
-                  byte* out, ulint cap)
+                  byte* out, ulint cap, ulint space, ulint page_no)
 {
 	const ulint MAXE = 8192;
 	ulint* offs = static_cast<ulint*>(ut_malloc_nokey(MAXE * sizeof(ulint)));
@@ -424,6 +496,8 @@ oppl_compact_view(const byte* raw, ulint raw_len, trx_id_t view_low,
 	}
 
 	/* 2. decide keep, newest -> oldest */
+	static ulint __cc = 0; ulint mycc = ++__cc;   /* per-compaction call id */
+	bool trace_all = false;                 /* dump every entry of first call only */
 	ulint seen[1024]; ulint seen_n = 0;
 	for (ulint i = n; i-- > 0; ) {
 		const byte* e = raw + offs[i];
@@ -431,19 +505,33 @@ oppl_compact_view(const byte* raw, ulint raw_len, trx_id_t view_low,
 		ulint body_len = mach_read_from_2(e + 1);
 		trx_id_t trx = mach_read_from_8(e + 3);
 		const byte* body = e + APPLY_LOG_HDR_SIZE;
-		if (trx >= view_low) { keep[i] = 0; continue; }      /* post-view: drop */
-		if (type != 41) { keep[i] = 1; continue; }
-		ulint ro = oppl_t41_rec_off(body, body_len);
-		if (ro == ULINT_UNDEFINED) { keep[i] = 1; continue; }
-		bool dup = false;
-		for (ulint k = 0; k < seen_n; k++) if (seen[k] == ro) { dup = true; break; }
-		if (dup) { keep[i] = 0; continue; }                  /* shadowed */
-		if (seen_n < 1024) seen[seen_n++] = ro;
-		keep[i] = 1;
+		const char* dec;
+		if (trx >= view_low) { keep[i] = 0; dec = "DROP_postview"; }
+		else if (type != 41) { keep[i] = 1; dec = "KEEP_nontype41"; }
+		else {
+			ulint ro = oppl_t41_rec_off(body, body_len);
+			if (ro == ULINT_UNDEFINED) { keep[i] = 1; dec = "KEEP_no_recoff"; }
+			else {
+				bool dup = false;
+				for (ulint k = 0; k < seen_n; k++) if (seen[k] == ro) { dup = true; break; }
+				if (dup) { keep[i] = 0; dec = "DROP_shadowed"; }
+				else { if (seen_n < 1024) seen[seen_n++] = ro; keep[i] = 1; dec = "KEEP_latest"; }
+			}
+		}
+		if (trace_all) {
+			ulint ro_dbg = (type == 41) ? oppl_t41_rec_off(body, body_len) : ULINT_UNDEFINED;
+			ib_uint64_t rec_trx = (type == 41) ? oppl_t41_rec_trx(body, body_len) : 0;
+			fprintf(stderr, "OPPL_CMP_E call=%lu page=(%lu,%lu) i=%lu hdr_trx=%llu rec_trx=%llu type=%u rec_off=%ld view_low=%llu %s\n",
+				(unsigned long)mycc, (unsigned long)space, (unsigned long)page_no,
+				(unsigned long)i,
+				(unsigned long long)trx, (unsigned long long)rec_trx, (unsigned)type,
+				(ro_dbg == ULINT_UNDEFINED) ? -1L : (long)ro_dbg,
+				(unsigned long long)view_low, dec);
+		}
 	}
 
 	/* 3. emit kept entries in time order */
-	ulint w = 0;
+	ulint w = 0, kept_n = 0;
 	for (ulint i = 0; i < n; i++) {
 		if (!keep[i]) continue;
 		ulint body_len = mach_read_from_2(raw + offs[i] + 1);
@@ -451,6 +539,30 @@ oppl_compact_view(const byte* raw, ulint raw_len, trx_id_t view_low,
 		if (w + elen > cap) break;
 		memcpy(out + w, raw + offs[i], elen);
 		w += elen;
+		kept_n++;
+	}
+
+	{
+		/* trace: what this compaction kept vs dropped, and the boundary used */
+		trx_id_t in_min = 0, in_max = 0, kept_max = 0;
+		for (ulint i = 0; i < n; i++) {
+			trx_id_t t = mach_read_from_8(raw + offs[i] + 3);
+			if (i == 0 || t < in_min) in_min = t;
+			if (t > in_max) in_max = t;
+			if (keep[i] && t > kept_max) kept_max = t;
+		}
+		static ulint __cmp = 0;
+		if (0)
+			fprintf(stderr, "OPPL_COMPACT seq=%lu page=(%lu,%lu) view_low=%llu "
+				"before_bytes=%lu before_n=%lu in_trx=[%llu..%llu] "
+				"after_bytes=%lu after_n=%lu kept_max_trx=%llu\n",
+				(unsigned long)__cmp,
+				(unsigned long)space, (unsigned long)page_no,
+				(unsigned long long)view_low,
+				(unsigned long)raw_len, (unsigned long)n,
+				(unsigned long long)in_min, (unsigned long long)in_max,
+				(unsigned long)w, (unsigned long)kept_n,
+				(unsigned long long)kept_max);
 	}
 
 	ut_free(offs);
@@ -463,7 +575,7 @@ oppl_linearize_page_logs(buf_page_t* bpage, byte* out, ulint cap)
 {
 	/* Gather NVDIMM chain + in_memory_ppl_buf into a scratch buffer in
 	   time order, then compact for warehouse/district. */
-	const ulint RAW_CAP = 128 * 1024;
+	const ulint RAW_CAP = 1024 * 1024;  /* must hold warehouse's enlarged in-memory window */
 	byte* raw = static_cast<byte*>(ut_malloc_nokey(RAW_CAP));
 	if (raw == NULL) return 0;
 
@@ -485,11 +597,21 @@ oppl_linearize_page_logs(buf_page_t* bpage, byte* out, ulint cap)
 	 || bpage->id.space() == llt_space_id_dist) {
 		trx_id_t view_low = __atomic_load_n(
 			&g_oldest_active_view_ts, __ATOMIC_ACQUIRE);
-		result = oppl_compact_view(raw, raw_len, view_low, out, cap);
+		result = oppl_compact_view(raw, raw_len, view_low, out, cap,
+			bpage->id.space(), bpage->id.page_no());
 	} else {
-		/* stock and others: straight copy (already fits cap). */
-		if (raw_len <= cap) { memcpy(out, raw, raw_len); result = raw_len; }
-		else result = 0;
+		/* stock: fits → straight copy; over cap → GC (dead-zone compaction)
+		   instead of dropping the whole chunk set (which left a stale snap-only
+		   entry). Compaction keeps latest pre-view per record, drops the rest,
+		   so the result fits within cap. */
+		if (raw_len <= cap) {
+			memcpy(out, raw, raw_len); result = raw_len;
+		} else {
+			trx_id_t view_low = __atomic_load_n(
+				&g_oldest_active_view_ts, __ATOMIC_ACQUIRE);
+			result = oppl_compact_view(raw, raw_len, view_low, out, cap,
+				bpage->id.space(), bpage->id.page_no());
+		}
 	}
 
 	ut_free(raw);
@@ -574,7 +696,7 @@ bool oppl_spill_page(buf_page_t* bpage)
 				set_flag(&(bpage->flags), OPPL_BACKED);
 				if (bpage->id.space() == llt_space_id_wh) {
 					static ulint __cap_ok = 0;
-					if (++__cap_ok <= 30 || __cap_ok % 1000 == 0)
+					if (0)
 						fprintf(stderr,
 							"OPPL=CAPTURE call=%lu page=(%u,%u) slot=%lu chain=%lu\n",
 							__cap_ok,
@@ -1205,34 +1327,6 @@ bool check_can_be_skip(buf_page_t *bpage) {
 //Dynamic 영역을 가지고 있는 checkpoint page인지 확인하기.
 bool check_can_be_pplized(buf_page_t *bpage) {
     if (get_flag(&(bpage->flags), NORMALIZE)) {
-        /* trace: warehouse / district 페이지가 NORMALIZE 진입 시 in_memory PPL size 로깅 */
-        // if (bpage->id.space() == llt_space_id_wh) {
-        //     ulint imem = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
-        //     ulint plen = bpage->ppl_length;
-        //     static ulint __wh_norm = 0;
-        //     ++__wh_norm;
-        //     if (__wh_norm <= 20 || __wh_norm % 5000 == 0) {
-        //         fprintf(stderr,
-        //             "WH_NORMALIZE n=%lu page=(%u,%u) in_mem_ppl=%lu ppl_length=%lu PPLIZED=%d OPPL_BACKED=%d\n",
-        //             __wh_norm,
-        //             bpage->id.space(), bpage->id.page_no(),
-        //             (unsigned long)imem, (unsigned long)plen,
-        //             get_flag(&(bpage->flags), PPLIZED) ? 1 : 0,
-        //             get_flag(&(bpage->flags), OPPL_BACKED) ? 1 : 0);
-        //     }
-        // } else if (bpage->id.space() == llt_space_id_dist) {
-        //     ulint imem = ((buf_block_t *)bpage)->in_memory_ppl_buf.size();
-        //     ulint plen = bpage->ppl_length;
-        //     static ulint __dist_norm = 0;
-        //     ++__dist_norm;
-        //     fprintf(stderr,
-        //         "DIST_NORMALIZE n=%lu page=(%u,%u) in_mem_ppl=%lu ppl_length=%lu PPLIZED=%d OPPL_BACKED=%d\n",
-        //         __dist_norm,
-        //         bpage->id.space(), bpage->id.page_no(),
-        //         (unsigned long)imem, (unsigned long)plen,
-        //         get_flag(&(bpage->flags), PPLIZED) ? 1 : 0,
-        //         get_flag(&(bpage->flags), OPPL_BACKED) ? 1 : 0);
-        // }
         return false;
     }
 
@@ -1406,7 +1500,7 @@ can_page_be_pplized(
 		(ptype == FIL_PAGE_INDEX || ptype == FIL_PAGE_RTREE) &&
 		page_is_leaf(((buf_block_t *)buf_page)->frame) &&
 		buf_page_in_file(buf_page) &&
-		page_id.page_no() > 3){
+		page_id.page_no() >= 3){
 		return true;
 	}
 	set_normalize_flag(buf_page, 4);
@@ -1756,8 +1850,13 @@ nvdimm_build_prev_vers_with_redo(
 	byte* oppl_chunks_ptr = NULL;
 	ulint oppl_chunks_len = 0;
 	bool from_oppl = false;
+	/* Pin the cache slot for the duration of this call (RAII unpins on every
+	   exit). Pinned slots are skipped by the clock-sweep evictor, so the
+	   snap/chunks pointers into the slot stay valid through the whole apply —
+	   no copy, no use-after-eviction race. */
+	OpplUnpinGuard __oppl_unpin;
 	if (__is_llt && oppl_load_for_llt(bpage->id, &oppl_snap_buf,
-		&oppl_chunks_ptr, &oppl_chunks_len)) {
+		&oppl_chunks_ptr, &oppl_chunks_len, &__oppl_unpin.slot)) {
 		from_oppl = true;
 		apply_log_size = oppl_chunks_len;
 		current_ptr = oppl_chunks_ptr;
@@ -1765,14 +1864,6 @@ nvdimm_build_prev_vers_with_redo(
 			? oppl_chunks_ptr + oppl_chunks_len
 			: NULL;
 		next_ppl = NULL;
-		static ulint __oppl_path = 0;
-		if (++__oppl_path <= 5 || __oppl_path % 10000 == 0) {
-			fprintf(stderr,
-				"OPPL=READ_PATH call=%lu page=(%u,%u) chunks=%lu\n",
-				__oppl_path,
-				bpage->id.space(), bpage->id.page_no(),
-				(unsigned long)oppl_chunks_len);
-		}
 	}
     byte temp_buffer[400] ={0, }; // Temporary buffer to handle data that spans multiple segments
 	mlog_id_t log_type;
@@ -1850,7 +1941,9 @@ read_old_page:
 		err = DB_SUCCESS;
 	} else if (__is_llt) {
 		byte* old_cache_ptr = NULL;
-		if (oppl_cache_load_old(page_id, page_size, &old_cache_ptr)) {
+		if (oppl_cache_load_old(page_id, page_size, &old_cache_ptr,
+				&__oppl_unpin.slot)) {
+			/* slot pinned → safe to copy out from under it. */
 			buf_frame_copy(old_page, old_cache_ptr);
 			err = DB_SUCCESS;
 		} else {
@@ -1904,7 +1997,7 @@ read_old_page:
 			   disk_rec_trx, we likely read from BP instead of .ibd. */
 			trx_id_t bp_rec_trx = row_get_rec_trx_id(rec, clust_index, *offsets);
 			trx_id_t bp_page_max = page_get_max_trx_id(page);
-			fprintf(stderr,
+			if (0) fprintf(stderr,
 				"OLD_UNDO_TRACE n=%lu page=(%u,%u) heap_no=%lu "
 				"disk_trx=%llu bp_trx=%llu disk_max=%llu bp_max=%llu "
 				"view_low=%llu has_oppl=%d apply_log_size=%lu\n",
@@ -2076,7 +2169,12 @@ read_old_page:
 			}
 
 			if (copied_length == log_body_length) {
-				old_page_max_trx_id = nvdimm_recv_parse_or_apply_log_rec_body(log_type, current_ptr, current_ptr + log_body_length, block->page.id.space(), block->page.id.page_no(), &temp_mtr, old_page, temp_trx_id);
+				/* Body spanned a segment boundary → it was reassembled into
+				   temp_buffer above. Apply from temp_buffer, NOT current_ptr
+				   (which points into the last segment = only the body tail).
+				   Matches all_ppl_apply_to_page; the current_ptr version mis-
+				   applied cross-boundary entries → record left at old version. */
+				old_page_max_trx_id = nvdimm_recv_parse_or_apply_log_rec_body(log_type, temp_buffer, temp_buffer + log_body_length, block->page.id.space(), block->page.id.page_no(), &temp_mtr, old_page, temp_trx_id);
 				IPL_apply_cnt++;
 			} else {
 				// Exception handling: When not all segments are fetched

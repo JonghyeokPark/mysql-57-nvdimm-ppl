@@ -976,19 +976,32 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 	buf_page_t * buf_page = buf_page_hash_get(buf_pool, page_id);
 	log_len = (ptr + len) - body + APPLY_LOG_HDR_SIZE;
 
-		if(get_flag(&(buf_page->flags), PPLIZED)){
-			if(get_ppl_length_from_ppl_header(buf_page) + log_len > nvdimm_info->max_ppl_size){
-				if (buf_page->id.space() == llt_space_id
-				 || buf_page->id.space() == llt_space_id_wh
-				 || buf_page->id.space() == llt_space_id_dist) {
-					oppl_mark_backed_for_ppl_max(buf_page);
-				}
-				if (get_flag(&(buf_page->flags), OPPL_BACKED)) {
-					copy_log_to_memory(body, log_len, type, buf_page, trx_id);
-				}
-				set_normalize_flag(buf_page, 2);
-				return;
+	if(get_flag(&(buf_page->flags), PPLIZED)){
+		/* Already OPPL-backed: route every entry to in_memory_ppl_buf instead of
+		   the NVDIMM chain. Appending to the chain here can silently fail (chain
+		   region full → copy_memory_log_to_ppl returns false → entry dropped),
+		   splitting one mtr's redo entries across chain/in_memory/void and
+		   leaving the chain incomplete. The spill captures chain + in_memory, so
+		   keeping everything in in_memory makes the OPPL chunk complete. */
+		if (get_flag(&(buf_page->flags), OPPL_BACKED)) {
+			copy_log_to_memory(body, log_len, type, buf_page, trx_id);
+			return;
+		}
+		if(get_ppl_length_from_ppl_header(buf_page) + log_len > nvdimm_info->max_ppl_size){
+			if (buf_page->id.space() == llt_space_id
+				|| buf_page->id.space() == llt_space_id_wh
+				|| buf_page->id.space() == llt_space_id_dist) {
+				oppl_mark_backed_for_ppl_max(buf_page);
 			}
+			/* Always persist the overflow entry to in_memory, even when no LLT
+			   is active — a consistent-read view may open immediately after and
+			   need this just-committed redo (it is visible to that view). The
+			   previous code dropped it when !OPPL_BACKED, losing redo the soon-
+			   to-open LLT required → stale OPPL reconstruction. */
+			copy_log_to_memory(body, log_len, type, buf_page, trx_id);
+			set_normalize_flag(buf_page, 2);
+			return;
+		}
 		copy_log_to_ppl_directly(body, log_len, type, buf_page, trx_id);
 	}
 	else{
@@ -997,10 +1010,16 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 		   first spilled snap captures more pre-view entries.
 		   (Flag check is lock-free; OPPL_BACKED ↔ oppl_table entry 1:1.) */
 		ulint cap = nvdimm_info->max_ppl_size;
-		if ((buf_page->id.space() == llt_space_id
-		  || buf_page->id.space() == llt_space_id_wh
-		  || buf_page->id.space() == llt_space_id_dist)
-		 && !get_flag(&(buf_page->flags), OPPL_BACKED)) {
+		if (buf_page->id.space() == llt_space_id_wh) {
+			/* warehouse: extremely hot, LLT view sits far behind current.
+			   A small cap normalizes the chain long before the view, so the
+			   spilled OPPL entry freezes pre-view-stale. Keep a large
+			   in-memory window so the chain retains redo up to the LLT view.
+			   Compacts to ~10 records (one per warehouse row) regardless. */
+			cap = 512 * 1024;
+		} else if ((buf_page->id.space() == llt_space_id
+		         || buf_page->id.space() == llt_space_id_dist)
+		        && !get_flag(&(buf_page->flags), OPPL_BACKED)) {
 			cap = OPPL_SEG_BYTES - OPPL_SEG_HEADER_SIZE - 64;
 		}
 		ulint cur_mem = ((buf_block_t *)buf_page)->in_memory_ppl_buf.size();

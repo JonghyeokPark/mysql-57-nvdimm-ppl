@@ -1299,17 +1299,6 @@ int buffer_miss_cnt = 0;
 		const char* tname = (index && index->table) ? index->table->name.m_name : "";
 		bool is_llt = ppl_is_llt_view(view);
 		if (tname && strstr(tname, "/stock") != NULL) {
-			MONITOR_INC(MONITOR_NVDIMM_PPL_UNDO_STOCK_CALLS);
-			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_STOCK_LEN_SUM,
-				(mon_type_t)version_build_cnt);
-			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_STOCK_LEN_MAX,
-				(mon_type_t)version_build_cnt);
-			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_STOCK_PAGE_MISS,
-				(mon_type_t)buffer_miss_cnt);
-			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_STOCK_US_SUM,
-				(mon_type_t)elapsed_us);
-			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_STOCK_US_MAX,
-				(mon_type_t)elapsed_us);
 			/* LLT: only count LATEST_UNDO_STOCK (fallback after nvdimm DB_FAIL).
 			   Non-fallback stock undo is the internal walk inside SNAP_UNDO,
 			   already accounted there. */
@@ -1321,17 +1310,6 @@ int buffer_miss_cnt = 0;
 					(mon_type_t)elapsed_us);
 			}
 		} else if (tname && strstr(tname, "/warehouse") != NULL) {
-			MONITOR_INC(MONITOR_NVDIMM_PPL_UNDO_WH_CALLS);
-			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_WH_LEN_SUM,
-				(mon_type_t)version_build_cnt);
-			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_WH_LEN_MAX,
-				(mon_type_t)version_build_cnt);
-			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_WH_PAGE_MISS,
-				(mon_type_t)buffer_miss_cnt);
-			MONITOR_INC_VALUE(MONITOR_NVDIMM_PPL_UNDO_WH_US_SUM,
-				(mon_type_t)elapsed_us);
-			MONITOR_SET_UPD_MAX_ONLY(MONITOR_NVDIMM_PPL_UNDO_WH_US_MAX,
-				(mon_type_t)elapsed_us);
 			/* Warehouse never goes through OPPL → every LLT undo here
 			   is LATEST_UNDO_WAREHOUSE (from BP latest). */
 			if (is_llt) {
