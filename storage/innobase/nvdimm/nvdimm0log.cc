@@ -418,158 +418,6 @@ struct oppl_pending_copy_t {
 	}
 };
 
-/* Parse rec_off (page byte offset of the record) from a type=41
-   MLOG_COMP_REC_UPDATE_IN_PLACE body. ULINT_UNDEFINED on failure. */
-static ulint
-oppl_t41_rec_off(const byte* body, ulint body_len)
-{
-	const byte* p  = body;
-	const byte* eb = body + body_len;
-	if ((ulint)(eb - p) < 4) return ULINT_UNDEFINED;
-	ulint nd = mach_read_from_2(p); p += 2;
-	p += 2; /* n_uniq */
-	if ((ulint)(eb - p) < nd * 2) return ULINT_UNDEFINED;
-	p += nd * 2;
-	if (p >= eb) return ULINT_UNDEFINED;
-	p += 1; /* flags */
-	mach_parse_compressed(&p, eb); /* pos */
-	if (p == NULL || (ulint)(eb - p) < DATA_ROLL_PTR_LEN) return ULINT_UNDEFINED;
-	p += DATA_ROLL_PTR_LEN;
-	mach_u64_parse_compressed(&p, eb); /* trx_id */
-	if (p == NULL || (ulint)(eb - p) < 2) return ULINT_UNDEFINED;
-	return mach_read_from_2(p);
-}
-
-/* Parse the record's embedded DB_TRX_ID (sys field written by the update),
-   from a type=41 body. 0 on failure. This is the trx stored IN the record,
-   which may differ from the apply-log entry header trx_id. */
-static ib_uint64_t
-oppl_t41_rec_trx(const byte* body, ulint body_len)
-{
-	const byte* p  = body;
-	const byte* eb = body + body_len;
-	if ((ulint)(eb - p) < 4) return 0;
-	ulint nd = mach_read_from_2(p); p += 2;
-	p += 2; /* n_uniq */
-	if ((ulint)(eb - p) < nd * 2) return 0;
-	p += nd * 2;
-	if (p >= eb) return 0;
-	p += 1; /* flags */
-	mach_parse_compressed(&p, eb); /* pos */
-	if (p == NULL || (ulint)(eb - p) < DATA_ROLL_PTR_LEN) return 0;
-	p += DATA_ROLL_PTR_LEN;
-	ib_uint64_t rtrx = mach_u64_parse_compressed(&p, eb);
-	if (p == NULL) return 0;
-	return rtrx;
-}
-
-/* View-aware coalescing of a linearized PPL entry stream (warehouse/district
-   hot pages). Entry layout: 1B type + 2B body_len + 8B trx_id + body.
-     - trx >= view_low (post-view): dropped — the current LLT view can't see
-       these; they are not needed to rebuild its visible version.
-     - trx <  view_low (pre-view): for type=41 keep only the LATEST entry per
-       rec_off (older same-record redo is shadowed by it for this view); other
-       types kept verbatim.
-   Time order is preserved in the output. Returns bytes written to `out`. */
-static ulint
-oppl_compact_view(const byte* raw, ulint raw_len, trx_id_t view_low,
-                  byte* out, ulint cap, ulint space, ulint page_no)
-{
-	const ulint MAXE = 8192;
-	ulint* offs = static_cast<ulint*>(ut_malloc_nokey(MAXE * sizeof(ulint)));
-	byte*  keep = static_cast<byte*>(ut_malloc_nokey(MAXE));
-	if (offs == NULL || keep == NULL) {
-		if (offs) ut_free(offs);
-		if (keep) ut_free(keep);
-		/* Fallback: straight copy if it fits. */
-		if (raw_len <= cap) { memcpy(out, raw, raw_len); return raw_len; }
-		return 0;
-	}
-
-	/* 1. index entry boundaries */
-	ulint n = 0, pos = 0;
-	while (pos + APPLY_LOG_HDR_SIZE <= raw_len && n < MAXE) {
-		ulint body_len = mach_read_from_2(raw + pos + 1);
-		if (pos + APPLY_LOG_HDR_SIZE + body_len > raw_len) break;
-		offs[n++] = pos;
-		pos += APPLY_LOG_HDR_SIZE + body_len;
-	}
-
-	/* 2. decide keep, newest -> oldest */
-	static ulint __cc = 0; ulint mycc = ++__cc;   /* per-compaction call id */
-	bool trace_all = false;                 /* dump every entry of first call only */
-	ulint seen[1024]; ulint seen_n = 0;
-	for (ulint i = n; i-- > 0; ) {
-		const byte* e = raw + offs[i];
-		mlog_id_t type = (mlog_id_t)mach_read_from_1(e);
-		ulint body_len = mach_read_from_2(e + 1);
-		trx_id_t trx = mach_read_from_8(e + 3);
-		const byte* body = e + APPLY_LOG_HDR_SIZE;
-		const char* dec;
-		if (trx >= view_low) { keep[i] = 0; dec = "DROP_postview"; }
-		else if (type != 41) { keep[i] = 1; dec = "KEEP_nontype41"; }
-		else {
-			ulint ro = oppl_t41_rec_off(body, body_len);
-			if (ro == ULINT_UNDEFINED) { keep[i] = 1; dec = "KEEP_no_recoff"; }
-			else {
-				bool dup = false;
-				for (ulint k = 0; k < seen_n; k++) if (seen[k] == ro) { dup = true; break; }
-				if (dup) { keep[i] = 0; dec = "DROP_shadowed"; }
-				else { if (seen_n < 1024) seen[seen_n++] = ro; keep[i] = 1; dec = "KEEP_latest"; }
-			}
-		}
-		if (trace_all) {
-			ulint ro_dbg = (type == 41) ? oppl_t41_rec_off(body, body_len) : ULINT_UNDEFINED;
-			ib_uint64_t rec_trx = (type == 41) ? oppl_t41_rec_trx(body, body_len) : 0;
-			fprintf(stderr, "OPPL_CMP_E call=%lu page=(%lu,%lu) i=%lu hdr_trx=%llu rec_trx=%llu type=%u rec_off=%ld view_low=%llu %s\n",
-				(unsigned long)mycc, (unsigned long)space, (unsigned long)page_no,
-				(unsigned long)i,
-				(unsigned long long)trx, (unsigned long long)rec_trx, (unsigned)type,
-				(ro_dbg == ULINT_UNDEFINED) ? -1L : (long)ro_dbg,
-				(unsigned long long)view_low, dec);
-		}
-	}
-
-	/* 3. emit kept entries in time order */
-	ulint w = 0, kept_n = 0;
-	for (ulint i = 0; i < n; i++) {
-		if (!keep[i]) continue;
-		ulint body_len = mach_read_from_2(raw + offs[i] + 1);
-		ulint elen = APPLY_LOG_HDR_SIZE + body_len;
-		if (w + elen > cap) break;
-		memcpy(out + w, raw + offs[i], elen);
-		w += elen;
-		kept_n++;
-	}
-
-	{
-		/* trace: what this compaction kept vs dropped, and the boundary used */
-		trx_id_t in_min = 0, in_max = 0, kept_max = 0;
-		for (ulint i = 0; i < n; i++) {
-			trx_id_t t = mach_read_from_8(raw + offs[i] + 3);
-			if (i == 0 || t < in_min) in_min = t;
-			if (t > in_max) in_max = t;
-			if (keep[i] && t > kept_max) kept_max = t;
-		}
-		static ulint __cmp = 0;
-		if (0)
-			fprintf(stderr, "OPPL_COMPACT seq=%lu page=(%lu,%lu) view_low=%llu "
-				"before_bytes=%lu before_n=%lu in_trx=[%llu..%llu] "
-				"after_bytes=%lu after_n=%lu kept_max_trx=%llu\n",
-				(unsigned long)__cmp,
-				(unsigned long)space, (unsigned long)page_no,
-				(unsigned long long)view_low,
-				(unsigned long)raw_len, (unsigned long)n,
-				(unsigned long long)in_min, (unsigned long long)in_max,
-				(unsigned long)w, (unsigned long)kept_n,
-				(unsigned long long)kept_max);
-	}
-
-	ut_free(offs);
-	ut_free(keep);
-	return w;
-}
-
 static ulint
 oppl_linearize_page_logs(buf_page_t* bpage, byte* out, ulint cap)
 {
@@ -592,26 +440,13 @@ oppl_linearize_page_logs(buf_page_t* bpage, byte* out, ulint cap)
 
 	if (raw_len == 0) { ut_free(raw); return 0; }
 
+	/* Fits within the chunk segment → keep the raw linearized stream.
+	   Over cap → no entry (caller drops). Compaction removed. */
 	ulint result;
-	if (bpage->id.space() == llt_space_id_wh
-	 || bpage->id.space() == llt_space_id_dist) {
-		trx_id_t view_low = __atomic_load_n(
-			&g_oldest_active_view_ts, __ATOMIC_ACQUIRE);
-		result = oppl_compact_view(raw, raw_len, view_low, out, cap,
-			bpage->id.space(), bpage->id.page_no());
+	if (raw_len <= cap) {
+		memcpy(out, raw, raw_len); result = raw_len;
 	} else {
-		/* stock: fits → straight copy; over cap → GC (dead-zone compaction)
-		   instead of dropping the whole chunk set (which left a stale snap-only
-		   entry). Compaction keeps latest pre-view per record, drops the rest,
-		   so the result fits within cap. */
-		if (raw_len <= cap) {
-			memcpy(out, raw, raw_len); result = raw_len;
-		} else {
-			trx_id_t view_low = __atomic_load_n(
-				&g_oldest_active_view_ts, __ATOMIC_ACQUIRE);
-			result = oppl_compact_view(raw, raw_len, view_low, out, cap,
-				bpage->id.space(), bpage->id.page_no());
-		}
+		result = 0;
 	}
 
 	ut_free(raw);
