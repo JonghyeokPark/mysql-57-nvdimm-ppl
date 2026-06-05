@@ -782,6 +782,7 @@ MVCC::view_close(ReadView*& view, bool own_mutex)
 #ifdef UNIV_NVDIMM_PPL
 		if (need_recompute) {
 			trx_id_t new_oldest = 0;
+			ReadView* oldest_v = NULL;
 			for (ReadView* v = UT_LIST_GET_FIRST(m_views);
 			     v != NULL;
 			     v = UT_LIST_GET_NEXT(m_view_list, v)) {
@@ -789,10 +790,14 @@ MVCC::view_close(ReadView*& view, bool own_mutex)
 				trx_id_t v_ts = v->low_limit_id();
 				if (new_oldest == 0 || v_ts < new_oldest) {
 					new_oldest = v_ts;
+					oldest_v = v;
 				}
 			}
 			__atomic_store_n(&g_oldest_active_view_ts,
 				new_oldest, __ATOMIC_RELEASE);
+			/* Re-publish the compaction horizon to the new oldest LLT
+			   view (or clear when none remain → purge resumes general). */
+			oppl_publish_oldest_view(oldest_v);
 		}
 		/* paper §5.2: discard prebuilt versions when LLT view closes. */
 		if (was_llt) {

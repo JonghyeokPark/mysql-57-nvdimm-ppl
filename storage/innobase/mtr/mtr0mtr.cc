@@ -984,6 +984,20 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 		   leaving the chain incomplete. The spill captures chain + in_memory, so
 		   keeping everything in in_memory makes the OPPL chunk complete. */
 		if (get_flag(&(buf_page->flags), OPPL_BACKED)) {
+			/* PPLIZED + OPPL_BACKED: every entry routes to in_memory (chain
+			   append can silently fail). Without a bound this grows unbounded
+			   (warehouse ballooned to ~2MB). Cap it with the same precise
+			   dead-zone compaction the else branch uses: when over the OPPL
+			   segment budget, drop versions no live view can see and collapse
+			   per-location latest. Compaction is safe pre-LLT now that purge
+			   publishes the general oldest view. */
+			ulint cur_mem = ((buf_block_t *)buf_page)->in_memory_ppl_buf.size();
+			if (cur_mem + log_len > OPPL_SEG_BYTES - OPPL_SEG_HEADER_SIZE - 64
+			    && (buf_page->id.space() == llt_space_id
+			        || buf_page->id.space() == llt_space_id_wh
+			        || buf_page->id.space() == llt_space_id_dist)) {
+				oppl_compact_in_memory_buf(buf_page);
+			}
 			copy_log_to_memory(body, log_len, type, buf_page, trx_id);
 			return;
 		}
@@ -1005,27 +1019,33 @@ my_recv_parse_log_recs(byte * ptr, ulint log_len, trx_id_t trx_id)
 		copy_log_to_ppl_directly(body, log_len, type, buf_page, trx_id);
 	}
 	else{
-		/* Default PPL_MAX cap (256B). If page is OPPL-eligible AND not yet
-		   OPPL-backed, allow chain to grow up to ~OPPL segment size so the
-		   first spilled snap captures more pre-view entries.
-		   (Flag check is lock-free; OPPL_BACKED ↔ oppl_table entry 1:1.) */
-		ulint cap = nvdimm_info->max_ppl_size;
-		if (buf_page->id.space() == llt_space_id_wh) {
-			/* warehouse: extremely hot, LLT view sits far behind current.
-			   A small cap normalizes the chain long before the view, so the
-			   spilled OPPL entry freezes pre-view-stale. Keep a large
-			   in-memory window so the chain retains redo up to the LLT view.
-			   Compacts to ~10 records (one per warehouse row) regardless. */
-			cap = 512 * 1024;
-		} else if ((buf_page->id.space() == llt_space_id
-		         || buf_page->id.space() == llt_space_id_dist)
-		        && !get_flag(&(buf_page->flags), OPPL_BACKED)) {
-			cap = OPPL_SEG_BYTES - OPPL_SEG_HEADER_SIZE - 64;
-		}
+		bool oppl_regime =
+			(buf_page->id.space() == llt_space_id
+			 || buf_page->id.space() == llt_space_id_dist
+			 || buf_page->id.space() == llt_space_id_wh)
+			&& get_flag(&(buf_page->flags), NORMALIZE)
+			&& !get_flag(&(buf_page->flags), OPPL_BACKED);
+		ulint cap = oppl_regime
+			? (OPPL_SEG_BYTES - OPPL_SEG_HEADER_SIZE - 64)
+			: nvdimm_info->max_ppl_size;
 		ulint cur_mem = ((buf_block_t *)buf_page)->in_memory_ppl_buf.size();
 		if(cur_mem + log_len > cap){
-			set_normalize_flag(buf_page, 2);
-			return;
+			/* Already OPPL-backed: its LLT version lives in the frozen OPPL
+			   entry, and the read path doesn't consume in_memory for it →
+			   this redo is dead weight. Drop it. */
+			if (get_flag(&(buf_page->flags), OPPL_BACKED)) {
+				return;
+			}
+			if (oppl_regime) {
+				/* OPPL regime: precise dead-zone compact (m_ids-aware) in
+				   place. Rolling: compact and keep accumulating. */
+				oppl_compact_in_memory_buf(buf_page);
+				cur_mem = ((buf_block_t *)buf_page)->in_memory_ppl_buf.size();
+			}
+			if (cur_mem + log_len > cap) {
+				/* PPL regime over cap → enter OPPL regime (N=1). */
+				set_normalize_flag(buf_page, 2);
+			}
 		}
 		copy_log_to_memory(body, log_len, type, buf_page, trx_id);
 	}

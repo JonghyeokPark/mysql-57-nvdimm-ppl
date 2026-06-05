@@ -839,6 +839,19 @@ row_sel_build_prev_vers(
 		*old_vers_heap, old_vers, NULL);
 #ifdef UNIV_NVDIMM_PPL
 	tls_llt_undo_is_fallback = false;
+	if (ppl_is_llt_view(read_view) && dict_index_get_space(index) == llt_space_id_wh) {
+		trx_id_t __rt = (err == DB_SUCCESS && *old_vers != NULL)
+			? row_get_rec_trx_id(*old_vers, index, *offsets) : 0;
+		fprintf(stderr, "WH_UNDO page=(%u,%lu) heap=%lu nvdimm_tried=%d "
+			"ret_trx=%llu view_up=%llu view_low=%llu\n",
+			(unsigned)llt_space_id_wh,
+			(unsigned long)page_get_page_no(page_align(rec)),
+			(unsigned long)page_rec_get_heap_no(rec),
+			use_nvdimm_for_vers_build ? 1 : 0,
+			(unsigned long long)__rt,
+			(unsigned long long)read_view->up_limit_id(),
+			(unsigned long long)read_view->low_limit_id());
+	}
 #endif
 
 	}

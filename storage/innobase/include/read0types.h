@@ -235,6 +235,26 @@ public:
 	}
 
 	/**
+	@return the up limit id */
+	trx_id_t up_limit_id() const
+	{
+		return(m_up_limit_id);
+	}
+
+	/* Copy the active-trx id list (m_ids, sorted ascending) into out[].
+	   Sets *n; sets *over=true and *n=0 if the list exceeds cap. Used to
+	   snapshot the oldest LLT view's m_ids for OPPL compaction. */
+	void copy_active_ids(trx_id_t* out, ulint cap, ulint* n, bool* over) const
+	{
+		ulint sz = m_ids.size();
+		if (sz > cap) { *over = true; *n = 0; return; }
+		*over = false;
+		const trx_id_t* p = m_ids.data();
+		for (ulint i = 0; i < sz; i++) out[i] = p[i];
+		*n = sz;
+	}
+
+	/**
 	@return true if there are no transaction ids in the snapshot */
 	bool empty() const
 	{
@@ -248,11 +268,6 @@ public:
 	bool le(const ReadView* rhs) const
 	{
 		return(m_low_limit_no <= rhs->m_low_limit_no);
-	}
-
-	trx_id_t up_limit_id() const
-	{
-		return(m_up_limit_id);
 	}
 #endif /* UNIV_DEBUG */
 private:

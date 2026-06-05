@@ -17,6 +17,14 @@ uint64_t ipl_org_apply_cnt = 0;
 std::tr1::unordered_map<page_id_t, unsigned char *> ipl_map;
 
 trx_id_t g_oldest_active_view_ts = 0;
+/* Snapshot of the oldest active LLT view (up/low + active-id list), published
+   at view open/close (under trx_sys, no page latch) and read lock-free-ish by
+   OPPL compaction under g_oppl_mutex. m_ids is immutable per view. */
+trx_id_t g_oppl_view_up = 0;
+trx_id_t g_oppl_view_low = 0;
+trx_id_t g_oppl_view_mids[OPPL_MIDS_CAP];
+ulint    g_oppl_view_mids_n = 0;
+bool     g_oppl_view_mids_overflow = false;
 __thread bool tls_llt_undo_is_fallback = false;
 __thread int tls_llt_undo_chain_len = 0;
 

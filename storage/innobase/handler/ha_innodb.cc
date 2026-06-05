@@ -4317,6 +4317,13 @@ innobase_start_trx_and_assign_read_view(
 					__atomic_store_n(&g_oldest_active_view_ts,
 						new_ts, __ATOMIC_RELEASE);
 				}
+				/* ALWAYS refresh the compaction horizon to THIS LLT's exact
+				   view on entry — not gated on becoming the oldest. A stale
+				   older horizon (left from a prior view / publish lag) made
+				   compaction collapse against the wrong m_ids and drop a
+				   version this LLT can see. Refreshing on every LLT entry
+				   keeps compaction aligned with the actual read view. */
+				oppl_publish_oldest_view(trx->read_view);
 			}
 #endif
 		}

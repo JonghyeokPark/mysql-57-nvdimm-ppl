@@ -49,6 +49,9 @@ Created 3/26/1996 Heikki Tuuri
 #include "trx0roll.h"
 #include "trx0rseg.h"
 #include "trx0trx.h"
+#ifdef UNIV_NVDIMM_PPL
+#include "nvdimm-ppl.h"
+#endif
 
 /** Maximum allowable purge history length.  <=0 means 'infinite'. */
 ulong		srv_max_purge_lag = 0;
@@ -1838,6 +1841,17 @@ trx_purge(
 	trx_sys->mvcc->clone_oldest_view(&purge_sys->view);
 
 	purge_sys->view_active = true;
+
+#ifdef UNIV_NVDIMM_PPL
+	/* Publish the general oldest active view (up/low/m_ids) for OPPL
+	   compaction — ONLY when no LLT is active. While an LLT is active, the
+	   compaction horizon is the LLT's own view (published at view open in
+	   ha_innodb). purge's general oldest can LAG below the LLT's view, and
+	   using it would drop versions the LLT can still see (over-drop). */
+	if (__atomic_load_n(&g_oldest_active_view_ts, __ATOMIC_ACQUIRE) == 0) {
+		oppl_publish_oldest_view(&purge_sys->view);
+	}
+#endif
 
 	rw_lock_x_unlock(&purge_sys->latch);
 

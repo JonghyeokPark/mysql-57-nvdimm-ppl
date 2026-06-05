@@ -20,6 +20,7 @@
 #include "mtr0log.h"
 #include "fil0fil.h"
 #include <vector>
+#include <algorithm>
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <errno.h>
@@ -29,6 +30,7 @@
 #include "srv0mon.h"
 #include "row0row.h"
 #include "trx0sys.h"
+#include "trx0purge.h"
 #include "row0vers.h"
 #include "trx0undo.h"
 #include "data0type.h"
@@ -418,6 +420,201 @@ struct oppl_pending_copy_t {
 	}
 };
 
+/* Parse rec_off (page byte offset of the record) from a type=41
+   MLOG_COMP_REC_UPDATE_IN_PLACE body. ULINT_UNDEFINED on failure. */
+static ulint
+oppl_t41_rec_off(const byte* body, ulint body_len)
+{
+	const byte* p  = body;
+	const byte* eb = body + body_len;
+	if ((ulint)(eb - p) < 4) return ULINT_UNDEFINED;
+	ulint nd = mach_read_from_2(p); p += 2;
+	p += 2; /* n_uniq */
+	if ((ulint)(eb - p) < nd * 2) return ULINT_UNDEFINED;
+	p += nd * 2;
+	if (p >= eb) return ULINT_UNDEFINED;
+	p += 1; /* flags */
+	mach_parse_compressed(&p, eb); /* pos */
+	if (p == NULL || (ulint)(eb - p) < DATA_ROLL_PTR_LEN) return ULINT_UNDEFINED;
+	p += DATA_ROLL_PTR_LEN;
+	mach_u64_parse_compressed(&p, eb); /* trx_id */
+	if (p == NULL || (ulint)(eb - p) < 2) return ULINT_UNDEFINED;
+	return mach_read_from_2(p);
+}
+
+/* Publish/clear the oldest active LLT view snapshot (up/low/m_ids) used by
+   compaction. Called at view open/close (under trx_sys, NOT under a page latch).
+   g_oppl_mutex is a leaf, so taking it here is order-safe. */
+void
+oppl_publish_oldest_view(const ReadView* v)
+{
+	if (!g_oppl_initialized) return;
+	mutex_enter(&g_oppl_mutex);
+	if (v == NULL) {
+		g_oppl_view_up = 0;
+		g_oppl_view_low = 0;
+		g_oppl_view_mids_n = 0;
+		g_oppl_view_mids_overflow = false;
+	} else {
+		g_oppl_view_up = v->up_limit_id();
+		g_oppl_view_low = v->low_limit_id();
+		v->copy_active_ids(g_oppl_view_mids, OPPL_MIDS_CAP,
+			&g_oppl_view_mids_n, &g_oppl_view_mids_overflow);
+	}
+	mutex_exit(&g_oppl_mutex);
+}
+
+/* In-memory dead-zone compaction (precise, m_ids-aware).
+   Uses the oldest LLT view snapshot (up/low/m_ids). A version is visible to that
+   view iff (trx < up) || (trx < low && trx not in m_ids). Per entry newest→oldest:
+     - NOT visible            → DROP (oldest view doesn't see it; latest is in page)
+     - visible, same record
+       already kept (shadowed) → DROP
+     - visible, first seen    → KEEP
+   This recognizes the ~99% dead entries in [up,low) that are committed (not in
+   m_ids) and collapses them — what the conservative scalar rule could not.
+   Fallback: if m_ids overflowed the snapshot, keep [up,low) verbatim (safe). */
+void
+oppl_compact_in_memory_buf(buf_page_t* bpage)
+{
+	buf_block_t* block = reinterpret_cast<buf_block_t*>(bpage);
+	ulint before = block->in_memory_ppl_buf.size();
+	if (before == 0) return;
+
+	/* Snapshot the oldest LLT view boundaries into a local heap copy
+	   (g_oppl_mutex is a leaf, short critical section). */
+	trx_id_t* mids = static_cast<trx_id_t*>(
+		ut_malloc_nokey(OPPL_MIDS_CAP * sizeof(trx_id_t)));
+	if (mids == NULL) return;
+	mutex_enter(&g_oppl_mutex);
+	trx_id_t up  = g_oppl_view_up;
+	trx_id_t low = g_oppl_view_low;
+	ulint mids_n = g_oppl_view_mids_n;
+	bool mids_over = g_oppl_view_mids_overflow;
+	for (ulint i = 0; i < mids_n; i++) mids[i] = g_oppl_view_mids[i];
+	mutex_exit(&g_oppl_mutex);
+	if (low == 0) { ut_free(mids); return; }   /* no active LLT */
+	/* Pre-LLT (no LLT view active): the published view here is the GENERAL
+	   oldest, which advances. A trx active/recent to it may commit and be
+	   needed by an LLT that opens right after. So pre-LLT we must NOT drop
+	   recent (>= up) versions — only collapse the definitely-shadowed
+	   committed-to-all ones (< up). During an LLT, the view is the LLT's own
+	   (published on entry) so the full m_ids drop is safe. */
+	bool llt_active = (__atomic_load_n(&g_oldest_active_view_ts,
+		__ATOMIC_ACQUIRE) != 0);
+
+	byte* raw = static_cast<byte*>(ut_malloc_nokey(before));
+	if (raw == NULL) { ut_free(mids); return; }
+	oppl_pending_copy_t pc;
+	pc.init(raw, before, 0);
+	if (!block->in_memory_ppl_buf.for_each_block(pc)) { ut_free(raw); ut_free(mids); return; }
+	ulint raw_len = pc.copied;
+
+	/* 1. index entry boundaries */
+	const ulint MAXE = 8192;
+	ulint* offs = static_cast<ulint*>(ut_malloc_nokey(MAXE * sizeof(ulint)));
+	byte*  keep = static_cast<byte*>(ut_malloc_nokey(MAXE));
+	if (offs == NULL || keep == NULL) {
+		if (offs) ut_free(offs);
+		if (keep) ut_free(keep);
+		ut_free(raw);
+		ut_free(mids);
+		return;
+	}
+	ulint n = 0, pos = 0;
+	while (pos + APPLY_LOG_HDR_SIZE <= raw_len && n < MAXE) {
+		ulint body_len = mach_read_from_2(raw + pos + 1);
+		if (pos + APPLY_LOG_HDR_SIZE + body_len > raw_len) break;
+		offs[n++] = pos;
+		pos += APPLY_LOG_HDR_SIZE + body_len;
+	}
+
+	/* 2. decide keep, newest -> oldest. Per location keep TWO entries:
+	        (a) the ABSOLUTE newest (any reader newer than the horizon — incl.
+	            an LLT that opens right after — must see it; visibility-blind),
+	        (b) the newest VISIBLE-to-horizon (for the current LLT).
+	      Drop everything else (shadowed). This is the safe MVCC-retention rule:
+	      never throw away a location's latest version, so a horizon that is
+	      older than a soon-to-open LLT (pre-LLT general view / publish lag)
+	      can't drop a version that LLT will need. Location: type41 = record
+	      offset, type8 = page offset.  m_ids overflow → conservative keep. */
+	ulint s41_any[1024]; ulint s41_any_n = 0;   /* loc whose absolute-newest kept */
+	ulint s41_vis[1024]; ulint s41_vis_n = 0;   /* loc whose newest-visible kept */
+	ulint s8_any[1024];  ulint s8_any_n = 0;
+	ulint s8_vis[1024];  ulint s8_vis_n = 0;
+	for (ulint i = n; i-- > 0; ) {
+		const byte* e = raw + offs[i];
+		mlog_id_t type = (mlog_id_t)mach_read_from_1(e);
+		ulint body_len = mach_read_from_2(e + 1);
+		trx_id_t trx = mach_read_from_8(e + 3);
+		const byte* body = e + APPLY_LOG_HDR_SIZE;
+
+		/* visibility to the horizon (oldest LLT view) */
+		bool visible;
+		if (trx < up) {
+			visible = true;
+		} else if (!llt_active) {
+			/* pre-LLT: keep all recent (>= up) verbatim — a soon-to-open LLT
+			   will need them; the general horizon must not drop them. */
+			keep[i] = 1; continue;
+		} else if (trx >= low) {
+			visible = false;
+		} else if (mids_over) {
+			keep[i] = 1; continue;   /* unknown m_ids → keep, don't collapse */
+		} else {
+			visible = !std::binary_search(mids, mids + mids_n, trx);
+		}
+
+		/* location key + per-type seen sets */
+		ulint loc;
+		ulint *sa, *san, *sv, *svn;
+		if (type == MLOG_COMP_REC_UPDATE_IN_PLACE) {
+			loc = oppl_t41_rec_off(body, body_len);
+			if (loc == ULINT_UNDEFINED) { keep[i] = 1; continue; }
+			sa = s41_any; san = &s41_any_n; sv = s41_vis; svn = &s41_vis_n;
+		} else if (type == MLOG_8BYTES && body_len >= 2) {
+			loc = mach_read_from_2(body);
+			sa = s8_any; san = &s8_any_n; sv = s8_vis; svn = &s8_vis_n;
+		} else {
+			keep[i] = visible ? 1 : 0;   /* non-collapsible: keep visible only */
+			continue;
+		}
+
+		bool any_seen = false;
+		for (ulint k = 0; k < *san; k++) if (sa[k] == loc) { any_seen = true; break; }
+		bool vis_seen = false;
+		for (ulint k = 0; k < *svn; k++) if (sv[k] == loc) { vis_seen = true; break; }
+
+		if (!any_seen) {
+			/* absolute newest for this location → always keep */
+			if (*san < 1024) sa[(*san)++] = loc;
+			keep[i] = 1;
+			if (visible && *svn < 1024) sv[(*svn)++] = loc;
+		} else if (visible && !vis_seen) {
+			/* newest visible-to-horizon for this location → keep */
+			if (*svn < 1024) sv[(*svn)++] = loc;
+			keep[i] = 1;
+		} else {
+			keep[i] = 0;             /* shadowed → drop */
+		}
+	}
+
+	/* 3. erase + re-push kept entries in time order */
+	block->in_memory_ppl_buf.erase();
+	for (ulint i = 0; i < n; i++) {
+		if (!keep[i]) continue;
+		ulint body_len = mach_read_from_2(raw + offs[i] + 1);
+		ulint elen = APPLY_LOG_HDR_SIZE + body_len;
+		byte* wp = block->in_memory_ppl_buf.open(elen);
+		memcpy(wp, raw + offs[i], elen);
+		block->in_memory_ppl_buf.close(wp + elen);
+	}
+	ut_free(offs);
+	ut_free(keep);
+	ut_free(raw);
+	ut_free(mids);
+}
+
 static ulint
 oppl_linearize_page_logs(buf_page_t* bpage, byte* out, ulint cap)
 {
@@ -467,8 +664,6 @@ bool oppl_spill_page(buf_page_t* bpage)
 	if (__atomic_load_n(&g_oldest_active_view_ts, __ATOMIC_ACQUIRE) == 0) {
 		return false;
 	}
-
-	bool __wh = (bpage->id.space() == llt_space_id_wh);
 
 	/* Quick exists check (short critical section). */
 	mutex_enter(&g_oppl_mutex);
@@ -1329,9 +1524,13 @@ can_page_be_pplized(
 	   causing false-positive PPLization → record-level apply on a
 	   non-index page byte layout → page corruption. */
 	ulint ptype = mach_read_from_2(((buf_block_t*)buf_page)->frame + FIL_PAGE_TYPE);
+	bool __oppl_target = (space == llt_space_id
+	                   || space == llt_space_id_wh
+	                   || space == llt_space_id_dist);
 	if(!is_system_or_undo_tablespace(space) &&
 		(!get_flag(&(buf_page->flags), NORMALIZE)
-		 || get_flag(&(buf_page->flags), OPPL_BACKED)) &&
+		 || get_flag(&(buf_page->flags), OPPL_BACKED)
+		 || (__oppl_target && buf_page->normalize_cause == 2)) &&
 		(ptype == FIL_PAGE_INDEX || ptype == FIL_PAGE_RTREE) &&
 		page_is_leaf(((buf_block_t *)buf_page)->frame) &&
 		buf_page_in_file(buf_page) &&

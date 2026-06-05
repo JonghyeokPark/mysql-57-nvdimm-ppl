@@ -361,6 +361,23 @@ extern uint64_t ipl_org_apply_cnt;
    in callers, not by volatile. */
 extern trx_id_t g_oldest_active_view_ts;
 
+/* Oldest-active-LLT-view snapshot for precise OPPL compaction (dead-zone GC).
+   Published at view open/close; read under g_oppl_mutex in compaction. */
+#define OPPL_MIDS_CAP 4096
+extern trx_id_t g_oppl_view_up;
+extern trx_id_t g_oppl_view_low;
+extern trx_id_t g_oppl_view_mids[OPPL_MIDS_CAP];
+extern ulint    g_oppl_view_mids_n;
+extern bool     g_oppl_view_mids_overflow;
+
+/* Publish (copy) the given oldest active view's up/low/m_ids into the snapshot;
+   pass NULL to clear (no active LLT). Called at view open/close. */
+void oppl_publish_oldest_view(const ReadView* v);
+
+/* In-memory dead-zone compaction (stock): drop in_memory_ppl_buf entries with
+   trx_id >= purge horizon (purge_sys->view low_limit). Pure in-memory prune. */
+void oppl_compact_in_memory_buf(buf_page_t* bpage);
+
 /* True iff this read view was tagged LLT via the `innodb_is_llt`
    session variable at view-open time. */
 bool ppl_is_llt_view(const ReadView* view);
